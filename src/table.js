@@ -10,6 +10,10 @@ const REVEAL_BOT = 500;    // бот решает быстро
 
 let handCounter = 0;
 
+// Сколько тяжёлых расчётов силы руки разрешено за один тик сервера.
+const evalBudget = { left: Infinity };
+function setEvalBudget(n) { evalBudget.left = n; }
+
 class Player {
   constructor({ userId, name, isBot, stack, seat }) {
     this.userId = userId;
@@ -55,8 +59,12 @@ class Table {
     this.handId = 0;
     this.log = [];
     this.logSeq = 0;
+    this.logFrames = new Map(); // готовые события ленты по отметке клиента
     this.lastWinners = [];
     this.handCache = new Map(); // сила руки считается перебором — держим её до конца улицы
+    this.evalCache = {};        // значения рук соперника для текущего борда
+    this.lastHand = new Map();  // последний посчитанный разбор руки по местам
+    this.byUserId = new Map();  // userId -> игрок, чтобы не перебирать места
     this.potParts = [];         // разбиение банка на основной и побочные — для показа фишками
     this.reveal = null;         // очередь вскрытия: кто сейчас решает, показывать ли карты
     this.results = new Map();
@@ -64,7 +72,14 @@ class Table {
     this.lastAggressorSeat = -1;
     this.onChipsReturn = hooks.onChipsReturn || (() => {});
     this.onHandStart = hooks.onHandStart || (() => {});
+    this.onSeat = hooks.onSeat || (() => {});
+    this.onUnseat = hooks.onUnseat || (() => {});
     this.version = 0;
+    this.frameVersion = -1;   // на какой версии собран кэш JSON
+    this.framePrefix = '';    // общая часть состояния без «you»
+    this.frameNoYou = '';     // готовый кадр для зрителя
+    this.privJson = new Map();// приватная часть по местам
+    this.emptyAt = 0;         // когда стол опустел — по этому его убирают
   }
 
   // ——— вспомогательное ———
@@ -73,7 +88,7 @@ class Table {
   inHand() { return this.players().filter((p) => p.inHand && !p.folded); }
   canAct() { return this.inHand().filter((p) => !p.allIn); }
   bySeat(seat) { return this.seats[seat] || null; }
-  byUser(userId) { return this.players().find((p) => p.userId === userId) || null; }
+  byUser(userId) { return this.byUserId.get(userId) || null; }
   occupied() { return this.players().length; }
   humans() { return this.players().filter((p) => !p.isBot).length; }
 
@@ -81,6 +96,7 @@ class Table {
   note(text, kind = 'game') {
     this.log.push({ id: ++this.logSeq, t: Date.now(), text, kind });
     if (this.log.length > 200) this.log.shift();
+    this.logFrames.clear();
     this.version++;
   }
 
@@ -111,6 +127,9 @@ class Table {
     }
     const p = new Player({ userId: user.id, name: user.name, isBot: !!user.isBot, stack: buyIn, seat });
     this.seats[seat] = p;
+    this.byUserId.set(p.userId, p);
+    this.emptyAt = 0;
+    this.onSeat(p, this);
     this.note(`${p.name} садится на место ${seat + 1} с ${buyIn} фишками`);
     this.touch();
     this.maybeStartHand();
@@ -154,6 +173,9 @@ class Table {
   removePlayer(p) {
     const chips = p.stack;
     this.seats[p.seat] = null;
+    this.byUserId.delete(p.userId);
+    this.onUnseat(p, this);
+    if (!this.occupied()) this.emptyAt = Date.now();
     this.onChipsReturn(p, chips);
     this.note(`${p.name} покидает стол`);
     this.touch();
@@ -187,6 +209,8 @@ class Table {
 
     this.handId = ++handCounter;
     this.handCache.clear();
+    this.evalCache = {};
+    this.lastHand.clear();
     this.potParts = [];
     this.reveal = null;
     this.results = new Map();
@@ -706,22 +730,38 @@ class Table {
   }
 
   // Какая комбинация собралась у игрока и насколько она сильна.
-  // Перебор всех рук соперника стоит десяток миллисекунд, поэтому результат
-  // кэшируется до следующей улицы.
+  //
+  // Перебор рук соперника стоит миллисекунды, а когда сотни столов открывают
+  // улицу в один тик, это складывается в заметную остановку цикла. Поэтому на
+  // тик выделяется бюджет: столы, которые в него не попали, получают прошлый
+  // расчёт и досчитываются следующим тиком.
   handInfoFor(p) {
     if (!p || !p.inHand || p.folded || p.cards.length < 2) return null;
     const key = `${this.handId}:${p.seat}:${this.board.length}`;
-    if (!this.handCache.has(key)) this.handCache.set(key, handInfo(p.cards, this.board));
-    return this.handCache.get(key);
+    const known = this.handCache.get(key);
+    if (known !== undefined) return known;
+
+    const needsBoard = this.board.length > 0 && this.evalCache.len !== this.board.length;
+    if (needsBoard && evalBudget.left <= 0) return this.lastHand.get(p.seat) || null;
+    if (needsBoard) evalBudget.left -= 1;
+
+    const info = handInfo(p.cards, this.board, this.evalCache);
+    this.evalCache.len = this.board.length;
+    this.handCache.set(key, info);
+    this.lastHand.set(p.seat, info);
+    return info;
   }
 
   // ——— состояние для клиента ———
 
-  publicState(viewerId) {
+  // Общее состояние стола: одинаковое для всех, свои карты игрок получает
+  // отдельной приватной частью. Так JSON собирается один раз на версию,
+  // а не на каждого зрителя.
+  publicState() {
     const now = Date.now();
-    const viewer = viewerId ? this.byUser(viewerId) : null;
     return {
       id: this.id,
+      levelId: this.levelId || this.id,
       name: this.name,
       maxSeats: this.maxSeats,
       sb: this.sb,
@@ -744,21 +784,8 @@ class Table {
         optional: this.reveal.optional,
         timeLeft: Math.max(0, this.reveal.deadline - now),
       } : null,
-      log: this.log,
-      you: viewer ? {
-        seat: viewer.seat,
-        stack: viewer.stack,
-        inHand: viewer.inHand && this.phase !== 'idle',
-        cards: viewer.cards,
-        sittingOut: viewer.sittingOut,
-        busted: !!viewer.busted,
-        hand: this.handInfoFor(viewer),
-        canReveal: !!(this.reveal && this.reveal.optional && this.reveal.seat === viewer.seat),
-        legal: this.actingSeat === viewer.seat ? this.legalActions(viewer) : null,
-      } : null,
       seats: this.seats.map((p, i) => {
         if (!p) return { seat: i, empty: true };
-        const showHole = p.showCards || (viewer && p.userId === viewer.userId);
         return {
           seat: i,
           name: p.name,
@@ -772,33 +799,77 @@ class Table {
           lastAction: p.lastAction,
           handName: p.handName,
           won: p.won,
-          you: !!(viewer && p.userId === viewer.userId),
           mucked: p.mucked,
           revealing: !!(this.reveal && this.reveal.seat === i),
           winner: this.phase === 'showdown' && p.won > 0,
           champion: this.phase === 'showdown' && p.wonContested,
-          cards: p.inHand ? (showHole ? p.cards : p.cards.map(() => '??')) : [],
+          cards: p.inHand ? (p.showCards ? p.cards : p.cards.map(() => '??')) : [],
           best: p.bestCards || null,
         };
       }),
     };
   }
 
-  lobbyInfo() {
+  // Личная часть: свои карты, разбор руки и доступные ходы.
+  privateState(p) {
     return {
-      id: this.id,
-      name: this.name,
-      maxSeats: this.maxSeats,
-      sb: this.sb,
-      bb: this.bb,
-      minBuyIn: this.minBuyIn,
-      maxBuyIn: this.maxBuyIn,
-      players: this.occupied(),
-      humans: this.humans(),
-      seatsTaken: this.seats.map((p) => (p ? (p.isBot ? 'bot' : 'human') : null)),
-      playing: this.phase !== 'idle',
+      seat: p.seat,
+      stack: p.stack,
+      inHand: p.inHand && this.phase !== 'idle',
+      cards: p.cards,
+      sittingOut: p.sittingOut,
+      busted: !!p.busted,
+      hand: this.handInfoFor(p),
+      canReveal: !!(this.reveal && this.reveal.optional && this.reveal.seat === p.seat),
+      legal: this.actingSeat === p.seat ? this.legalActions(p) : null,
     };
+  }
+
+  // Кадры кэшируются по версии стола: пересобираем, только когда что-то изменилось.
+  buildFrames() {
+    if (this.frameVersion === this.version) return;
+    const json = JSON.stringify(this.publicState());
+    this.framePrefix = json.slice(0, -1);
+    this.frameNoYou = `event: table\ndata: ${this.framePrefix},"you":null}\n\n`;
+    this.privJson.clear();
+    this.frameVersion = this.version;
+  }
+
+  // Готовая строка события для зрителя или для конкретного места.
+  // Собирается один раз на версию: у стола зрителей может быть сколько угодно.
+  frameFor(p) {
+    this.buildFrames();
+    if (!p) return this.frameNoYou;
+    let frame = this.privJson.get(p.seat);
+    if (frame === undefined) {
+      frame = `event: table\ndata: ${this.framePrefix},"you":${JSON.stringify(this.privateState(p))}}\n\n`;
+      this.privJson.set(p.seat, frame);
+    }
+    return frame;
+  }
+
+  // Событие ленты для клиента, который видел строки до id. Зрители одного стола
+  // обычно стоят на одной отметке, поэтому строка кэшируется.
+  logFrameSince(id, reset) {
+    const key = reset ? 'all' : id;
+    let frame = this.logFrames.get(key);
+    if (frame === undefined) {
+      const lines = reset ? this.log.slice(-120) : this.logSince(id);
+      if (!reset && (!lines || !lines.length)) return null;
+      frame = `event: log\ndata: ${JSON.stringify({ reset: !!reset, lines: lines || [] })}\n\n`;
+      this.logFrames.set(key, frame);
+    }
+    return frame;
+  }
+
+  // Лента отдаётся отдельным событием и только новыми строками.
+  logSince(id) {
+    if (!id) return this.log.slice(-120);
+    if (!this.log.length || this.log[this.log.length - 1].id <= id) return null;
+    let from = this.log.length;
+    while (from > 0 && this.log[from - 1].id > id) from -= 1;
+    return this.log.slice(from);
   }
 }
 
-module.exports = { Table };
+module.exports = { Table, setEvalBudget };

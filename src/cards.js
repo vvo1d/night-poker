@@ -51,39 +51,87 @@ function rankOf(card) { return RANK_VALUE[card[0]]; }
 function suitOf(card) { return card[1]; }
 
 // Оценка ровно пяти карт -> целое число, чем больше, тем сильнее.
+//
+// Функция вызывается миллионы раз (перебор рук соперника для силомера,
+// вскрытия, боты), поэтому написана без выделения памяти и сортировок:
+// ранги считаются в постоянном буфере, стрит ищется по битовой маске.
+const rankCount = new Int8Array(15);   // сколько карт каждого ранга (2..14)
+const suitCount = new Int8Array(4);
+const SUIT_INDEX = { s: 0, h: 1, d: 2, c: 3 };
+
+// Маски пяти подряд: от туза сверху до «колеса» A-2-3-4-5.
+const STRAIGHTS = (() => {
+  const out = [];
+  for (let high = 14; high >= 6; high--) {
+    let mask = 0;
+    for (let r = high; r > high - 5; r--) mask |= 1 << r;
+    out.push([mask, high]);
+  }
+  out.push([(1 << 14) | (1 << 5) | (1 << 4) | (1 << 3) | (1 << 2), 5]); // колесо
+  return out;
+})();
+
 function score5(cards) {
-  const ranks = cards.map(rankOf).sort((a, b) => b - a);
-  const suits = cards.map(suitOf);
-  const isFlush = suits.every((s) => s === suits[0]);
+  rankCount.fill(0);
+  suitCount[0] = 0; suitCount[1] = 0; suitCount[2] = 0; suitCount[3] = 0;
+  let mask = 0;
 
-  const counts = new Map();
-  for (const r of ranks) counts.set(r, (counts.get(r) || 0) + 1);
-  // Сортируем группы: сначала по количеству, потом по рангу.
-  const groups = [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0]);
+  for (let i = 0; i < 5; i++) {
+    const card = cards[i];
+    const rank = RANK_VALUE[card[0]];
+    rankCount[rank] += 1;
+    mask |= 1 << rank;
+    suitCount[SUIT_INDEX[card[1]]] += 1;
+  }
 
-  const uniq = [...counts.keys()].sort((a, b) => b - a);
+  const isFlush = suitCount[0] === 5 || suitCount[1] === 5 || suitCount[2] === 5 || suitCount[3] === 5;
+
   let straightHigh = 0;
-  if (uniq.length === 5) {
-    if (uniq[0] - uniq[4] === 4) straightHigh = uniq[0];
-    // «Колесо»: A-2-3-4-5, туз считается младшим.
-    else if (uniq[0] === 14 && uniq[1] === 5 && uniq[4] === 2) straightHigh = 5;
+  for (let i = 0; i < STRAIGHTS.length; i++) {
+    if ((mask & STRAIGHTS[i][0]) === STRAIGHTS[i][0]) { straightHigh = STRAIGHTS[i][1]; break; }
+  }
+
+  // Ранги по группам, от старших к младшим: сначала четвёрки, потом тройки и так далее.
+  let quad = 0; let trips = 0; let pairHigh = 0; let pairLow = 0;
+  let k1 = 0; let k2 = 0; let k3 = 0;
+  for (let r = 14; r >= 2; r--) {
+    const n = rankCount[r];
+    if (!n) continue;
+    if (n === 4) quad = r;
+    else if (n === 3) { if (trips) { if (!pairHigh) pairHigh = r; } else trips = r; }
+    else if (n === 2) { if (!pairHigh) pairHigh = r; else if (!pairLow) pairLow = r; }
+    else if (!k1) k1 = r; else if (!k2) k2 = r; else if (!k3) k3 = r;
   }
 
   let category;
-  let kickers;
-  if (straightHigh && isFlush) { category = 8; kickers = [straightHigh]; }
-  else if (groups[0][1] === 4) { category = 7; kickers = [groups[0][0], groups[1][0]]; }
-  else if (groups[0][1] === 3 && groups[1][1] === 2) { category = 6; kickers = [groups[0][0], groups[1][0]]; }
-  else if (isFlush) { category = 5; kickers = ranks; }
-  else if (straightHigh) { category = 4; kickers = [straightHigh]; }
-  else if (groups[0][1] === 3) { category = 3; kickers = [groups[0][0], ...groups.slice(1).map((g) => g[0])]; }
-  else if (groups[0][1] === 2 && groups[1][1] === 2) { category = 2; kickers = [groups[0][0], groups[1][0], groups[2][0]]; }
-  else if (groups[0][1] === 2) { category = 1; kickers = groups.map((g) => g[0]); }
-  else { category = 0; kickers = ranks; }
+  let a = 0; let b = 0; let c = 0; let d = 0; let e = 0;
+  if (straightHigh && isFlush) { category = 8; a = straightHigh; }
+  else if (quad) { category = 7; a = quad; b = k1; }
+  else if (trips && pairHigh) { category = 6; a = trips; b = pairHigh; }
+  else if (isFlush) {
+    category = 5;
+    // Флеш сравнивается по всем пяти картам сверху вниз.
+    let i = 0;
+    for (let r = 14; r >= 2 && i < 5; r--) {
+      if (!rankCount[r]) continue;
+      if (i === 0) a = r; else if (i === 1) b = r; else if (i === 2) c = r; else if (i === 3) d = r; else e = r;
+      i += 1;
+    }
+  } else if (straightHigh) { category = 4; a = straightHigh; }
+  else if (trips) { category = 3; a = trips; b = k1; c = k2; }
+  else if (pairHigh && pairLow) { category = 2; a = pairHigh; b = pairLow; c = k1; }
+  else if (pairHigh) { category = 1; a = pairHigh; b = k1; c = k2; d = k3; }
+  else {
+    category = 0;
+    let i = 0;
+    for (let r = 14; r >= 2 && i < 5; r--) {
+      if (!rankCount[r]) continue;
+      if (i === 0) a = r; else if (i === 1) b = r; else if (i === 2) c = r; else if (i === 3) d = r; else e = r;
+      i += 1;
+    }
+  }
 
-  let value = category;
-  for (let i = 0; i < 5; i++) value = value * 16 + (kickers[i] || 0);
-  return value;
+  return ((((category * 16 + a) * 16 + b) * 16 + c) * 16 + d) * 16 + e;
 }
 
 const COMBOS_5_OF_7 = (() => {
@@ -95,6 +143,32 @@ const COMBOS_5_OF_7 = (() => {
           for (let e = d + 1; e < 7; e++) out.push([a, b, c, d, e]);
   return out;
 })();
+
+// Только сила руки, без лучшей пятёрки и названия: используется там,
+// где результат нужен миллионами — в переборе рук соперника.
+const scratch5 = new Array(5);
+function bestValue(cards) {
+  const n = cards.length;
+  if (n === 5) return score5(cards);
+  let best = -1;
+  if (n === 7) {
+    for (let k = 0; k < COMBOS_5_OF_7.length; k++) {
+      const idx = COMBOS_5_OF_7[k];
+      for (let i = 0; i < 5; i++) scratch5[i] = cards[idx[i]];
+      const v = score5(scratch5);
+      if (v > best) best = v;
+    }
+    return best;
+  }
+  // Шесть карт: шесть пятёрок.
+  for (let skip = 0; skip < n; skip++) {
+    let at = 0;
+    for (let i = 0; i < n; i++) if (i !== skip) scratch5[at++] = cards[i];
+    const v = score5(scratch5);
+    if (v > best) best = v;
+  }
+  return best;
+}
 
 // Лучшая пятёрка из 5..7 карт. Возвращает { value, cards, name }.
 function evaluate(cards) {
@@ -172,36 +246,50 @@ function describeHole(cards) {
 }
 
 // Сила руки на конкретном борде одна и та же для всех, кто за ним сидит,
-// поэтому значения рук соперника считаются один раз на борд.
-const boardCache = new Map();
-
-function opponentValues(board) {
+// поэтому значения рук соперника считаются один раз на стол и на улицу.
+// Храним только числа: тысяча пар — это четыре килобайта, а не мегабайты объектов.
+function opponentValues(board, cache) {
   const key = board.join('');
-  const cached = boardCache.get(key);
-  if (cached) return cached;
+  if (cache && cache.key === key) return cache;
+
   const rest = freshDeck().filter((c) => !board.includes(c));
-  const rows = [];
-  for (let i = 0; i < rest.length; i++) {
-    for (let j = i + 1; j < rest.length; j++) {
-      rows.push([rest[i], rest[j], evaluate([rest[i], rest[j], ...board]).value]);
+  const n = rest.length;
+  const values = new Int32Array((n * (n - 1)) / 2);
+  const hand = [null, null, ...board];
+  let k = 0;
+  for (let i = 0; i < n; i++) {
+    hand[0] = rest[i];
+    for (let j = i + 1; j < n; j++) {
+      hand[1] = rest[j];
+      values[k++] = bestValue(hand);
     }
   }
-  boardCache.set(key, rows);
-  if (boardCache.size > 8) boardCache.delete(boardCache.keys().next().value);
-  return rows;
+  const built = { key, rest, values };
+  if (cache) Object.assign(cache, built);
+  return built;
 }
 
 // Доля рук соперника, которые проигрывают нашей на текущем борде (ничья — половина).
 // Перебор честный: все пары карт из оставшейся колоды.
-function shareBeaten(hole, board) {
-  const mine = evaluate([...hole, ...board]).value;
+function shareBeaten(hole, board, cache) {
+  const { rest, values } = opponentValues(board, cache);
+  const mine = bestValue([...hole, ...board]);
+  const skipA = rest.indexOf(hole[0]);
+  const skipB = rest.indexOf(hole[1]);
+
+  const n = rest.length;
+  let k = 0;
   let score = 0;
   let total = 0;
-  for (const [a, b, value] of opponentValues(board)) {
-    if (a === hole[0] || a === hole[1] || b === hole[0] || b === hole[1]) continue;
-    total += 1;
-    if (value < mine) score += 1;
-    else if (value === mine) score += 0.5;
+  for (let i = 0; i < n; i++) {
+    const skipI = i === skipA || i === skipB;
+    for (let j = i + 1; j < n; j++, k++) {
+      if (skipI || j === skipA || j === skipB) continue;
+      const value = values[k];
+      total += 1;
+      if (value < mine) score += 1;
+      else if (value === mine) score += 0.5;
+    }
   }
   return total ? score / total : 0;
 }
@@ -216,7 +304,7 @@ function coreCards(category, cards) {
 }
 
 // Что за рука собралась и насколько она хороша: имя, пятёрка для подсветки, сила 0..1.
-function handInfo(hole, board) {
+function handInfo(hole, board, cache) {
   if (!hole || hole.length < 2) return null;
   if (!board.length) {
     const pair = hole[0][0] === hole[1][0];
@@ -238,13 +326,13 @@ function handInfo(hole, board) {
     core: coreCards(category, res.cards),
     category,
     usesHole: res.cards.filter((c) => hole.includes(c)).length,
-    strength: shareBeaten(hole, board),
+    strength: shareBeaten(hole, board, cache),
     exact: true,
   };
 }
 
 module.exports = {
   freshDeck, shuffle, evaluate, score5, rankOf, suitOf,
-  handInfo, holeStrength, shareBeaten, describeHole, coreCards,
+  handInfo, holeStrength, shareBeaten, describeHole, coreCards, bestValue,
   RANKS, SUITS, CATEGORY_NAMES,
 };

@@ -174,8 +174,14 @@ function connectStream() {
   });
   stream.addEventListener('table', (e) => {
     const data = JSON.parse(e.data);
+    // Общий кадр приходит без чужих и своих карт — свои подставляем из личной части.
+    if (data.you && data.seats[data.you.seat]) data.seats[data.you.seat].cards = data.you.cards;
     if (state.view !== 'table') show('table');
     renderTable(data);
+  });
+  stream.addEventListener('log', (e) => {
+    const data = JSON.parse(e.data);
+    renderLog(data.lines, data.reset);
   });
   stream.onerror = async () => {
     const res = await fetch('/api/me');
@@ -200,18 +206,18 @@ function renderLobby(rooms, leaders) {
       `Блайнды ${fmt(room.sb)}/${fmt(room.bb)} · закупка ${fmt(room.minBuyIn)}–${fmt(room.maxBuyIn)} · до ${room.maxSeats} игроков`));
     li.append(left);
 
-    const seats = el('div', 'room__seats');
-    room.seatsTaken.forEach((kind) => {
-      seats.append(el('span', `dot${kind ? ` dot--${kind}` : ''}`));
-    });
-    const middle = el('div');
-    middle.append(seats);
+    // Уровень — это столько столов, сколько нужно игрокам.
+    const middle = el('div', 'room__stats');
+    middle.append(el('div', 'room__count', `${fmt(room.players)} за столами`));
     const live = el('div', `room__live${room.playing ? ' room__live--hot' : ''}`,
-      room.playing ? 'идёт раздача' : room.players ? 'ждут игроков' : 'стол свободен');
+      room.playing
+        ? `${fmt(room.playing)} ${plural(room.playing, 'стол играет', 'стола играют', 'столов играют')}`
+        : `${fmt(room.tables)} ${plural(room.tables, 'стол ждёт', 'стола ждут', 'столов ждут')}`);
     middle.append(live);
     li.append(middle);
 
-    const join = el('button', 'btn', room.players >= room.maxSeats ? 'Посмотреть' : 'Войти');
+    const join = el('button', 'btn', 'Войти');
+    join.title = `Свободных мест: ${fmt(room.free)}`;
     join.addEventListener('click', () => { Sound.play('click'); cmd({ cmd: 'enterRoom', roomId: room.id }); });
     li.append(join);
 
@@ -226,6 +232,15 @@ function renderLobby(rooms, leaders) {
     li.append(el('span', null, fmt(player.chips)));
     board.append(li);
   }
+}
+
+// «1 стол», «2 стола», «5 столов»
+function plural(n, one, few, many) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+  return many;
 }
 
 $('#back-to-lobby').addEventListener('click', async () => {
@@ -481,7 +496,6 @@ function renderTable(t) {
   }
 
   renderMeter(t);
-  renderLog(t.log, t.logReset);
   renderActions(t);
 
   const snap = snapshot(t);
