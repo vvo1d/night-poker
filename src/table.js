@@ -4,6 +4,9 @@ const { decideBotAction, botThinkingTime } = require('./bot');
 
 const PHASES = ['preflop', 'flop', 'turn', 'river'];
 
+// Что показывать в ленте стола: разговоры и итоги раздач.
+const FEED_KINDS = new Set(['chat', 'result']);
+
 const REVEAL_STEP = 600;   // пауза перед обязательным вскрытием
 const REVEAL_ASK = 5000;   // сколько человек думает, показывать ли проигравшую руку
 const REVEAL_BOT = 500;    // бот решает быстро
@@ -130,7 +133,7 @@ class Table {
     this.byUserId.set(p.userId, p);
     this.emptyAt = 0;
     this.onSeat(p, this);
-    this.note(`${p.name} садится на место ${seat + 1} с ${buyIn} фишками`);
+    this.note(`${p.name} садится на место ${seat + 1} с ${buyIn} фишками`, 'seat');
     this.touch();
     this.maybeStartHand();
     return { ok: true };
@@ -143,7 +146,7 @@ class Table {
     if (p.stack + amount > this.maxBuyIn) return { error: `Максимум за столом — ${this.maxBuyIn} фишек` };
     p.stack += amount;
     if (p.sittingOut && !p.leaving) p.sittingOut = false;
-    this.note(`${p.name} докупает ${amount}`);
+    this.note(`${p.name} докупает ${amount}`, 'seat');
     this.touch();
     this.maybeStartHand();
     return { ok: true };
@@ -155,7 +158,7 @@ class Table {
     if (!p) return { error: 'Вас нет за столом' };
     if (p.inHand && !p.folded && this.phase === 'showdown') {
       p.leaving = true;
-      this.note(`${p.name} выходит из-за стола`);
+      this.note(`${p.name} выходит из-за стола`, 'seat');
       this.touch();
       return { ok: true, pending: true };
     }
@@ -163,7 +166,7 @@ class Table {
       p.leaving = true;
       if (this.actingSeat === p.seat) this.applyAction(p, 'fold');
       else { p.folded = true; p.lastAction = 'fold'; this.afterFoldCheck(); }
-      this.note(`${p.name} выходит из-за стола`);
+      this.note(`${p.name} выходит из-за стола`, 'seat');
       this.touch();
       return { ok: true, pending: true };
     }
@@ -177,7 +180,7 @@ class Table {
     this.onUnseat(p, this);
     if (!this.occupied()) this.emptyAt = Date.now();
     this.onChipsReturn(p, chips);
-    this.note(`${p.name} покидает стол`);
+    this.note(`${p.name} покидает стол`, 'seat');
     this.touch();
     if (this.phase === 'idle') this.maybeStartHand();
     return { ok: true, chips };
@@ -269,7 +272,7 @@ class Table {
     this.bbSeat = bbSeat;
     const first = heads ? this.buttonSeat : this.nextOccupied(bbSeat, (p) => p.inHand && !p.allIn);
     this.setActor(first);
-    this.note(`— Раздача #${this.handId} —`);
+    this.note(`— Раздача #${this.handId} —`, 'hand');
     this.onHandStart(ready);
     this.touch();
   }
@@ -337,15 +340,15 @@ class Table {
     if (action === 'fold') {
       p.folded = true;
       p.lastAction = 'fold';
-      this.note(`${p.name}: фолд`);
+      this.note(`${p.name}: фолд`, 'action');
     } else if (action === 'check') {
       p.lastAction = 'check';
-      this.note(`${p.name}: чек`);
+      this.note(`${p.name}: чек`, 'action');
     } else if (action === 'call') {
       const pay = Math.min(this.currentBet - p.bet, p.stack);
       this.moveChips(p, pay);
       p.lastAction = 'call';
-      this.note(`${p.name}: колл ${pay}${p.allIn ? ' (олл-ин)' : ''}`);
+      this.note(`${p.name}: колл ${pay}${p.allIn ? ' (олл-ин)' : ''}`, 'action');
     } else if (action === 'raise') {
       const pay = raiseTo - p.bet;
       const wasBet = this.currentBet;
@@ -363,7 +366,7 @@ class Table {
       }
       p.lastAction = wasBet === 0 ? 'bet' : 'raise';
       this.lastAggressorSeat = p.seat;
-      this.note(`${p.name}: ${wasBet === 0 ? 'бет' : 'рейз до'} ${p.bet}${p.allIn ? ' (олл-ин)' : ''}`);
+      this.note(`${p.name}: ${wasBet === 0 ? 'бет' : 'рейз до'} ${p.bet}${p.allIn ? ' (олл-ин)' : ''}`, 'action');
     }
     this.touch();
     this.advance();
@@ -447,7 +450,7 @@ class Table {
     this.deck.pop(); // сжигаем карту
     const count = phase === 'flop' ? 3 : 1;
     for (let i = 0; i < count; i++) this.board.push(this.deck.pop());
-    this.note(`${{ flop: 'Флоп', turn: 'Тёрн', river: 'Ривер' }[phase]}: ${this.board.join(' ')}`);
+    this.note(`${{ flop: 'Флоп', turn: 'Тёрн', river: 'Ривер' }[phase]}: ${this.board.join(' ')}`, 'street');
     this.touch();
   }
 
@@ -582,14 +585,14 @@ class Table {
     p.showCards = true;
     p.mucked = false;
     this.applyResult(p);
-    if (!quiet) this.note(`${p.name} открывает карты: ${p.cards.join(' ')}`);
+    if (!quiet) this.note(`${p.name} открывает карты: ${p.cards.join(' ')}`, 'reveal');
     this.touch();
   }
 
   muckHand(p) {
     p.mucked = true;
     p.showCards = false;
-    this.note(`${p.name} не показывает карты`);
+    this.note(`${p.name} не показывает карты`, 'reveal');
     this.touch();
   }
 
@@ -659,9 +662,12 @@ class Table {
       amount: w.amount,
       names: w.players.map((p) => p.name),
       hand: w.contested && w.players[0].showCards ? w.players[0].handName : null,
+      best: w.contested && w.players[0].showCards ? w.players[0].bestCards : null,
     }));
+    // В ленте остаётся одна строка на раздачу — с комбинацией и картами, которые её собрали.
     for (const w of this.lastWinners) {
-      this.note(`${w.names.join(', ')} выигрывает ${w.amount}${w.hand ? ` — ${w.hand}` : ''}`);
+      const combo = w.hand ? ` — ${w.hand}${w.best ? ` · ${w.best.join(' ')}` : ''}` : '';
+      this.note(`${w.names.join(', ')} выигрывает ${w.amount}${combo}`, 'result');
     }
 
     this.pendingWinners = [];
@@ -722,7 +728,7 @@ class Table {
         this.applyAction(p, action, amount);
       } else {
         const legal = this.legalActions(p);
-        this.note(`${p.name}: время вышло`);
+        this.note(`${p.name}: время вышло`, 'action');
         this.applyAction(p, legal.check ? 'check' : 'fold');
         if (!p.isBot) p.sittingOut = true; // отсутствующего игрока снимаем с раздач
       }
@@ -848,13 +854,26 @@ class Table {
     return frame;
   }
 
+  // В ленту игроку попадают только разговоры и итог раздачи с комбинацией:
+  // перечисление каждого чека и колла её только засоряет. Остальные записи
+  // остаются в истории стола — они нужны для разбора и отладки.
+  feedSince(id) {
+    const out = [];
+    for (let i = this.log.length - 1; i >= 0; i--) {
+      const line = this.log[i];
+      if (line.id <= id) break;
+      if (FEED_KINDS.has(line.kind)) out.push(line);
+    }
+    return out.reverse();
+  }
+
   // Событие ленты для клиента, который видел строки до id. Зрители одного стола
   // обычно стоят на одной отметке, поэтому строка кэшируется.
   logFrameSince(id, reset) {
     const key = reset ? 'all' : id;
     let frame = this.logFrames.get(key);
     if (frame === undefined) {
-      const lines = reset ? this.log.slice(-120) : this.logSince(id);
+      const lines = reset ? this.feedSince(0).slice(-120) : this.feedSince(id);
       if (!reset && (!lines || !lines.length)) return null;
       frame = `event: log\ndata: ${JSON.stringify({ reset: !!reset, lines: lines || [] })}\n\n`;
       this.logFrames.set(key, frame);

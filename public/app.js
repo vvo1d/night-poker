@@ -297,7 +297,7 @@ function cardEl(card, { small = false, dim = false, key = '', mark = '', deal = 
     node.classList.add(`card--${suit}`);
     const glyph = SUIT_GLYPH[suit];
     front.append(el('span', 'card__mark', glyph));
-    front.append(el('span', 'card__r', card[0]));
+    front.append(el('span', 'card__r', card[0] === 'T' ? '10' : card[0]));
     front.append(el('span', 'card__s', glyph));
   }
   inner.append(front, el('div', 'card__face card__back'));
@@ -496,6 +496,7 @@ function renderTable(t) {
   }
 
   renderMeter(t);
+  renderMenu(t);
   renderActions(t);
 
   const snap = snapshot(t);
@@ -507,30 +508,100 @@ function renderTable(t) {
 // поэтому они не наезжают на плашки с именами.
 function betPositions(n, hero) {
   const out = [];
-  const ry = narrow.matches ? 18 : 21; // на узком экране стол ниже — кольцо поджимаем
+  const ry = narrow.matches ? 18 : 21;
   for (let i = 0; i < n; i++) {
     const rel = ((i - hero) % n + n) % n;
     const angle = (90 + (rel * 360) / n) * (Math.PI / 180);
-    out.push({ x: 50 + 26 * Math.cos(angle), y: 50 + ry * Math.sin(angle) });
+    out.push({ x: 50 + 26 * Math.cos(angle), y: 50 + ry * Math.sin(angle), angle });
   }
   return out;
+}
+
+// Прямоугольник центра стола: банк, общие карты и надпись под ними.
+function centerBox(feltBox) {
+  const box = { top: Infinity, bottom: -Infinity, left: Infinity, right: -Infinity };
+  for (const sel of ['#pots', '#pot', '#board', '#felt-msg']) {
+    const node = $(sel);
+    if (!node || node.hidden || !node.getClientRects().length) continue;
+    const r = node.getBoundingClientRect();
+    if (!r.width) continue;
+    box.top = Math.min(box.top, r.top - feltBox.top);
+    box.bottom = Math.max(box.bottom, r.bottom - feltBox.top);
+    box.left = Math.min(box.left, r.left - feltBox.left);
+    box.right = Math.max(box.right, r.right - feltBox.left);
+  }
+  if (box.top === Infinity) {
+    return { top: feltBox.height * 0.42, bottom: feltBox.height * 0.58, left: feltBox.width * 0.35, right: feltBox.width * 0.65 };
+  }
+  return box;
+}
+
+// Ставку кладём в полосу между местом и центром стола: на невысоком экране
+// эта полоса узкая, и попасть в неё процентами по эллипсу не получается.
+function betSpot(ring, seatBox, core, feltBox) {
+  const M = 10;
+  let x = (ring.x / 100) * feltBox.width;
+  let y = (ring.y / 100) * feltBox.height;
+  const sin = Math.sin(ring.angle);
+  const cos = Math.cos(ring.angle);
+
+  const middle = (a, b) => (a + b) / 2;
+  const NEED = 46; // высота стопки с подписью
+  if (Math.abs(sin) > 0.5) {
+    // Место сверху или снизу: свободная полоса — по вертикали.
+    const [lo, hi] = sin > 0
+      ? [core.bottom + M, seatBox.top - M]
+      : [seatBox.bottom + M, core.top - M];
+    if (hi - lo >= NEED) {
+      y = Math.min(Math.max(y, lo), hi);
+    } else {
+      // Стол низкий, между бортом и картами не влезает — кладём ставку сбоку от места.
+      const half = 30;
+      const left = seatBox.left - M - half;
+      const right = seatBox.right + M + half;
+      x = left - half > 0 ? left : right;
+      y = middle(seatBox.top, seatBox.bottom) - 6;
+    }
+  } else {
+    const [lo, hi] = cos > 0
+      ? [core.right + M, seatBox.left - M]
+      : [seatBox.right + M, core.left - M];
+    x = hi - lo < 36 ? middle(lo, hi) : Math.min(Math.max(x, lo), hi);
+  }
+  return { x: (x / feltBox.width) * 100, y: (y / feltBox.height) * 100 };
 }
 
 function renderBets(t, hero) {
   const box = $('#bets');
   const prev = state.snap;
   box.textContent = '';
-  const spots = betPositions(t.maxSeats, hero);
+
+  const feltBox = $('#felt').getBoundingClientRect();
+  const core = centerBox(feltBox);
+  const seatNodes = $('#seats').children;
+  const ring = betPositions(t.maxSeats, hero);
+
   t.seats.forEach((seat, i) => {
     if (seat.empty || !seat.bet) return;
+    const node = seatNodes[i];
+    if (!node) return;
+    const r = node.getBoundingClientRect();
+    const seatBox = {
+      top: r.top - feltBox.top,
+      bottom: r.bottom - feltBox.top,
+      left: r.left - feltBox.left,
+      right: r.right - feltBox.left,
+    };
+    const spot = betSpot(ring[i], seatBox, core, feltBox);
+
     const was = prev && prev.seats[i] ? prev.seats[i].bet : 0;
-    const node = el('div', `bet${seat.bet !== was ? ' is-new' : ''}`);
-    node.style.setProperty('--x', `${spots[i].x}%`);
-    node.style.setProperty('--y', `${spots[i].y}%`);
-    node.append(chipStack(seat.bet, { small: true }));
-    node.append(el('span', 'bet__value', fmt(seat.bet)));
-    node.title = `${seat.name}: ${fmt(seat.bet)}`;
-    box.append(node);
+    const bet = el('div', `bet${seat.bet !== was ? ' is-new' : ''}`);
+    bet.style.setProperty('--x', `${spot.x}%`);
+    bet.style.setProperty('--y', `${spot.y}%`);
+    bet.append(chipStack(seat.bet, { small: true }));
+    bet.append(el('span', 'bet__value', fmt(seat.bet)));
+    bet.title = `${seat.name}: ${fmt(seat.bet)}`;
+    box.append(bet);
   });
 }
 
@@ -635,17 +706,29 @@ function withCards(text) {
 }
 
 function logLine(line) {
-  const kind = line.kind === 'chat' ? 'chat' : line.text.startsWith('—') ? 'hand' : 'game';
+  const kind = line.kind || 'game';
   const node = el('div', `log__line log__line--${kind}`);
+
   if (kind === 'chat') {
     const split = line.text.indexOf(': ');
     if (split > 0) {
       node.append(el('b', 'log__who', line.text.slice(0, split)));
       node.append(document.createTextNode(line.text.slice(split + 1)));
     } else node.textContent = line.text;
-  } else {
-    node.append(withCards(line.text));
+    return node;
   }
+
+  // «Марго выигрывает 520 — Каре тузов · A♦ A♣ A♥ A♠ 10♣»: комбинация важнее суммы,
+  // а карты рисуются иконками.
+  const dash = line.text.indexOf(' — ');
+  if (kind === 'result' && dash > 0) {
+    node.append(document.createTextNode(line.text.slice(0, dash + 3)));
+    const combo = el('b', 'log__combo');
+    combo.append(withCards(line.text.slice(dash + 3)));
+    node.append(combo);
+    return node;
+  }
+  node.append(withCards(line.text));
   return node;
 }
 
@@ -754,6 +837,7 @@ function playEffects(t, prev, positions) {
     prev.seats.forEach((s, i) => {
       if (s && s.bet > 0 && spots[i]) flyChips(spots[i], target, { count: 2 });
     });
+
     Sound.play('pot');
   }
 
@@ -817,83 +901,193 @@ function hotkey(btn, key) {
   return btn;
 }
 
+// Сколько нужно доставить, чтобы остаться в раздаче (когда ход не наш).
+function callAmount(t) {
+  const you = t.you;
+  if (!you) return 0;
+  const seat = t.seats[you.seat];
+  return Math.max(0, t.currentBet - (seat && !seat.empty ? seat.bet : 0));
+}
+
+// Заранее выбранное действие живёт до тех пор, пока не изменилась ставка:
+// если соперник повысил, решение принимается заново.
+function checkPre(t) {
+  const pre = state.pre;
+  if (!pre) return;
+  const you = t.you;
+  if (!you || !you.inHand || t.handId !== pre.handId) { state.pre = null; return; }
+
+  const toCall = you.legal ? you.legal.toCall : callAmount(t);
+  if (pre.action === 'check' && toCall > 0) {
+    state.pre = null;
+    toast('Ставка изменилась — решайте заново');
+    return;
+  }
+  if (pre.action === 'call' && toCall !== pre.amount) {
+    state.pre = null;
+    toast('Ставка изменилась — решайте заново');
+    return;
+  }
+
+  // Дождались своего хода — отправляем то, что выбрали.
+  if (you.legal) {
+    const action = pre.action === 'call' && you.legal.check ? 'check' : pre.action;
+    state.pre = null;
+    cmd({ cmd: 'act', action });
+  }
+}
+
+function preButton(label, action, amount, hint) {
+  const armed = state.pre && state.pre.action === action;
+  const btn = el('button', `btn btn--pre${armed ? ' is-armed' : ''}`, label);
+  btn.title = hint;
+  btn.setAttribute('aria-pressed', String(!!armed));
+  btn.addEventListener('click', () => {
+    const t = state.table;
+    state.pre = armed ? null : { action, amount, handId: t.handId };
+    Sound.play('click');
+    state.actionKey = '';   // перерисуем панель, чтобы кнопка загорелась
+    renderActions(t);
+  });
+  return btn;
+}
+
 function renderActions(t) {
   const box = $('#actions');
   const you = t.you;
   const legal = you && you.legal;
   box.classList.toggle('is-your-turn', !!legal || !!(you && you.canReveal));
 
-  const key = JSON.stringify([t.handId, t.phase, t.actingSeat, legal, you && you.stack,
-    you && you.sittingOut, you && you.inHand, !!you, you && you.canReveal, t.reveal && t.reveal.seat]);
+  const pre = state.pre ? `${state.pre.action}:${state.pre.amount}` : '';
+  const key = JSON.stringify([t.handId, t.phase, t.actingSeat, legal, you && you.stack, you && you.sittingOut,
+    you && you.inHand, !!you, you && you.canReveal, t.reveal && t.reveal.seat, pre, callAmount(t)]);
   if (key === state.actionKey) return;
   state.actionKey = key;
   box.textContent = '';
   state.setRaise = null; // панель перестроена — старый шаг ставки больше не годится
 
+  const status = el('div', 'actions__status');
+  const row = el('div', 'acts');
+  box.append(status, row);
+
   if (!you) {
-    box.append(el('span', 'actions__wait', 'Вы наблюдаете. Займите свободное место, чтобы играть.'));
-    box.append(botButton(t));
+    status.textContent = 'Вы наблюдаете за столом';
+    row.append(el('span', 'actions__wait', 'Займите свободное место, чтобы играть'));
     return;
   }
 
-  // Наша очередь решать, показывать ли карты.
+  // Очередь решать, показывать ли карты.
   if (you.canReveal) {
-    box.append(el('span', 'actions__wait', 'Показать карты соперникам?'));
+    status.textContent = 'Показать карты соперникам?';
     const show = el('button', 'btn btn--primary', 'Показать');
     show.addEventListener('click', () => cmd({ cmd: 'reveal', show: true }));
     const hide = el('button', 'btn', 'Убрать в сброс');
     hide.addEventListener('click', () => cmd({ cmd: 'reveal', show: false }));
-    box.append(show, hide);
+    row.append(show, hide);
     return;
   }
 
   if (legal) {
+    status.textContent = 'Ваш ход';
     const fold = el('button', 'btn btn--danger', 'Фолд');
     fold.addEventListener('click', () => cmd({ cmd: 'act', action: 'fold' }));
-    box.append(hotkey(fold, 'F'));
+    row.append(hotkey(fold, 'F'));
 
     if (legal.check) {
       const check = el('button', 'btn', 'Чек');
       check.addEventListener('click', () => cmd({ cmd: 'act', action: 'check' }));
-      box.append(hotkey(check, 'C'));
+      row.append(hotkey(check, 'C'));
     } else {
       const call = el('button', 'btn', `Колл ${fmt(legal.toCall)}`);
       call.addEventListener('click', () => cmd({ cmd: 'act', action: 'call' }));
-      box.append(hotkey(call, 'C'));
+      row.append(hotkey(call, 'C'));
     }
 
-    if (legal.minRaiseTo !== undefined) {
-      box.append(raiseBox(t, legal));
-    }
+    if (legal.minRaiseTo !== undefined) row.append(raiseBox(t, legal));
     return;
   }
 
-  // Не наш ход: управление местом.
-  const waiting = t.actingSeat >= 0 && t.seats[t.actingSeat] && !t.seats[t.actingSeat].empty
+  // Ход соперника: кнопки остаются на месте, но теперь это выбор наперёд.
+  const acting = t.actingSeat >= 0 && t.seats[t.actingSeat] && !t.seats[t.actingSeat].empty
     ? `Ход: ${t.seats[t.actingSeat].name}`
     : t.phase === 'showdown' ? 'Вскрытие' : 'Ждём начала раздачи';
-  box.append(el('span', 'actions__wait', waiting));
 
-  if (!you.inHand && you.stack < t.maxBuyIn) {
-    const add = el('button', 'btn btn--sm', 'Докупить');
-    add.addEventListener('click', () => {
-      const room = state.table;
-      const want = Math.min(room.maxBuyIn - you.stack, state.user.chips);
-      if (want <= 0) return toast('В банке нет свободных фишек');
-      cmd({ cmd: 'topUp', amount: want });
-    });
-    box.append(add);
+  const canPre = you.inHand && !you.sittingOut && t.phase !== 'showdown' && t.actingSeat >= 0;
+  if (!canPre) {
+    status.textContent = acting;
+    row.append(raiseBox(t, null));
+    return;
   }
 
-  const sitOut = el('button', 'btn btn--sm', you.sittingOut ? 'Вернуться в игру' : 'Пропустить раздачи');
-  sitOut.addEventListener('click', () => cmd({ cmd: 'sitOut', value: !you.sittingOut }));
-  box.append(sitOut);
+  const toCall = callAmount(t);
+  const armed = state.pre
+    ? (state.pre.action === 'fold' ? 'фолд' : state.pre.action === 'check' ? 'чек' : `колл ${fmt(state.pre.amount)}`)
+    : '';
+  status.textContent = armed ? `${acting} · заранее выбрано: ${armed}` : `${acting} · можно выбрать ход заранее`;
 
-  const stand = el('button', 'btn btn--sm', 'Встать');
-  stand.addEventListener('click', () => cmd({ cmd: 'standUp' }));
-  box.append(stand);
+  row.append(preButton('Фолд', 'fold', 0, 'Сбросить карты, как только дойдёт очередь'));
+  row.append(toCall > 0
+    ? preButton(`Колл ${fmt(toCall)}`, 'call', toCall, 'Уравнять, если ставка не изменится')
+    : preButton('Чек', 'check', 0, 'Чекнуть, если никто не поставит'));
+  row.append(raiseBox(t, null));
+}
 
-  box.append(botButton(t));
+// ——— меню стола ———
+// Разметка постоянная: перерисовывать её на каждый кадр нельзя, иначе
+// открытое меню будет закрываться само.
+
+function closeMenu() {
+  $('#menu-panel').hidden = true;
+  $('#menu-toggle').setAttribute('aria-expanded', 'false');
+}
+
+$('#menu-toggle').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const panel = $('#menu-panel');
+  panel.hidden = !panel.hidden;
+  $('#menu-toggle').setAttribute('aria-expanded', String(!panel.hidden));
+  Sound.play('click');
+});
+document.addEventListener('click', (e) => {
+  if (!$('#menu-panel').hidden && !$('#table-menu').contains(e.target)) closeMenu();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+
+function menuAction(id, run) {
+  $(id).addEventListener('click', () => { closeMenu(); run(); });
+}
+menuAction('#menu-topup', () => {
+  const t = state.table;
+  const you = t && t.you;
+  if (!you) return;
+  const want = Math.min(t.maxBuyIn - you.stack, state.user.chips);
+  if (want <= 0) return toast('В банке нет свободных фишек');
+  cmd({ cmd: 'topUp', amount: want });
+});
+menuAction('#menu-sitout', () => {
+  const you = state.table && state.table.you;
+  if (you) cmd({ cmd: 'sitOut', value: !you.sittingOut });
+});
+menuAction('#menu-bot', () => cmd({ cmd: 'addBot' }));
+menuAction('#menu-stand', () => cmd({ cmd: 'standUp' }));
+
+function renderMenu(t) {
+  const you = t.you;
+  const seated = !!you;
+  const free = t.seats.some((s) => s.empty);
+
+  const topup = $('#menu-topup');
+  topup.hidden = !(seated && !you.inHand && you.stack < t.maxBuyIn);
+
+  const sitOut = $('#menu-sitout');
+  sitOut.hidden = !seated;
+  sitOut.textContent = seated && you.sittingOut ? 'Вернуться в игру' : 'Пропустить раздачи';
+
+  const bot = $('#menu-bot');
+  bot.disabled = !free;
+  bot.title = free ? '' : 'Свободных мест нет';
+
+  $('#menu-stand').hidden = !seated;
 }
 
 // Удержание кнопки повторяет шаг и постепенно ускоряется.
@@ -995,14 +1189,6 @@ function raiseBox(t, legal) {
   wrap.append(presets, dial, slider, submit);
   paint();
   return wrap;
-}
-
-function botButton(t) {
-  const free = t.seats.some((s) => s.empty);
-  const btn = el('button', 'btn btn--sm', 'Позвать бота');
-  btn.disabled = !free;
-  btn.addEventListener('click', () => cmd({ cmd: 'addBot' }));
-  return btn;
 }
 
 // ——— закупка ———

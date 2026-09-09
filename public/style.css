@@ -143,6 +143,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
 }
 .brand { font-family: Fraunces, Georgia, serif; font-size: 19px; }
 .topbar__right { display: flex; align-items: center; gap: 12px; }
+.topbar .btn, .menu__panel { white-space: nowrap; }
 .bank { display: flex; align-items: baseline; gap: 8px; }
 .bank__label { font-size: 12px; color: var(--muted); }
 .bank strong { color: var(--brass); font-size: 17px; transition: color 200ms ease; }
@@ -151,7 +152,31 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .table-title strong { font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: 17px; }
 .table-title span { font-size: 13px; color: var(--muted); }
 
-.pick { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+/* меню стола */
+.menu { position: relative; }
+.menu__panel {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; min-width: 210px;
+  background: var(--ink-2); border: 1px solid var(--line); border-radius: 12px; padding: 6px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  animation: rise 140ms ease-out both;
+}
+.menu__item {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  font: inherit; font-size: 13px; color: var(--text);
+  background: transparent; border: 0; border-radius: 8px; padding: 9px 12px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.menu__item:hover:not(:disabled) { background: #1f3037; }
+.menu__item:disabled { opacity: 0.4; cursor: not-allowed; }
+.menu__item:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
+.menu__sep { height: 1px; background: var(--line); margin: 5px 8px; }
+.menu__item--danger { color: #eab6ad; }
+.menu__item--danger:hover:not(:disabled) { background: #3a221e; }
+
+.pick {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: 12px; color: var(--muted); padding: 7px 12px 8px;
+}
 .pick select {
   font: inherit; font-size: 12px; color: var(--text); background: var(--ink-3);
   border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; cursor: pointer;
@@ -518,6 +543,8 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .log__line { color: var(--muted); line-height: 1.45; }
 .log__line--chat { color: var(--text); }
 .log__who { color: var(--brass); font-weight: 600; margin-right: 2px; }
+.log__line--result { color: var(--muted); }
+.log__combo { color: var(--brass); font-weight: 600; }
 .log__line--hand {
   color: var(--brass-dim); margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line);
 }
@@ -552,11 +579,15 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .turnbar { height: 3px; background: transparent; }
 .turnbar i { display: block; height: 100%; width: 0; background: var(--brass); transition: width 200ms linear, background 300ms ease; }
 .turnbar i.is-low { background: var(--weak); }
+/* Высота панели постоянная: когда приходит наш ход, стол не должен
+   съёживаться под выросшими кнопками. */
 .actions {
-  padding: 14px 22px calc(14px + env(safe-area-inset-bottom));
+  padding: 12px 22px calc(12px + env(safe-area-inset-bottom));
   display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
-  min-height: 74px;
+  min-height: 116px;
 }
+/* Фолд, чек-колл и повышение стоят рядом одной группой. */
+.acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
 .actions.is-your-turn { animation: turnGlow 1.8s ease-in-out infinite; }
 .actions__wait { color: var(--muted); }
 
@@ -703,8 +734,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
   .stack--sm { --chip: 13px; }
   .pots { gap: 12px; }
   .pots__caption b { font-size: 13px; }
-  .pick__label { display: none; }
-  .pick select { max-width: 96px; padding: 5px 4px; }
+
   .back__text { display: none; }
   .topbar--table { gap: 8px; padding: 8px 10px; }
 
@@ -714,7 +744,9 @@ strong, .num { font-variant-numeric: tabular-nums; }
   .seat--you .card--sm .card__r { font-size: 15px; }
   .seat--you .card--sm .card__s { font-size: 11px; }
   .topbar { padding: 10px 12px; }
-  .actions { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); gap: 8px; }
+  .actions { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); gap: 8px; min-height: 178px; }
+  .acts { width: 100%; }
+  .menu__panel { min-width: 190px; }
   .raise {
     width: 100%; gap: 8px 10px; padding: 8px;
     grid-template-columns: auto minmax(0, 1fr);
@@ -732,7 +764,8 @@ strong, .num { font-variant-numeric: tabular-nums; }
 
   .topbar--table { gap: 10px; }
   .table-title { flex-direction: column; align-items: flex-start; gap: 0; }
-  .table-title span { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38vw; }
+  .table-title strong { max-width: 40vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .table-title span { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 44vw; }
   .topbar--table .bank__label { display: none; }
 
 

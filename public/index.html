@@ -81,15 +81,28 @@
     </div>
     <div class="topbar__right">
       <div class="bank"><span class="bank__label">В банке</span><strong id="table-chips">0</strong></div>
-      <label class="pick" title="Что делать со своими картами в конце раздачи">
-        <span class="pick__label">Карты</span>
-        <select id="reveal-mode">
-          <option value="ask">спрашивать</option>
-          <option value="always">показывать</option>
-          <option value="never">скрывать</option>
-        </select>
-      </label>
       <button class="icon-btn" data-sound-toggle title="Звук" aria-pressed="true"><span>♪</span></button>
+
+      <!-- Распоряжения столом: они не нужны каждый ход и не должны занимать место внизу -->
+      <div class="menu" id="table-menu">
+        <button class="btn btn--ghost btn--sm" id="menu-toggle" aria-expanded="false" aria-haspopup="true">Стол ▾</button>
+        <div class="menu__panel" id="menu-panel" role="menu" hidden>
+          <label class="pick" title="Что делать со своими картами в конце раздачи">
+            <span class="pick__label">Карты в конце</span>
+            <select id="reveal-mode">
+              <option value="ask">спрашивать</option>
+              <option value="always">показывать</option>
+              <option value="never">скрывать</option>
+            </select>
+          </label>
+          <div class="menu__sep"></div>
+          <button class="menu__item" id="menu-topup" role="menuitem">Докупить фишки</button>
+          <button class="menu__item" id="menu-sitout" role="menuitem">Пропустить раздачи</button>
+          <button class="menu__item" id="menu-bot" role="menuitem">Позвать бота</button>
+          <button class="menu__item menu__item--danger" id="menu-stand" role="menuitem">Встать из-за стола</button>
+        </div>
+      </div>
+
       <button class="btn btn--ghost btn--sm" id="toggle-log" aria-expanded="false">Лента</button>
     </div>
   </header>

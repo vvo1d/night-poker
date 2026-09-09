@@ -165,6 +165,14 @@ const MIME = {
 // Файлы клиента маленькие, а запросов при большом онлайне много.
 const staticCache = new Map(); // путь -> { body, type, etag }
 
+// Файлы клиента меняются редко, но менять их без перезапуска сервера удобно:
+// следим за папкой и сбрасываем кэш при любом изменении.
+try {
+  fs.watch(PUBLIC_DIR, { persistent: false }, () => staticCache.clear());
+} catch {
+  // Слежение недоступно — тогда кэш живёт до перезапуска.
+}
+
 function staticFile(file) {
   let entry = staticCache.get(file);
   if (entry !== undefined) return entry;
@@ -176,7 +184,7 @@ function staticFile(file) {
       etag: `"${crypto.createHash('sha1').update(body).digest('hex').slice(0, 16)}"`,
     };
   } catch {
-    entry = null;
+    return null;   // отсутствие файла не кэшируем: иначе добавленный файл виден только после перезапуска
   }
   staticCache.set(file, entry);
   return entry;
