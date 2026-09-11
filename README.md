@@ -164,9 +164,9 @@ sqlite3 data/poker.db 'SELECT name, chips, hands_played FROM users ORDER BY chip
 
 ## Развёртывание на Ubuntu
 
-Ниже — установка на чистый сервер, адрес в примерах `146.158.123.214`. Всё выполняется от пользователя с `sudo`.
+Ниже — установка на чистый сервер: код в `/var/www/night-poker`, служба от `www-data`, адрес в примерах `146.158.123.214`. Всё выполняется от пользователя с `sudo`.
 
-**1. Node 22.** В репозиториях Ubuntu Node старый, а встроенная база появилась в 22.5:
+**1. Node 22 и nginx.** В репозиториях Ubuntu Node старый, а встроенная база появилась в 22.5:
 
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
@@ -174,25 +174,26 @@ sudo apt-get install -y nodejs nginx
 node -v          # должно быть v22.5 или новее
 ```
 
-**2. Отдельный пользователь и код.** Служба не должна работать от root:
+**2. Папки.** Код — в `/var/www`, данные — в `/var/lib`: в папке сайта базе не место, даже если сейчас nginx ничего оттуда не отдаёт.
 
 ```bash
-sudo useradd --system --home /opt/night-poker --shell /usr/sbin/nologin poker
-sudo mkdir -p /opt/night-poker
-sudo chown poker:poker /opt/night-poker
+sudo mkdir -p /var/www/night-poker /var/lib/night-poker
+sudo chown -R www-data:www-data /var/www/night-poker /var/lib/night-poker
 ```
 
-Код кладётся в `/opt/night-poker` — например, `git clone` или с рабочей машины:
+**3. Код.** С рабочей машины:
 
 ```bash
 rsync -av --exclude data --exclude .git ./ user@146.158.123.214:/tmp/night-poker/
-ssh user@146.158.123.214 'sudo rsync -a --delete --exclude data /tmp/night-poker/ /opt/night-poker/ && sudo mkdir -p /opt/night-poker/data && sudo chown -R poker:poker /opt/night-poker'
+ssh user@146.158.123.214 '
+  sudo rsync -a --delete --exclude data /tmp/night-poker/ /var/www/night-poker/ &&
+  sudo chown -R www-data:www-data /var/www/night-poker'
 ```
 
-**3. Служба.** Файл лежит в репозитории, его достаточно скопировать:
+**4. Служба.** Файл лежит в репозитории, его достаточно скопировать:
 
 ```bash
-sudo cp /opt/night-poker/deploy/night-poker.service /etc/systemd/system/
+sudo cp /var/www/night-poker/deploy/night-poker.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now night-poker
 systemctl status night-poker
@@ -201,16 +202,16 @@ journalctl -u night-poker -f      # в первой строке видно вы
 
 Сервер слушает `127.0.0.1:3000` — снаружи напрямую до него не достучаться. Остановка идёт по `SIGTERM`: игроки дописываются в базу, и только потом процесс выходит, поэтому `systemctl restart` безопасен.
 
-**4. nginx.** Поток состояния нельзя буферизовать, в готовом конфиге это учтено:
+**5. nginx.** Поток состояния нельзя буферизовать, в готовом конфиге это учтено:
 
 ```bash
-sudo cp /opt/night-poker/deploy/nginx.conf /etc/nginx/sites-available/night-poker
+sudo cp /var/www/night-poker/deploy/nginx.conf /etc/nginx/sites-available/night-poker
 sudo ln -sf /etc/nginx/sites-available/night-poker /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-**5. Брандмауэр:**
+**6. Брандмауэр:**
 
 ```bash
 sudo ufw allow OpenSSH
@@ -223,20 +224,22 @@ sudo ufw enable
 ### Обновление
 
 ```bash
-ssh user@146.158.123.214
-sudo rsync -a --delete --exclude data /tmp/night-poker/ /opt/night-poker/
-sudo systemctl restart night-poker
+rsync -av --exclude data --exclude .git ./ user@146.158.123.214:/tmp/night-poker/
+ssh user@146.158.123.214 '
+  sudo rsync -a --delete --exclude data /tmp/night-poker/ /var/www/night-poker/ &&
+  sudo chown -R www-data:www-data /var/www/night-poker &&
+  sudo systemctl restart night-poker'
 ```
 
-Перезапуск сохраняет игроков и сессии: после него никого не выкидывает на экран входа.
+Данные лежат отдельно от кода, поэтому `--delete` их не трогает. Перезапуск сохраняет игроков и сессии: после него никого не выкидывает на экран входа.
 
 ### Резервные копии
 
-Вся игра — в `/opt/night-poker/data`. Копию базы снимают, не останавливая сервер:
+Вся игра — в `/var/lib/night-poker`. Копию базы снимают, не останавливая сервер:
 
 ```bash
-sudo -u poker sqlite3 /opt/night-poker/data/poker.db \
-  "VACUUM INTO '/opt/night-poker/data/backup-$(date +%F).db'"
+sudo -u www-data sqlite3 /var/lib/night-poker/poker.db \
+  "VACUUM INTO '/var/lib/night-poker/backup-$(date +%F).db'"
 ```
 
 ### HTTPS

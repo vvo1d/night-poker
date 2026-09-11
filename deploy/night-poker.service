@@ -6,14 +6,16 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=poker
-Group=poker
-WorkingDirectory=/opt/night-poker
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/night-poker
 ExecStart=/usr/bin/node server.js
 
 # Сервер стоит за nginx, поэтому наружу сам не смотрит.
 Environment=PORT=3000
 Environment=HOST=127.0.0.1
+# Игроки и сессии — вне папки сайта: в /var/www лежит только код.
+Environment=DB_FILE=/var/lib/night-poker/poker.db
 # Пароли считаются на пуле потоков: четырёх по умолчанию мало на час пик.
 Environment=UV_THREADPOOL_SIZE=16
 # Когда появится HTTPS, поставьте 1 — cookie получит флаг Secure.
@@ -33,7 +35,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/night-poker/data
+ReadWritePaths=/var/lib/night-poker
 
 [Install]
 WantedBy=multi-user.target

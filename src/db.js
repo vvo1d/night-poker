@@ -281,8 +281,9 @@ function fileBackend(dir = DATA_DIR) {
 }
 
 // Основной путь — база; если её в этой версии Node нет, работаем на файлах.
-function openStorage(file) {
-  return sqliteBackend(file) || fileBackend(file ? path.dirname(file) : undefined);
+// Оба движка кладут данные в одну и ту же папку, заданную DB_FILE.
+function openStorage(file = DEFAULT_DB) {
+  return sqliteBackend(file) || fileBackend(path.dirname(file));
 }
 
 module.exports = { openStorage, sqliteBackend, fileBackend, hasSqlite: () => !!loadSqlite() };
