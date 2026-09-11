@@ -144,6 +144,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .brand { font-family: Fraunces, Georgia, serif; font-size: 19px; }
 .topbar__right { display: flex; align-items: center; gap: 12px; }
 .topbar .btn, .menu__panel { white-space: nowrap; }
+.btn__ico { display: none; font-size: 15px; line-height: 1; }
 .bank { display: flex; align-items: baseline; gap: 8px; }
 .bank__label { font-size: 12px; color: var(--muted); }
 .bank strong { color: var(--brass); font-size: 17px; transition: color 200ms ease; }
@@ -177,6 +178,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   font-size: 12px; color: var(--muted); padding: 7px 12px 8px;
 }
+.pick input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--brass); cursor: pointer; }
 .pick select {
   font: inherit; font-size: 12px; color: var(--text); background: var(--ink-3);
   border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; cursor: pointer;
@@ -239,21 +241,34 @@ strong, .num { font-variant-numeric: tabular-nums; }
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 14px; pointer-events: none;
 }
-.pot { display: flex; align-items: baseline; gap: 7px; color: #cfe0d6; opacity: 0.85; }
+.pot { display: flex; align-items: baseline; gap: 7px; color: #cfe0d6; opacity: 0.85; min-height: 20px; }
 .pot span { font-size: 11px; color: #8fa9a0; text-transform: uppercase; letter-spacing: 0.05em; }
 .pot strong { font-size: 14px; font-variant-numeric: tabular-nums; }
 .pot.is-bump strong { animation: bump 520ms ease; color: var(--brass); }
 .felt__msg {
+  position: relative; z-index: 4;
   font-family: Fraunces, Georgia, serif; font-size: 17px; color: #b9d1c6;
-  text-align: center; padding: 0 20px; max-width: 520px;
+  text-align: center; padding: 0 20px; max-width: 520px; min-height: 24px;
+}
+/* Итог раздачи — плашка: на невысоком столе строка иначе ложится на карты. */
+.felt__msg.is-win {
+  background: rgba(9, 16, 19, 0.9); border: 1px solid var(--brass-dim);
+  border-radius: 999px; padding: 7px 18px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
 }
 .felt__msg.is-win { color: var(--bone); animation: rise 420ms ease-out both; }
 .felt__msg b { color: var(--brass); font-weight: 500; }
 
-.board { display: flex; gap: 8px; min-height: 96px; align-items: center; perspective: 900px; }
+.board {
+  display: flex; gap: 8px; min-height: 74px; min-width: 292px;
+  align-items: center; justify-content: center; perspective: 900px;
+}
 
 /* банк фишками */
-.pots { display: flex; gap: 20px; align-items: flex-end; justify-content: center; flex-wrap: wrap; }
+.pots {
+  display: flex; gap: 20px; align-items: flex-end; justify-content: center; flex-wrap: wrap;
+  min-height: 62px;
+}
 .pots__item { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .pots__caption { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
 .pots__caption b { color: var(--bone); font-size: 16px; font-variant-numeric: tabular-nums; }
@@ -288,7 +303,8 @@ strong, .num { font-variant-numeric: tabular-nums; }
 
 /* карты */
 .card {
-  width: 52px; height: 74px; border-radius: 8px; position: relative;
+  --r: 8px;
+  width: 52px; height: 74px; border-radius: var(--r); position: relative;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   transition: box-shadow 260ms ease, transform 260ms ease, filter 260ms ease;
   --suit: #263038;
@@ -304,9 +320,12 @@ strong, .num { font-variant-numeric: tabular-nums; }
   transition: transform 420ms cubic-bezier(0.3, 0.8, 0.3, 1);
 }
 .card__face {
-  position: absolute; inset: 0; border-radius: inherit; backface-visibility: hidden;
+  position: absolute; inset: 0; border-radius: var(--r); backface-visibility: hidden;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   font-weight: 600; line-height: 1; overflow: hidden;
+  /* Карта повёрнута в трёх измерениях, а при этом overflow в вебките не режет.
+     Поэтому обрезаем содержимое честной маской по тому же скруглению. */
+  clip-path: inset(0 round var(--r));
 }
 .card__front {
   background: linear-gradient(158deg, #fdfbf5 0%, #f3ede1 62%, #e9e1d1 100%);
@@ -320,8 +339,8 @@ strong, .num { font-variant-numeric: tabular-nums; }
 }
 /* водяной знак масти */
 .card__mark {
-  position: absolute; right: -10%; bottom: -13%;
-  font-size: 3.6em; line-height: 1; color: var(--tint); pointer-events: none;
+  position: absolute; right: -6%; bottom: -8%;
+  font-size: 3.2em; line-height: 1; color: var(--tint); pointer-events: none;
 }
 .card__r { position: relative; font-size: 25px; font-weight: 700; letter-spacing: -0.02em; }
 .card__s { position: relative; font-size: 17px; margin-top: 2px; }
@@ -337,12 +356,12 @@ strong, .num { font-variant-numeric: tabular-nums; }
   color: rgba(201, 162, 74, 0.5); font-size: 1.6em;
 }
 .card--back .card__inner { transform: rotateY(180deg); }
-.card--sm { width: 40px; height: 57px; border-radius: 6px; }
+.card--sm { --r: 6px; width: 40px; height: 57px; }
 .card--sm .card__r { font-size: 17px; }
 .card--sm .card__s { font-size: 12px; }
 .card--sm .card__front::before { height: 4px; }
 .seat--you .seat__cards { height: 68px; }
-.seat--you .card--sm { width: 48px; height: 68px; border-radius: 7px; }
+.seat--you .card--sm { --r: 7px; width: 48px; height: 68px; }
 .seat--you .card--sm .card__r { font-size: 21px; }
 .seat--you .card--sm .card__s { font-size: 15px; }
 .card--dim { filter: grayscale(0.65) brightness(0.6); }
@@ -404,25 +423,33 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .seat__name { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seat__stack { display: block; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .seat__note {
-  display: block; font-size: 11px; color: var(--muted);
+  display: block; font-size: 11px; color: var(--muted); min-height: 1.5em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .seat__note--hand { color: var(--brass); }
 .seat__timer { width: 100%; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .seat__timer i { display: block; height: 100%; background: var(--brass); transition: width 200ms linear, background 300ms ease; }
 .seat__timer i.is-low { background: var(--weak); }
-/* поставленные фишки лежат на сукне отдельным кольцом вокруг банка */
+/* Поставленные фишки лежат на сукне на постоянном месте — низкой плашкой,
+   чтобы помещаться в полосу между бортом и картами на любом экране. */
 #bets { position: absolute; inset: 0; pointer-events: none; }
 .bet {
   position: absolute; left: var(--x); top: var(--y); transform: translate(-50%, -50%);
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  display: flex; align-items: center; gap: 6px;
   font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap;
 }
+.bet .chip { position: relative; left: auto; bottom: auto; width: 20px; height: 20px; }
 .bet__value {
-  padding: 0 8px; border-radius: 999px; line-height: 1.5;
-  background: rgba(9, 16, 19, 0.85); border: 1px solid var(--brass-dim); color: var(--brass);
+  padding: 0 8px; border-radius: 999px; line-height: 1.5; color: var(--brass);
+  background: rgba(9, 16, 19, 0.85); border: 1px solid var(--brass-dim);
 }
-.bet.is-new { animation: pop 260ms cubic-bezier(0.2, 1.4, 0.5, 1) both; }
+/* Своя анимация появления: обычная заменяла бы центрирующий сдвиг, и фишка
+   на время анимации уезжала на половину своего размера. */
+.bet.is-new { animation: betPop 260ms cubic-bezier(0.2, 1.4, 0.5, 1) both; }
+@keyframes betPop {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
 .seat__badge {
   position: absolute; right: -7px; bottom: 14px; width: 20px; height: 20px; border-radius: 50%;
   background: var(--bone); color: #16202a; font-size: 11px; font-weight: 700;
@@ -545,6 +572,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .log__who { color: var(--brass); font-weight: 600; margin-right: 2px; }
 .log__line--result { color: var(--muted); }
 .log__combo { color: var(--brass); font-weight: 600; }
+.log__cards { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
 .log__line--hand {
   color: var(--brass-dim); margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line);
 }
@@ -579,44 +607,64 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .turnbar { height: 3px; background: transparent; }
 .turnbar i { display: block; height: 100%; width: 0; background: var(--brass); transition: width 200ms linear, background 300ms ease; }
 .turnbar i.is-low { background: var(--weak); }
-/* Высота панели постоянная: когда приходит наш ход, стол не должен
-   съёживаться под выросшими кнопками. */
+/* Панель как в больших румах: слева состояние, справа блок управления —
+   сверху размер ставки, снизу три кнопки. Высота постоянная, чтобы стол
+   не съёживался, когда приходит ваш ход. */
 .actions {
-  padding: 12px 22px calc(12px + env(safe-area-inset-bottom));
-  display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
-  min-height: 116px;
+  padding: 10px 18px calc(10px + env(safe-area-inset-bottom));
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 18px;
+  min-height: 128px;
 }
-/* Фолд, чек-колл и повышение стоят рядом одной группой. */
-.acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
-.actions.is-your-turn { animation: turnGlow 1.8s ease-in-out infinite; }
-.actions__wait { color: var(--muted); }
+.actions__status {
+  flex: 1; min-width: 0; align-self: center;
+  font-size: 13px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.actions.is-your-turn .actions__status { color: var(--brass); }
 
-/* панель повышения: доли банка, шаг в блайнд, слайдер */
+.acts { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.acts__size { display: flex; justify-content: flex-end; }
+.acts__main { display: flex; gap: 8px; }
+
+/* Три главные кнопки одного размера — рука привыкает к месту. */
+.btn--act {
+  min-width: 138px; min-height: 46px; font-size: 15px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.btn--call { background: rgba(47, 125, 84, 0.22); border-color: rgba(79, 157, 106, 0.55); }
+.btn--call:hover:not(:disabled) { background: rgba(47, 125, 84, 0.35); border-color: var(--strong); }
+
+/* Ход, выбранный заранее: кнопка горит, пока ставка не изменилась. */
+.btn--pre { border-style: dashed; color: var(--muted); background: transparent; }
+.btn--pre:hover:not(:disabled) { color: var(--text); background: #1b2a31; }
+.btn--pre.is-armed {
+  border-style: solid; border-color: var(--brass); color: var(--brass);
+  background: rgba(201, 162, 74, 0.12);
+}
+.btn--pre.is-armed::after { content: '✓'; margin-left: 8px; font-size: 12px; opacity: 0.9; }
+
+/* размер ставки */
 .raise {
-  display: grid; align-items: center;
-  grid-template-columns: auto minmax(190px, auto) auto;
-  grid-template-areas:
-    "dial slider go"
-    "dial presets go";
-  gap: 8px 14px;
-  padding: 9px 12px; border-radius: 16px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 14px;
   background: rgba(9, 16, 19, 0.5); border: 1px solid var(--line);
 }
-.raise__dial { grid-area: dial; }
-.raise__slider { grid-area: slider; }
-.raise__presets { grid-area: presets; display: flex; gap: 6px; justify-content: center; }
-.raise__go { grid-area: go; }
+.raise--idle { opacity: 0.9; }
+.raise--dead { opacity: 0.45; }
+.raise--flat .raise__slider, .raise--flat .raise__presets { opacity: 0.4; }
+.raise__presets { display: flex; gap: 5px; }
 .raise__preset {
-  font: inherit; font-size: 12px; color: var(--text); cursor: pointer;
-  background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px;
+  font: inherit; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap;
+  background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px;
   transition: background 130ms ease, border-color 130ms ease, color 130ms ease;
 }
-.raise__preset:hover { background: rgba(201, 162, 74, 0.12); border-color: var(--brass-dim); color: var(--bone); }
+.raise__preset:hover:not(:disabled) { background: rgba(201, 162, 74, 0.12); border-color: var(--brass-dim); color: var(--bone); }
+.raise__preset:disabled { cursor: default; opacity: 0.5; }
 .raise__preset:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 
 .raise__dial { display: flex; align-items: center; gap: 6px; }
 .raise__step {
-  width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+  width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
   font: inherit; font-size: 20px; line-height: 1; color: var(--bone); cursor: pointer;
   background: var(--ink-3); border: 1px solid var(--line);
   transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
@@ -627,12 +675,12 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .raise__step:disabled { opacity: 0.35; cursor: not-allowed; }
 .raise__step:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 
-.raise__value { min-width: 104px; text-align: center; line-height: 1.1; }
+.raise__value { min-width: 92px; text-align: center; line-height: 1.1; }
 .raise__amount { display: block; font-size: 21px; font-weight: 600; color: var(--brass); font-variant-numeric: tabular-nums; }
 .raise__hint { display: block; font-size: 11px; color: var(--muted); }
 
 .raise__slider {
-  -webkit-appearance: none; appearance: none; width: 100%; height: 6px; margin: 0;
+  -webkit-appearance: none; appearance: none; width: 150px; flex: 1 1 110px; max-width: 220px; height: 6px; margin: 0;
   border-radius: 999px; cursor: pointer; background: #22333a;
   background-image: linear-gradient(90deg, var(--brass) var(--fill, 0%), transparent var(--fill, 0%));
 }
@@ -646,8 +694,8 @@ strong, .num { font-variant-numeric: tabular-nums; }
   background: radial-gradient(circle at 35% 30%, #f0d68f, var(--brass) 60%, #8d7134);
   border: 1px solid #6f5622; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55); cursor: pointer;
 }
+.raise__slider:disabled { cursor: default; }
 .raise__slider:focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; }
-.raise__go { min-width: 104px; }
 
 /* диалог и уведомления */
 .dialog {
@@ -720,44 +768,55 @@ strong, .num { font-variant-numeric: tabular-nums; }
 @media (max-width: 620px) {
   :root { --seat-w: 84px; }
   .felt { margin: 10px; border-width: 6px; }
-  .card { width: 38px; height: 55px; }
-  .card__r { font-size: 16px; }
-  .card__s { font-size: 12px; }
-  .card--sm { width: 28px; height: 41px; }
-  .card--sm .card__r { font-size: 12px; }
-  .card--sm .card__s { font-size: 10px; }
-  .seat__cards { height: 41px; }
+  .card { --r: 7px; width: 44px; height: 63px; }
+  .card__r { font-size: 19px; }
+  .card__s { font-size: 14px; }
+  .card--sm { --r: 5px; width: 32px; height: 46px; }
+  .card--sm .card__r { font-size: 14px; }
+  .card--sm .card__s { font-size: 11px; }
+  .seat__cards { height: 46px; }
   .seat__name { font-size: 11px; }
   .seat__stack { font-size: 12px; }
-  .board { min-height: 60px; gap: 5px; }
+  .board { min-height: 63px; min-width: 240px; gap: 5px; }
   .stack { --chip: 15px; }
   .stack--sm { --chip: 13px; }
   .pots { gap: 12px; }
   .pots__caption b { font-size: 13px; }
 
   .back__text { display: none; }
-  .topbar--table { gap: 8px; padding: 8px 10px; }
+  /* На телефоне в шапке тесно: подписи кнопок прячем, оставляем значки,
+     а название стола сжимается с многоточием и никуда не наезжает. */
+  .topbar--table { gap: 6px; padding: 8px; }
+  .topbar--table .btn--sm { padding: 7px 9px; }
+  .btn__text { display: none; }
+  .btn__ico { display: block; }
+  .table-title { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+  .topbar--table .bank { flex: 0 0 auto; }
+  .topbar--table .bank strong { font-size: 15px; }
+  .icon-btn { flex: 0 0 auto; }
 
   /* свои карты крупнее чужих, но на узком экране — умеренно */
-  .seat--you .seat__cards { height: 52px; }
-  .seat--you .card--sm { width: 36px; height: 52px; }
-  .seat--you .card--sm .card__r { font-size: 15px; }
-  .seat--you .card--sm .card__s { font-size: 11px; }
+  .seat--you .seat__cards { height: 58px; }
+  .seat--you .card--sm { --r: 6px; width: 40px; height: 58px; }
+  .seat--you .card--sm .card__r { font-size: 17px; }
+  .seat--you .card--sm .card__s { font-size: 12px; }
   .topbar { padding: 10px 12px; }
-  .actions { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); gap: 8px; min-height: 178px; }
-  .acts { width: 100%; }
-  .menu__panel { min-width: 190px; }
-  .raise {
-    width: 100%; gap: 8px 10px; padding: 8px;
-    grid-template-columns: auto minmax(0, 1fr);
-    grid-template-areas:
-      "dial slider"
-      "presets presets"
-      "go go";
+  .actions {
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+    flex-direction: column; align-items: stretch; gap: 8px; min-height: 186px;
   }
-  .raise__presets { flex-wrap: wrap; }
-  .raise__go { width: 100%; }
-  .raise__preset { padding: 5px 9px; }
+  .actions__status { text-align: center; white-space: normal; }
+  .acts { width: 100%; align-items: stretch; }
+  .acts__size { justify-content: center; }
+  .acts__main { gap: 6px; }
+  .btn--act { flex: 1; min-width: 0; padding: 10px 4px; font-size: 14px; }
+  .btn--act .btn__key { display: none; }
+  .menu__panel { min-width: 190px; }
+  .raise { flex-wrap: wrap; justify-content: center; width: 100%; gap: 8px; padding: 8px; }
+  .raise__presets { order: 1; width: 100%; justify-content: center; flex-wrap: wrap; }
+  .raise__dial { order: 2; }
+  .raise__slider { order: 3; flex: 1 1 120px; }
+  .raise__preset { padding: 6px 9px; }
   .room { grid-template-columns: 1fr auto; }
   .room__seats { display: none; }
   .seat__kick { opacity: 0.55; }
@@ -769,6 +828,31 @@ strong, .num { font-variant-numeric: tabular-nums; }
   .topbar--table .bank__label { display: none; }
 
 
+}
+
+/* Низкий экран (ноутбук 720p и подобные): сукну нужно больше места,
+   иначе блок игрока упирается в центр стола и ставке некуда лечь. */
+@media (max-height: 780px) and (min-width: 621px) {
+  .felt { margin: 14px; }
+  .felt__inner { gap: 8px; }
+  .pots { min-height: 46px; }
+  .pot { min-height: 16px; }
+  .felt__msg { min-height: 20px; font-size: 15px; }
+  .card { --r: 7px; width: 44px; height: 63px; }
+  .card__r { font-size: 20px; }
+  .card__s { font-size: 15px; }
+  .card--sm { --r: 5px; width: 34px; height: 49px; }
+  .card--sm .card__r { font-size: 15px; }
+  .card--sm .card__s { font-size: 11px; }
+  .seat__cards { height: 49px; }
+  .seat--you .seat__cards { height: 58px; }
+  .seat--you .card--sm { --r: 6px; width: 40px; height: 58px; }
+  .seat--you .card--sm .card__r { font-size: 17px; }
+  .board { min-height: 63px; min-width: 252px; }
+  .seat__plate { padding: 4px 7px; }
+  .actions { min-height: 104px; padding: 8px 18px calc(8px + env(safe-area-inset-bottom)); }
+  .btn--act { min-height: 42px; }
+  .meter--bar { padding: 5px 14px 7px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

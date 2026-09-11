@@ -304,7 +304,10 @@ function coreCards(category, cards) {
 }
 
 // Что за рука собралась и насколько она хороша: имя, пятёрка для подсветки, сила 0..1.
-function handInfo(hole, board, cache) {
+// withStrength=false отдаёт только название и карты комбинации: перебор рук
+// соперника — самая тяжёлая арифметика, и если игрок выключил силомер,
+// считать её незачем.
+function handInfo(hole, board, cache, withStrength = true) {
   if (!hole || hole.length < 2) return null;
   if (!board.length) {
     const pair = hole[0][0] === hole[1][0];
@@ -314,7 +317,7 @@ function handInfo(hole, board, cache) {
       core: pair ? hole.slice() : [],
       category: pair ? 1 : 0,
       usesHole: 2,
-      strength: holeStrength(hole),
+      strength: withStrength ? holeStrength(hole) : null,
       exact: false,
     };
   }
@@ -326,7 +329,7 @@ function handInfo(hole, board, cache) {
     core: coreCards(category, res.cards),
     category,
     usesHole: res.cards.filter((c) => hole.includes(c)).length,
-    strength: shareBeaten(hole, board, cache),
+    strength: withStrength ? shareBeaten(hole, board, cache) : null,
     exact: true,
   };
 }

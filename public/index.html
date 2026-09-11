@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Ночная партия — техасский холдем</title>
+<title>Poker — техасский холдем</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -18,7 +18,7 @@
     <div class="auth__mark" aria-hidden="true">
       <span>♠</span><span>♥</span><span>♦</span><span>♣</span>
     </div>
-    <h1 class="auth__title">Ночная партия</h1>
+    <h1 class="auth__title">Poker</h1>
     <p class="auth__lede">Техасский холдем без лимита. Шесть столов, до девяти игроков, фишки только виртуальные.</p>
 
     <div class="tabs" role="tablist">
@@ -85,7 +85,7 @@
 
       <!-- Распоряжения столом: они не нужны каждый ход и не должны занимать место внизу -->
       <div class="menu" id="table-menu">
-        <button class="btn btn--ghost btn--sm" id="menu-toggle" aria-expanded="false" aria-haspopup="true">Стол ▾</button>
+        <button class="btn btn--ghost btn--sm" id="menu-toggle" aria-expanded="false" aria-haspopup="true" title="Действия со столом"><span class="btn__ico" aria-hidden="true">⋮</span><span class="btn__text">Стол ▾</span></button>
         <div class="menu__panel" id="menu-panel" role="menu" hidden>
           <label class="pick" title="Что делать со своими картами в конце раздачи">
             <span class="pick__label">Карты в конце</span>
@@ -95,6 +95,10 @@
               <option value="never">скрывать</option>
             </select>
           </label>
+          <label class="pick" title="Показывать силу собранной руки">
+            <span class="pick__label">Силомер руки</span>
+            <input type="checkbox" id="meter-mode" checked>
+          </label>
           <div class="menu__sep"></div>
           <button class="menu__item" id="menu-topup" role="menuitem">Докупить фишки</button>
           <button class="menu__item" id="menu-sitout" role="menuitem">Пропустить раздачи</button>
@@ -103,15 +107,15 @@
         </div>
       </div>
 
-      <button class="btn btn--ghost btn--sm" id="toggle-log" aria-expanded="false">Лента</button>
+      <button class="btn btn--ghost btn--sm" id="toggle-log" aria-expanded="false" title="Лента стола"><span class="btn__ico" aria-hidden="true">☰</span><span class="btn__text">Лента</span></button>
     </div>
   </header>
 
   <div class="table-wrap">
     <div class="felt" id="felt">
       <div class="felt__inner">
-        <div class="pots" id="pots" hidden></div>
-        <div class="pot" id="pot" hidden><span>всего в игре</span><strong id="pot-amount">0</strong></div>
+        <div class="pots" id="pots"></div>
+        <div class="pot" id="pot"><span>всего в игре</span><strong id="pot-amount">0</strong></div>
         <div class="board" id="board"></div>
         <div class="felt__msg" id="felt-msg"></div>
       </div>

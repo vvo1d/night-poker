@@ -741,9 +741,9 @@ class Table {
   // улицу в один тик, это складывается в заметную остановку цикла. Поэтому на
   // тик выделяется бюджет: столы, которые в него не попали, получают прошлый
   // расчёт и досчитываются следующим тиком.
-  handInfoFor(p) {
+  handInfoFor(p, withStrength = true) {
     if (!p || !p.inHand || p.folded || p.cards.length < 2) return null;
-    const key = `${this.handId}:${p.seat}:${this.board.length}`;
+    const key = `${this.handId}:${p.seat}:${this.board.length}:${withStrength ? 1 : 0}`;
     const known = this.handCache.get(key);
     if (known !== undefined) return known;
 
@@ -751,7 +751,7 @@ class Table {
     if (needsBoard && evalBudget.left <= 0) return this.lastHand.get(p.seat) || null;
     if (needsBoard) evalBudget.left -= 1;
 
-    const info = handInfo(p.cards, this.board, this.evalCache);
+    const info = handInfo(p.cards, this.board, this.evalCache, withStrength);
     this.evalCache.len = this.board.length;
     this.handCache.set(key, info);
     this.lastHand.set(p.seat, info);
@@ -817,7 +817,7 @@ class Table {
   }
 
   // Личная часть: свои карты, разбор руки и доступные ходы.
-  privateState(p) {
+  privateState(p, withStrength = true) {
     return {
       seat: p.seat,
       stack: p.stack,
@@ -825,7 +825,7 @@ class Table {
       cards: p.cards,
       sittingOut: p.sittingOut,
       busted: !!p.busted,
-      hand: this.handInfoFor(p),
+      hand: this.handInfoFor(p, withStrength),
       canReveal: !!(this.reveal && this.reveal.optional && this.reveal.seat === p.seat),
       legal: this.actingSeat === p.seat ? this.legalActions(p) : null,
     };
@@ -843,13 +843,14 @@ class Table {
 
   // Готовая строка события для зрителя или для конкретного места.
   // Собирается один раз на версию: у стола зрителей может быть сколько угодно.
-  frameFor(p) {
+  frameFor(p, withStrength = true) {
     this.buildFrames();
     if (!p) return this.frameNoYou;
-    let frame = this.privJson.get(p.seat);
+    const key = `${p.seat}:${withStrength ? 1 : 0}`;
+    let frame = this.privJson.get(key);
     if (frame === undefined) {
-      frame = `event: table\ndata: ${this.framePrefix},"you":${JSON.stringify(this.privateState(p))}}\n\n`;
-      this.privJson.set(p.seat, frame);
+      frame = `event: table\ndata: ${this.framePrefix},"you":${JSON.stringify(this.privateState(p, withStrength))}}\n\n`;
+      this.privJson.set(key, frame);
     }
     return frame;
   }

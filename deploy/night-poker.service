@@ -1,0 +1,39 @@
+# Служба игрового сервера. Класть в /etc/systemd/system/night-poker.service
+[Unit]
+Description=Ночная партия — покерный сервер
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=poker
+Group=poker
+WorkingDirectory=/opt/night-poker
+ExecStart=/usr/bin/node server.js
+
+# Сервер стоит за nginx, поэтому наружу сам не смотрит.
+Environment=PORT=3000
+Environment=HOST=127.0.0.1
+# Пароли считаются на пуле потоков: четырёх по умолчанию мало на час пик.
+Environment=UV_THREADPOOL_SIZE=16
+# Когда появится HTTPS, поставьте 1 — cookie получит флаг Secure.
+Environment=COOKIE_SECURE=0
+
+# По SIGTERM сервер дописывает игроков в базу и только потом выходит.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=always
+RestartSec=2
+
+# Много живых соединений — много дескрипторов.
+LimitNOFILE=65535
+
+# Ограничения: служба пишет только в свою папку с данными.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/night-poker/data
+
+[Install]
+WantedBy=multi-user.target

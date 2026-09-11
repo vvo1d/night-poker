@@ -28,6 +28,8 @@ const state = {
   actionKey: '',
   raiseValue: 0,
   cardValues: new Map(), // ключ карты -> что на ней было в прошлом кадре
+  betSpots: new Map(),   // куда легли фишки — оттуда же они улетают в банк
+  pre: null,             // ход, выбранный заранее
   logSeen: new Set(),    // номера уже показанных строк ленты
   snap: null,            // снимок стола для диффа: по нему решаем, что анимировать и озвучивать
   combo: '',
@@ -86,6 +88,18 @@ function setUser(user) {
 }
 
 // ——— показывать ли карты в конце раздачи ———
+
+// Силомер можно выключить: панель прячется, а сервер перестаёт считать
+// для этого игрока перебор рук соперника — самую тяжёлую часть.
+const METER_KEY = 'night-poker-meter';
+function meterOn() { return localStorage.getItem(METER_KEY) !== 'off'; }
+$('#meter-mode').checked = meterOn();
+$('#meter-mode').addEventListener('change', (e) => {
+  localStorage.setItem(METER_KEY, e.target.checked ? 'on' : 'off');
+  cmd({ cmd: 'prefs', meter: e.target.checked }, { quiet: true });
+  Sound.play('click');
+  if (state.table) renderMeter(state.table);
+});
 
 const REVEAL_KEY = 'night-poker-reveal';
 function revealMode() { return localStorage.getItem(REVEAL_KEY) || 'ask'; }
@@ -165,6 +179,8 @@ function connectStream() {
   if (state.stream) state.stream.close();
   const stream = new EventSource('/api/stream');
   state.stream = stream;
+
+  if (!meterOn()) cmd({ cmd: 'prefs', meter: false }, { quiet: true });
 
   stream.addEventListener('user', (e) => setUser(JSON.parse(e.data)));
   stream.addEventListener('lobby', (e) => {
@@ -367,7 +383,9 @@ function renderTable(t) {
   renderPots(t);
   const onTable = (t.pots || []).reduce((sum, part) => sum + part.amount, 0);
   const pot = $('#pot');
-  pot.hidden = !t.pot || t.pot === onTable;
+  // Прячем содержимое, но не сам блок: место под него зарезервировано,
+  // иначе борд и фишки поедут, как только появится банк.
+  pot.style.visibility = !t.pot || t.pot === onTable ? 'hidden' : 'visible';
   $('#pot-amount').textContent = fmt(t.pot);
   if (prev && t.pot > prev.pot) retrigger(pot, 'is-bump');
 
@@ -450,11 +468,11 @@ function renderTable(t) {
         : seat.allIn ? 'олл-ин'
           : seat.sittingOut ? (seat.stack === 0 ? 'без фишек' : 'пропускает')
             : seat.handName || labelAction(seat.lastAction);
-    if (note) {
-      const noteEl = el('span', `seat__note${seat.handName ? ' seat__note--hand' : ''}`, note);
-      noteEl.title = note;
-      plate.append(noteEl);
-    }
+    // Строка заметки стоит всегда, даже пустая: иначе плашка меняет высоту,
+    // а вместе с ней прыгает и место под ставку.
+    const noteEl = el('span', `seat__note${seat.handName ? ' seat__note--hand' : ''}`, note || '');
+    if (note) noteEl.title = note;
+    plate.append(noteEl);
     node.append(plate);
 
     const timer = el('div', 'seat__timer');
@@ -479,6 +497,8 @@ function renderTable(t) {
     seatsBox.append(node);
   });
 
+  // Силомер рисуем до фишек: он занимает угол сукна, и фишки должны его обойти.
+  renderMeter(t);
   renderBets(t, hero);
 
   state.cardValues = state.nextValues;
@@ -495,7 +515,7 @@ function renderTable(t) {
     cmd({ cmd: 'reveal', show: mode === 'always' }, { quiet: true });
   }
 
-  renderMeter(t);
+  checkPre(t);
   renderMenu(t);
   renderActions(t);
 
@@ -506,69 +526,60 @@ function renderTable(t) {
 
 // Поставленные фишки лежат на сукне между местом и банком — своим кольцом,
 // поэтому они не наезжают на плашки с именами.
-function betPositions(n, hero) {
-  const out = [];
-  const ry = narrow.matches ? 18 : 21;
-  for (let i = 0; i < n; i++) {
-    const rel = ((i - hero) % n + n) % n;
-    const angle = (90 + (rel * 360) / n) * (Math.PI / 180);
-    out.push({ x: 50 + 26 * Math.cos(angle), y: 50 + ry * Math.sin(angle), angle });
-  }
-  return out;
-}
+// Место для ставки постоянное и привязано к самому игроку: плашка стоит
+// вплотную к его блоку со стороны банка. Если стол низкий и полоса между
+// местом и центром узкая, плашка встаёт ровно посередине этой полосы.
+// Вся геометрия устойчива, поэтому фишки не ездят от кадра к кадру.
+const BET_GAP = 10;
 
-// Прямоугольник центра стола: банк, общие карты и надпись под ними.
 function centerBox(feltBox) {
   const box = { top: Infinity, bottom: -Infinity, left: Infinity, right: -Infinity };
   for (const sel of ['#pots', '#pot', '#board', '#felt-msg']) {
     const node = $(sel);
-    if (!node || node.hidden || !node.getClientRects().length) continue;
+    if (!node) continue;
     const r = node.getBoundingClientRect();
-    if (!r.width) continue;
+    if (!r.height) continue;
     box.top = Math.min(box.top, r.top - feltBox.top);
     box.bottom = Math.max(box.bottom, r.bottom - feltBox.top);
     box.left = Math.min(box.left, r.left - feltBox.left);
     box.right = Math.max(box.right, r.right - feltBox.left);
   }
   if (box.top === Infinity) {
-    return { top: feltBox.height * 0.42, bottom: feltBox.height * 0.58, left: feltBox.width * 0.35, right: feltBox.width * 0.65 };
+    return {
+      top: feltBox.height * 0.38, bottom: feltBox.height * 0.62,
+      left: feltBox.width * 0.32, right: feltBox.width * 0.68,
+    };
   }
   return box;
 }
 
-// Ставку кладём в полосу между местом и центром стола: на невысоком экране
-// эта полоса узкая, и попасть в неё процентами по эллипсу не получается.
-function betSpot(ring, seatBox, core, feltBox) {
-  const M = 10;
-  let x = (ring.x / 100) * feltBox.width;
-  let y = (ring.y / 100) * feltBox.height;
-  const sin = Math.sin(ring.angle);
-  const cos = Math.cos(ring.angle);
+function betSpot(seatBox, core, feltBox, half) {
+  const x = (seatBox.left + seatBox.right) / 2;
+  const y = (seatBox.top + seatBox.bottom) / 2;
+  const dx = feltBox.width / 2 - x;
+  const dy = feltBox.height / 2 - y;
 
-  const middle = (a, b) => (a + b) / 2;
-  const NEED = 46; // высота стопки с подписью
-  if (Math.abs(sin) > 0.5) {
-    // Место сверху или снизу: свободная полоса — по вертикали.
-    const [lo, hi] = sin > 0
-      ? [core.bottom + M, seatBox.top - M]
-      : [seatBox.bottom + M, core.top - M];
-    if (hi - lo >= NEED) {
-      y = Math.min(Math.max(y, lo), hi);
-    } else {
-      // Стол низкий, между бортом и картами не влезает — кладём ставку сбоку от места.
-      const half = 30;
-      const left = seatBox.left - M - half;
-      const right = seatBox.right + M + half;
-      x = left - half > 0 ? left : right;
-      y = middle(seatBox.top, seatBox.bottom) - 6;
-    }
+  // Сверху и снизу от банка двигаемся по вертикали, сбоку — по горизонтали.
+  const vertical = Math.abs(dy) * feltBox.width > Math.abs(dx) * feltBox.height;
+  if (vertical) {
+    const [near, far] = dy > 0
+      ? [seatBox.bottom + BET_GAP + half.h, core.top - BET_GAP - half.h]
+      : [seatBox.top - BET_GAP - half.h, core.bottom + BET_GAP + half.h];
+    if (dy > 0 ? near <= far : near >= far) return { x, y: near };
   } else {
-    const [lo, hi] = cos > 0
-      ? [core.right + M, seatBox.left - M]
-      : [seatBox.right + M, core.left - M];
-    x = hi - lo < 36 ? middle(lo, hi) : Math.min(Math.max(x, lo), hi);
+    const [near, far] = dx > 0
+      ? [seatBox.right + BET_GAP + half.w, core.left - BET_GAP - half.w]
+      : [seatBox.left - BET_GAP - half.w, core.right + BET_GAP + half.w];
+    if (dx > 0 ? near <= far : near >= far) return { x: near, y };
   }
-  return { x: (x / feltBox.width) * 100, y: (y / feltBox.height) * 100 };
+
+  // Между местом и центром не осталось полосы — на тесном экране такое бывает.
+  // Тогда кладём сбоку от места, с той стороны, где до борта дальше.
+  const toLeft = seatBox.left > feltBox.width - seatBox.right;
+  return {
+    x: toLeft ? seatBox.left - BET_GAP - half.w : seatBox.right + BET_GAP + half.w,
+    y,
+  };
 }
 
 function renderBets(t, hero) {
@@ -579,30 +590,49 @@ function renderBets(t, hero) {
   const feltBox = $('#felt').getBoundingClientRect();
   const core = centerBox(feltBox);
   const seatNodes = $('#seats').children;
-  const ring = betPositions(t.maxSeats, hero);
+  const placed = new Map();
+  const nodes = [];
 
   t.seats.forEach((seat, i) => {
-    if (seat.empty || !seat.bet) return;
-    const node = seatNodes[i];
-    if (!node) return;
-    const r = node.getBoundingClientRect();
-    const seatBox = {
-      top: r.top - feltBox.top,
-      bottom: r.bottom - feltBox.top,
-      left: r.left - feltBox.left,
-      right: r.right - feltBox.left,
-    };
-    const spot = betSpot(ring[i], seatBox, core, feltBox);
-
+    if (seat.empty || !seat.bet || !seatNodes[i]) return;
     const was = prev && prev.seats[i] ? prev.seats[i].bet : 0;
     const bet = el('div', `bet${seat.bet !== was ? ' is-new' : ''}`);
-    bet.style.setProperty('--x', `${spot.x}%`);
-    bet.style.setProperty('--y', `${spot.y}%`);
-    bet.append(chipStack(seat.bet, { small: true }));
+    // Плашка низкая: одна фишка старшего номинала и сумма рядом. Высокая стопка
+    // не помещалась в полосу между бортом и картами на невысоком экране.
+    bet.append(el('div', `chip chip--${topChip(seat.bet)}`));
     bet.append(el('span', 'bet__value', fmt(seat.bet)));
     bet.title = `${seat.name}: ${fmt(seat.bet)}`;
     box.append(bet);
+    nodes.push({ i, bet });
   });
+  if (!nodes.length) { state.betSpots = placed; return; }
+
+  // Размер берём по вёрстке, а не по экранному прямоугольнику: на первом кадре
+  // ставка появляется с анимацией масштаба, и измеренный размер был бы меньше
+  // настоящего — фишки вставали бы ближе к месту, а потом прыгали.
+  const sample = nodes[0].bet;
+  const half = { w: sample.offsetWidth / 2, h: sample.offsetHeight / 2 };
+
+  for (const { i, bet } of nodes) {
+    const r = seatNodes[i].getBoundingClientRect();
+    const seatBox = {
+      left: r.left - feltBox.left, right: r.right - feltBox.left,
+      top: r.top - feltBox.top, bottom: r.bottom - feltBox.top,
+    };
+    const spot = betSpot(seatBox, core, feltBox, half);
+    const x = (spot.x / feltBox.width) * 100;
+    const y = (spot.y / feltBox.height) * 100;
+    bet.style.setProperty('--x', `${x}%`);
+    bet.style.setProperty('--y', `${y}%`);
+    placed.set(i, { x, y });
+  }
+  state.betSpots = placed;
+}
+
+// Самый крупный номинал, который помещается в ставку, — его и рисуем.
+function topChip(amount) {
+  for (const value of CHIP_VALUES) if (amount >= value) return value;
+  return 1;
 }
 
 // Банк на столе: основной и побочные — каждый своей стопкой фишек.
@@ -610,7 +640,6 @@ function renderPots(t) {
   const box = $('#pots');
   const parts = t.pots || [];
   box.textContent = '';
-  box.hidden = !parts.length;
   parts.forEach((part, i) => {
     const item = el('div', 'pots__item');
     item.append(chipStack(part.amount));
@@ -655,6 +684,11 @@ function renderMeter(t) {
   placeMeter();
   const box = $('#meter');
   const hand = t.you && t.you.hand;
+  if (!meterOn() || !hand || hand.strength === null) {
+    box.hidden = true;
+    state.combo = '';
+    return;
+  }
   if (!hand) {
     box.hidden = true;
     state.combo = '';
@@ -723,9 +757,18 @@ function logLine(line) {
   const dash = line.text.indexOf(' — ');
   if (kind === 'result' && dash > 0) {
     node.append(document.createTextNode(line.text.slice(0, dash + 3)));
-    const combo = el('b', 'log__combo');
-    combo.append(withCards(line.text.slice(dash + 3)));
-    node.append(combo);
+    const tail = line.text.slice(dash + 3);
+    const split = tail.indexOf(' · ');
+    if (split > 0) {
+      // Название комбинации остаётся в строке, а карты уходят отдельным рядом:
+      // иначе пятёрка рвётся посреди комбинации и лента выглядит рвано.
+      node.append(el('b', 'log__combo', tail.slice(0, split)));
+      const cards = el('div', 'log__cards');
+      cards.append(withCards(tail.slice(split + 3)));
+      node.append(cards);
+    } else {
+      node.append(el('b', 'log__combo', tail));
+    }
     return node;
   }
   node.append(withCards(line.text));
@@ -833,9 +876,10 @@ function playEffects(t, prev, positions) {
   const noBets = t.seats.every((s) => s.empty || !s.bet);
   if (hadBets && noBets && t.phase !== 'showdown' && t.pot > 0) {
     const target = centerPct($('#pot').hidden ? $('#board') : $('#pot'));
-    const spots = betPositions(t.maxSeats, t.you ? t.you.seat : 0);
+    const spots = state.betSpots || new Map();
     prev.seats.forEach((s, i) => {
-      if (s && s.bet > 0 && spots[i]) flyChips(spots[i], target, { count: 2 });
+      const from = spots.get(i);
+      if (s && s.bet > 0 && from) flyChips(from, target, { count: 2 });
     });
 
     Sound.play('pot');
@@ -939,7 +983,7 @@ function checkPre(t) {
 
 function preButton(label, action, amount, hint) {
   const armed = state.pre && state.pre.action === action;
-  const btn = el('button', `btn btn--pre${armed ? ' is-armed' : ''}`, label);
+  const btn = el('button', `btn btn--act btn--pre${armed ? ' is-armed' : ''}`, label);
   btn.title = hint;
   btn.setAttribute('aria-pressed', String(!!armed));
   btn.addEventListener('click', () => {
@@ -956,66 +1000,85 @@ function renderActions(t) {
   const box = $('#actions');
   const you = t.you;
   const legal = you && you.legal;
+  const mySeat = you && t.seats[you.seat] && !t.seats[you.seat].empty ? t.seats[you.seat] : null;
   box.classList.toggle('is-your-turn', !!legal || !!(you && you.canReveal));
 
   const pre = state.pre ? `${state.pre.action}:${state.pre.amount}` : '';
   const key = JSON.stringify([t.handId, t.phase, t.actingSeat, legal, you && you.stack, you && you.sittingOut,
-    you && you.inHand, !!you, you && you.canReveal, t.reveal && t.reveal.seat, pre, callAmount(t)]);
+    you && you.inHand, !!you, you && you.canReveal, t.reveal && t.reveal.seat, pre, callAmount(t),
+    mySeat && mySeat.folded, mySeat && mySeat.allIn]);
   if (key === state.actionKey) return;
   state.actionKey = key;
   box.textContent = '';
   state.setRaise = null; // панель перестроена — старый шаг ставки больше не годится
 
   const status = el('div', 'actions__status');
-  const row = el('div', 'acts');
-  box.append(status, row);
+  const acts = el('div', 'acts');
+  const size = el('div', 'acts__size');
+  const main = el('div', 'acts__main');
+  acts.append(size, main);
+  box.append(status, acts);
 
   if (!you) {
-    status.textContent = 'Вы наблюдаете за столом';
-    row.append(el('span', 'actions__wait', 'Займите свободное место, чтобы играть'));
+    status.textContent = 'Вы наблюдаете за столом. Займите свободное место, чтобы играть';
+    const sizing = raiseBox(t, null, { dead: true });
+    size.append(sizing.size);
+    main.append(deadButton('Фолд'), deadButton('Чек'), sizing.submit);
     return;
   }
 
   // Очередь решать, показывать ли карты.
   if (you.canReveal) {
     status.textContent = 'Показать карты соперникам?';
-    const show = el('button', 'btn btn--primary', 'Показать');
+    const show = el('button', 'btn btn--primary btn--act', 'Показать');
     show.addEventListener('click', () => cmd({ cmd: 'reveal', show: true }));
-    const hide = el('button', 'btn', 'Убрать в сброс');
+    const hide = el('button', 'btn btn--act', 'Убрать в сброс');
     hide.addEventListener('click', () => cmd({ cmd: 'reveal', show: false }));
-    row.append(show, hide);
+    main.append(show, hide);
     return;
   }
 
   if (legal) {
     status.textContent = 'Ваш ход';
-    const fold = el('button', 'btn btn--danger', 'Фолд');
+    const sizing = raiseBox(t, legal);
+    size.append(sizing.size);
+
+    const fold = el('button', 'btn btn--danger btn--act', 'Фолд');
     fold.addEventListener('click', () => cmd({ cmd: 'act', action: 'fold' }));
-    row.append(hotkey(fold, 'F'));
+    main.append(hotkey(fold, 'F'));
 
     if (legal.check) {
-      const check = el('button', 'btn', 'Чек');
+      const check = el('button', 'btn btn--call btn--act', 'Чек');
       check.addEventListener('click', () => cmd({ cmd: 'act', action: 'check' }));
-      row.append(hotkey(check, 'C'));
+      main.append(hotkey(check, 'C'));
     } else {
-      const call = el('button', 'btn', `Колл ${fmt(legal.toCall)}`);
+      const call = el('button', 'btn btn--call btn--act', `Колл ${fmt(legal.toCall)}`);
       call.addEventListener('click', () => cmd({ cmd: 'act', action: 'call' }));
-      row.append(hotkey(call, 'C'));
+      main.append(hotkey(call, 'C'));
     }
-
-    if (legal.minRaiseTo !== undefined) row.append(raiseBox(t, legal));
+    main.append(sizing.submit);
     return;
   }
 
-  // Ход соперника: кнопки остаются на месте, но теперь это выбор наперёд.
   const acting = t.actingSeat >= 0 && t.seats[t.actingSeat] && !t.seats[t.actingSeat].empty
     ? `Ход: ${t.seats[t.actingSeat].name}`
     : t.phase === 'showdown' ? 'Вскрытие' : 'Ждём начала раздачи';
 
-  const canPre = you.inHand && !you.sittingOut && t.phase !== 'showdown' && t.actingSeat >= 0;
+  // Заранее ходит только тот, кому ещё предстоит решать: пас и олл-ин
+  // выбирать нечего.
+  const folded = !!(mySeat && (mySeat.folded || mySeat.mucked));
+  const allIn = !!(mySeat && mySeat.allIn);
+  const canPre = you.inHand && !folded && !allIn && !you.sittingOut
+    && t.phase !== 'showdown' && t.actingSeat >= 0;
+
   if (!canPre) {
-    status.textContent = acting;
-    row.append(raiseBox(t, null));
+    if (state.pre) state.pre = null;
+    status.textContent = folded ? `${acting} · вы сбросили карты`
+      : allIn ? `${acting} · вы в олл-ине`
+        : acting;
+    const sizing = raiseBox(t, null, { dead: true });
+    size.append(sizing.size);
+    main.append(deadButton('Фолд'), deadButton('Чек'), sizing.submit);
     return;
   }
 
@@ -1025,11 +1088,20 @@ function renderActions(t) {
     : '';
   status.textContent = armed ? `${acting} · заранее выбрано: ${armed}` : `${acting} · можно выбрать ход заранее`;
 
-  row.append(preButton('Фолд', 'fold', 0, 'Сбросить карты, как только дойдёт очередь'));
-  row.append(toCall > 0
+  const sizing = raiseBox(t, null);
+  size.append(sizing.size);
+  main.append(preButton('Фолд', 'fold', 0, 'Сбросить карты, как только дойдёт очередь'));
+  main.append(toCall > 0
     ? preButton(`Колл ${fmt(toCall)}`, 'call', toCall, 'Уравнять, если ставка не изменится')
     : preButton('Чек', 'check', 0, 'Чекнуть, если никто не поставит'));
-  row.append(raiseBox(t, null));
+  main.append(sizing.submit);
+}
+
+// Кнопка-заглушка: держит строй, пока ходить нельзя.
+function deadButton(label) {
+  const btn = el('button', 'btn btn--act', label);
+  btn.disabled = true;
+  return btn;
 }
 
 // ——— меню стола ———
@@ -1107,20 +1179,32 @@ function holdRepeat(btn, step) {
   ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, stop));
 }
 
-// Панель повышения: шаг в один блайнд, кнопки, слайдер и быстрые доли банка.
-function raiseBox(t, legal) {
-  const min = legal.minRaiseTo;
-  const max = legal.maxRaiseTo;
-  const step = Math.max(1, t.bb);
-  state.raiseValue = clamp(state.raiseValue || min, min, max);
+// Размер ставки: доли банка, шаг в блайнд и слайдер. Возвращает две части —
+// блок выбора размера и саму кнопку, потому что кнопка стоит в общем ряду
+// с фолдом и коллом, как в больших румах.
+function raiseBox(t, legal, { dead = false } = {}) {
+  const you = t.you;
+  const seat = you && t.seats[you.seat];
+  const myBet = seat && !seat.empty ? seat.bet : 0;
 
-  const wrap = el('div', 'raise');
+  const live = !!legal;
+  const max = live ? legal.maxRaiseTo : myBet + (you ? you.stack : 0);
+  const min = live ? legal.minRaiseTo : Math.min(Math.max(t.currentBet + t.bb, t.bb), max);
+  const toCall = live ? legal.toCall : Math.max(0, t.currentBet - myBet);
+  const pot = live ? legal.pot : t.pot;
+  const isBet = live ? legal.isBet : t.currentBet === 0;
+  const flat = max <= min;
+
+  const size = el('div', `raise${live ? '' : ' raise--idle'}${dead ? ' raise--dead' : ''}`);
+  if (flat) size.classList.add('raise--flat');
+  state.raiseValue = clamp(state.raiseValue || min, min, max);
 
   const presets = el('div', 'raise__presets');
   const slider = document.createElement('input');
   slider.type = 'range';
   slider.className = 'raise__slider';
-  slider.min = min; slider.max = max; slider.step = 1;
+  slider.min = min; slider.max = Math.max(max, min); slider.step = 1;
+  slider.disabled = dead || flat;
 
   const amount = el('b', 'raise__amount');
   const hint = el('span', 'raise__hint');
@@ -1130,65 +1214,73 @@ function raiseBox(t, legal) {
   minus.title = 'Меньше на блайнд (стрелка вниз)';
   plus.title = 'Больше на блайнд (стрелка вверх)';
 
+  const submit = el('button', 'btn btn--primary btn--act raise__go');
+  submit.disabled = !live || flat;
+
+  const step = Math.max(1, t.bb);
   const paint = () => {
     const v = state.raiseValue;
     slider.value = v;
     amount.textContent = fmt(v);
-    const share = legal.pot > 0 ? Math.round(((v - legal.toCall) / legal.pot) * 100) : 0;
-    hint.textContent = v >= max
+    const share = pot > 0 ? Math.round(((v - toCall) / pot) * 100) : 0;
+    hint.textContent = v >= max && max > min
       ? `олл-ин · ${(v / t.bb).toFixed(1)} bb`
       : `${(v / t.bb).toFixed(1)} bb · ${share}% банка`;
-    minus.disabled = v <= min;
-    plus.disabled = v >= max;
-    wrap.style.setProperty('--fill', `${max > min ? ((v - min) / (max - min)) * 100 : 100}%`);
+    minus.disabled = dead || v <= min;
+    plus.disabled = dead || v >= max;
+    // Сумму на кнопке показываем, только если её действительно можно поставить.
+    submit.textContent = flat || dead ? (isBet ? 'Бет' : 'Рейз') : `${isBet ? 'Бет' : 'Рейз'} ${fmt(v)}`;
+    if (live && !flat) hotkey(submit, 'R');
+    size.style.setProperty('--fill', `${max > min ? ((v - min) / (max - min)) * 100 : 100}%`);
   };
 
-  // Шаг всегда кратен блайнду, но крайние значения доступны точно.
   const setValue = (v, snap = false) => {
     let next = clamp(Math.round(v), min, max);
-    if (snap && next > min && next < max) {
-      next = clamp(min + Math.round((next - min) / step) * step, min, max);
-    }
+    if (snap && next > min && next < max) next = clamp(min + Math.round((next - min) / step) * step, min, max);
     state.raiseValue = next;
     paint();
   };
-  state.setRaise = (delta) => setValue(state.raiseValue + delta * step, true);
 
-  holdRepeat(minus, () => state.setRaise(-1));
-  holdRepeat(plus, () => state.setRaise(1));
-  slider.addEventListener('input', () => setValue(Number(slider.value)));
+  if (!dead) {
+    state.setRaise = (delta) => setValue(state.raiseValue + delta * step, true);
+    holdRepeat(minus, () => state.setRaise(-1));
+    holdRepeat(plus, () => state.setRaise(1));
+    slider.addEventListener('input', () => setValue(Number(slider.value)));
+  }
 
   const seen = new Set();
-  for (const [label, target] of [
-    ['Мин', min],
-    ['½ банка', Math.round(legal.toCall + legal.pot * 0.5)],
-    ['¾ банка', Math.round(legal.toCall + legal.pot * 0.75)],
-    ['Банк', Math.round(legal.toCall + legal.pot)],
-    ['Олл-ин', max],
+  for (const [label, target, title] of [
+    ['Мин', min, 'Минимальное повышение'],
+    ['½', Math.round(toCall + pot * 0.5), 'Половина банка'],
+    ['¾', Math.round(toCall + pot * 0.75), 'Три четверти банка'],
+    ['Банк', Math.round(toCall + pot), 'Размер банка'],
+    ['Олл-ин', max, 'Весь стек'],
   ]) {
     const value = clamp(target, min, max);
     if (seen.has(value) && label !== 'Олл-ин') continue;
     seen.add(value);
     const b = el('button', 'raise__preset', label);
     b.type = 'button';
-    b.addEventListener('click', () => { setValue(value); Sound.play('click'); });
+    b.title = `${title}: ${fmt(value)}`;
+    b.disabled = dead || flat;
+    if (!dead) b.addEventListener('click', () => { setValue(value); Sound.play('click'); });
     presets.append(b);
   }
 
-  const submit = el('button', 'btn btn--primary raise__go', legal.isBet ? 'Бет' : 'Рейз');
-  hotkey(submit, 'R');
   submit.addEventListener('click', () => {
-    cmd({ cmd: 'act', action: legal.isBet ? 'bet' : 'raise', amount: state.raiseValue });
+    if (!live || flat) return;
+    cmd({ cmd: 'act', action: isBet ? 'bet' : 'raise', amount: state.raiseValue });
     state.raiseValue = 0;
   });
 
   const dial = el('div', 'raise__dial');
-  dial.append(minus, el('div', 'raise__value', undefined), plus);
-  dial.children[1].append(amount, hint);
+  const value = el('div', 'raise__value');
+  value.append(amount, hint);
+  dial.append(minus, value, plus);
 
-  wrap.append(presets, dial, slider, submit);
+  size.append(presets, dial, slider);
   paint();
-  return wrap;
+  return { size, submit };
 }
 
 // ——— закупка ———
@@ -1269,8 +1361,26 @@ document.addEventListener('keydown', (e) => {
     paintSoundButtons();
     return;
   }
-  const legal = state.table && state.table.you && state.table.you.legal;
-  if (!legal) return;
+  const t = state.table;
+  const you = t && t.you;
+  const legal = you && you.legal;
+
+  // Вне своего хода те же клавиши выбирают ход заранее.
+  if (!legal) {
+    if (!you || !you.inHand || t.actingSeat < 0 || t.phase === 'showdown') return;
+    const toCall = callAmount(t);
+    let action = null;
+    if (e.key === 'f' || e.key === 'а') action = 'fold';
+    if (e.key === 'c' || e.key === 'с') action = toCall > 0 ? 'call' : 'check';
+    if (!action) return;
+    const same = state.pre && state.pre.action === action;
+    state.pre = same ? null : { action, amount: action === 'call' ? toCall : 0, handId: t.handId };
+    Sound.play('click');
+    state.actionKey = '';
+    renderActions(t);
+    return;
+  }
+
   if (e.key === 'f' || e.key === 'а') cmd({ cmd: 'act', action: 'fold' });
   if (e.key === 'c' || e.key === 'с') cmd({ cmd: 'act', action: legal.check ? 'check' : 'call' });
   if (legal.minRaiseTo !== undefined && state.setRaise && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {

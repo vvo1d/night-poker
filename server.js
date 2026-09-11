@@ -13,6 +13,11 @@ const { Table, setEvalBudget } = require('./src/table');
 const { BOT_NAMES } = require('./src/bot');
 
 const PORT = Number(process.env.PORT) || 3000;
+// За обратным прокси сервер стоит слушать только петлю, чтобы снаружи
+// нельзя было постучаться мимо прокси.
+const HOST = process.env.HOST || '0.0.0.0';
+// По HTTPS cookie должна помечаться Secure, по HTTP — нет, иначе браузер её не сохранит.
+const SECURE_COOKIE = process.env.COOKIE_SECURE === '1';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const ROOM_CONFIGS = [
@@ -358,6 +363,11 @@ async function handleCommand(ctx, body) {
       if (!table) return { error: 'Вы не за столом' };
       return table.act(user.id, String(body.action), body.amount);
     }
+    case 'prefs': {
+      // Выключенный силомер экономит серверу перебор рук соперника.
+      session.meter = body.meter !== false;
+      return { ok: true };
+    }
     case 'reveal': {
       const table = room();
       if (!table) return { error: 'Вы не за столом' };
@@ -473,6 +483,7 @@ const server = http.createServer(async (req, res) => {
         clients: clients.size,
         users: store.users.size,
         sessions: store.sessions.size,
+        pendingWrites: store.stats().pendingWrites,
         tables: tables.size,
         tablesActive: active,
         seated,
@@ -514,7 +525,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 function sessionCookie(token) {
-  return `sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}`;
+  return `sid=${token}; Path=/; HttpOnly; SameSite=Lax${SECURE_COOKIE ? '; Secure' : ''}`
+    + `; Max-Age=${60 * 60 * 24 * 30}`;
 }
 
 // ——— поток событий ———
@@ -587,7 +599,8 @@ function pushTo(client, force = false) {
 
     if (table.frameVersion !== table.version) metrics.serialized += 1;
     // Один и тот же кадр уходит всем зрителям стола, личная часть — только своему месту.
-    if (!emitRaw(client, table.frameFor(table.byUser(user.id)))) return; // повторим в следующий тик
+    const seat = table.byUser(user.id);
+    if (!emitRaw(client, table.frameFor(seat, session.meter !== false))) return; // повторим в следующий тик
     client.lastTable = table.version;
     client.lastRoom = session.roomId;
 
@@ -651,7 +664,6 @@ function maintain(now) {
   if (now - purgedAt > 300_000) {
     purgedAt = now;
     store.purgeSessions(now);
-    store.saveSessions();
     for (const [userId, rec] of presence) {
       if (rec.conns <= 0 && now - rec.lastSeen > 3_600_000) presence.delete(userId);
     }
@@ -704,7 +716,7 @@ async function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-server.listen(PORT, 1024, () => {
-  console.log(`Покер-сервер работает: http://localhost:${PORT}`);
+server.listen(PORT, HOST, 1024, () => {
+  console.log(`Покер-сервер работает: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
   console.log(`Уровней ставок: ${levels.size}, столов открыто: ${tables.size}`);
 });

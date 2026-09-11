@@ -1,20 +1,11 @@
 'use strict';
-const fs = require('node:fs');
-const fsp = require('node:fs/promises');
-const path = require('node:path');
 const crypto = require('node:crypto');
-
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const JOURNAL_FILE = path.join(DATA_DIR, 'users.log');
-const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
+const { openStorage } = require('./db');
 
 const START_CHIPS = 10000;
 const RELOAD_CHIPS = 2000; // бесплатное пополнение для игроков без фишек
 
-const SNAPSHOT_EVERY = 60_000;      // как часто переписываем полный снимок
-const JOURNAL_FLUSH = 400;          // как часто дописываем изменения
-const JOURNAL_LIMIT = 20_000;       // после стольких записей журнал сворачивается в снимок
+const WRITE_EVERY = 400;            // как часто изменения уходят в базу
 const LEADERBOARD_TTL = 5_000;      // таблица лидеров пересчитывается не чаще
 const SESSION_TTL = 30 * 24 * 3600 * 1000;
 
@@ -28,137 +19,100 @@ function scrypt(password, salt) {
   });
 }
 
+// Игроки живут в базе, но горячие чтения идут из памяти: состояние игрока
+// уходит в поток тысячам соединений, ходить за ним в базу на каждый кадр незачем.
+// Изменения копятся и уезжают в базу пачкой в одной транзакции.
 class Store {
-  constructor() {
-    this.users = new Map();      // id -> user
+  constructor(file) {
+    // Движок выбирается сам: база, если она есть в этой версии Node, иначе файлы.
+    this.backend = openStorage(file);
+    this.users = new Map();      // id -> игрок
     this.byName = new Map();     // имя в нижнем регистре -> id
-    this.sessions = new Map();   // токен -> { userId, created, roomId }
-    this.dirty = new Set();      // кого нужно записать в журнал
-    this.versions = new Map();   // id -> версия (для потока), в файл не попадает
-    this.publicJson = new Map(); // id -> готовый JSON публичного вида
-    this.journalCount = 0;
-    this.writing = false;
-    this.snapshotAt = Date.now();
-    this.flushTimer = null;
+    this.sessions = new Map();   // токен -> { userId, created, seen, roomId }
+
+    this.dirtyUsers = new Set();
+    this.dirtySessions = new Set();
+    this.goneSessions = new Set();
+    this.writeTimer = null;
+    this.writing = null;
+
+    this.versions = new Map();   // id -> версия (для потока), в базу не попадает
+    this.publicJson = new Map(); // id -> готовое событие для потока
     this.board = { at: 0, list: [] };
+
     this.load();
   }
 
-  // ——— хранение ———
-  // Снимок + журнал: изменение фишек дописывает одну строку, а не переписывает
-  // файл целиком. На десяти тысячах игроков разница между килобайтом и мегабайтами.
-
   load() {
-    try {
-      const raw = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
-      for (const u of raw.users || []) this.put(u);
-    } catch { /* первый запуск */ }
-
-    try {
-      const journal = fs.readFileSync(JOURNAL_FILE, 'utf8');
-      let applied = 0;
-      for (const line of journal.split('\n')) {
-        if (!line) continue;
-        try { this.put(JSON.parse(line)); applied += 1; } catch { /* обрезанная строка в конце */ }
-      }
-      this.journalCount = applied;
-    } catch { /* журнала нет */ }
-
-    // Сессии переживают перезапуск: иначе после каждого обновления сервера
-    // тысячи игроков вылетают на экран входа.
-    try {
-      const saved = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
-      const now = Date.now();
-      for (const [token, rec] of saved) {
-        if (this.users.has(rec.userId) && now - rec.seen < SESSION_TTL) {
-          this.sessions.set(token, { ...rec, roomId: null });
-        }
-      }
-    } catch { /* сессий нет */ }
-
-    if (this.users.size) {
-      console.log(`Загружено игроков: ${this.users.size}, сессий: ${this.sessions.size}`);
+    const { users, sessions } = this.backend.load(SESSION_TTL);
+    for (const user of users) {
+      this.users.set(user.id, user);
+      this.byName.set(user.name.toLowerCase(), user.id);
     }
-  }
-
-  async saveSessions() {
-    try {
-      await fsp.mkdir(DATA_DIR, { recursive: true });
-      const tmp = `${SESSIONS_FILE}.tmp`;
-      await fsp.writeFile(tmp, JSON.stringify([...this.sessions.entries()]));
-      await fsp.rename(tmp, SESSIONS_FILE);
-    } catch (err) {
-      console.error('Не удалось сохранить сессии:', err.message);
+    for (const [token, rec] of sessions) {
+      if (this.users.has(rec.userId)) this.sessions.set(token, rec);
     }
+    console.log(`Хранилище: ${this.backend.kind} (${this.backend.where})`);
+    if (this.users.size) console.log(`Загружено игроков: ${this.users.size}, сессий: ${this.sessions.size}`);
   }
 
-  put(user) {
-    this.publicJson.delete(user.id);
-    const known = this.users.get(user.id);
-    if (known && known.name !== user.name) this.byName.delete(known.name.toLowerCase());
-    this.users.set(user.id, user);
-    this.byName.set(user.name.toLowerCase(), user.id);
-  }
+  // ——— запись ———
 
   touch(user) {
-    // Версия и готовый JSON живут рядом с игроком, а не внутри него:
-    // в файл должны попадать только настоящие данные.
     this.versions.set(user.id, (this.versions.get(user.id) || 0) + 1);
     this.publicJson.delete(user.id);
-    this.dirty.add(user.id);
-    if (!this.flushTimer) this.flushTimer = setTimeout(() => this.flush(), JOURNAL_FLUSH);
+    this.dirtyUsers.add(user.id);
+    this.schedule();
   }
 
-  async flush() {
-    this.flushTimer = null;
-    if (this.writing || !this.dirty.size) return;
-    this.writing = true;
-    const batch = [...this.dirty];
-    this.dirty.clear();
-    try {
-      await fsp.mkdir(DATA_DIR, { recursive: true });
-      const needSnapshot = this.journalCount + batch.length > JOURNAL_LIMIT
-        || Date.now() - this.snapshotAt > SNAPSHOT_EVERY;
-      if (needSnapshot) {
-        await this.snapshot();
-      } else {
-        const lines = batch
-          .map((id) => this.users.get(id))
-          .filter(Boolean)
-          .map((u) => JSON.stringify(u))
-          .join('\n');
-        if (lines) await fsp.appendFile(JOURNAL_FILE, `${lines}\n`);
-        this.journalCount += batch.length;
-      }
-    } catch (err) {
+  schedule() {
+    if (!this.writeTimer) this.writeTimer = setTimeout(() => this.flush(), WRITE_EVERY);
+  }
+
+  // Всё накопленное уходит в хранилище пачкой: база пишет это одной
+  // транзакцией, файловый движок — одной дозаписью в журнал.
+  flush() {
+    clearTimeout(this.writeTimer);
+    this.writeTimer = null;
+    if (this.writing) { this.schedule(); return this.writing; }
+    if (!this.dirtyUsers.size && !this.dirtySessions.size && !this.goneSessions.size) return null;
+
+    const users = [...this.dirtyUsers].map((id) => this.users.get(id)).filter(Boolean);
+    const sessions = [...this.dirtySessions].map((token) => [token, this.sessions.get(token)]).filter(([, s]) => s);
+    const gone = [...this.goneSessions];
+    this.dirtyUsers.clear();
+    this.dirtySessions.clear();
+    this.goneSessions.clear();
+
+    const done = (err) => {
+      this.writing = null;
+      if (!err) return;
       console.error('Не удалось сохранить игроков:', err.message);
-      for (const id of batch) this.dirty.add(id); // попробуем в следующий раз
-    } finally {
-      this.writing = false;
-      if (this.dirty.size && !this.flushTimer) this.flushTimer = setTimeout(() => this.flush(), JOURNAL_FLUSH);
+      for (const u of users) this.dirtyUsers.add(u.id);
+      for (const [token] of sessions) this.dirtySessions.add(token);
+      for (const token of gone) this.goneSessions.add(token);
+      this.schedule();
+    };
+
+    try {
+      const result = this.backend.save({
+        users, sessions, gone, allSessions: () => [...this.sessions.entries()],
+      });
+      if (result && typeof result.then === 'function') {
+        this.writing = result.then(() => done(null), done);
+        return this.writing;
+      }
+      done(null);
+    } catch (err) {
+      done(err);
     }
+    return null;
   }
 
-  // Полный снимок пишется редко: во временный файл и переименованием.
-  async snapshot() {
-    await fsp.mkdir(DATA_DIR, { recursive: true });
-    const tmp = `${USERS_FILE}.tmp`;
-    await fsp.writeFile(tmp, JSON.stringify({ users: [...this.users.values()] }));
-    await fsp.rename(tmp, USERS_FILE);
-    await fsp.rm(JOURNAL_FILE, { force: true });
-    this.journalCount = 0;
-    this.snapshotAt = Date.now();
-  }
-
-  // Вызывается при остановке сервера, чтобы ничего не потерялось.
-  // Снимок пишется из памяти, поэтому он заведомо новее журнала:
-  // при остановке достаточно свернуть всё в него.
   async close() {
-    clearTimeout(this.flushTimer);
-    this.flushTimer = null;
-    this.dirty.clear();
-    await this.snapshot();
-    await this.saveSessions();
+    await this.flush();
+    if (this.writing) await this.writing;
+    await this.backend.close();
   }
 
   // ——— аккаунты ———
@@ -191,7 +145,8 @@ class Store {
       handsPlayed: 0,
       createdAt: Date.now(),
     };
-    this.put(user);
+    this.users.set(user.id, user);
+    this.byName.set(name.toLowerCase(), user.id);
     this.touch(user);
     return { user };
   }
@@ -212,7 +167,10 @@ class Store {
 
   createSession(userId) {
     const token = crypto.randomBytes(24).toString('hex');
-    this.sessions.set(token, { userId, created: Date.now(), seen: Date.now(), roomId: null });
+    const now = Date.now();
+    this.sessions.set(token, { userId, created: now, seen: now, roomId: null });
+    this.dirtySessions.add(token);
+    this.schedule();
     return token;
   }
 
@@ -220,18 +178,33 @@ class Store {
     if (!token) return null;
     const s = this.sessions.get(token);
     if (!s) return null;
-    s.seen = Date.now();
+    // Отметку «виден» пишем не чаще раза в минуту: она нужна только для уборки.
+    const now = Date.now();
+    if (now - s.seen > 60_000) {
+      s.seen = now;
+      this.dirtySessions.add(token);
+      this.schedule();
+    } else s.seen = now;
     return s;
   }
 
-  destroySession(token) { this.sessions.delete(token); }
+  destroySession(token) {
+    if (!this.sessions.delete(token)) return;
+    this.dirtySessions.delete(token);
+    this.goneSessions.add(token);
+    this.schedule();
+  }
 
-  // Забытые сессии не должны копиться в памяти.
+  // Забытые сессии не должны копиться ни в памяти, ни в базе.
   purgeSessions(now = Date.now()) {
     let gone = 0;
     for (const [token, s] of this.sessions) {
-      if (now - s.seen > SESSION_TTL) { this.sessions.delete(token); gone += 1; }
+      if (now - s.seen <= SESSION_TTL) continue;
+      this.sessions.delete(token);
+      this.goneSessions.add(token);
+      gone += 1;
     }
+    if (gone) this.schedule();
     return gone;
   }
 
@@ -266,8 +239,6 @@ class Store {
     return { id: u.id, name: u.name, chips: u.chips, handsPlayed: u.handsPlayed };
   }
 
-  // Готовый JSON публичного вида кэшируется на самом игроке: в потоке
-  // состояние игрока уходит тысячам соединений, пересобирать его каждый раз незачем.
   // Готовое событие для потока: строка собирается один раз до следующего изменения.
   publicUserFrame(id) {
     let frame = this.publicJson.get(id);
@@ -285,23 +256,25 @@ class Store {
     return this.versions.get(id) || 0;
   }
 
-  // Таблица лидеров считается перебором всех игроков, поэтому кэшируется.
+  // Таблица лидеров: база берёт её запросом по индексу, файловый движок —
+  // перебором в памяти. В обоих случаях результат кэшируется.
   leaderboard(limit = 10) {
     const now = Date.now();
     if (now - this.board.at < LEADERBOARD_TTL) return this.board.list;
-    const top = [];
-    for (const u of this.users.values()) {
-      if (top.length < limit) {
-        top.push(u);
-        if (top.length === limit) top.sort((a, b) => b.chips - a.chips);
-      } else if (u.chips > top[limit - 1].chips) {
-        top[limit - 1] = u;
-        top.sort((a, b) => b.chips - a.chips);
-      }
-    }
-    if (top.length < limit) top.sort((a, b) => b.chips - a.chips);
-    this.board = { at: now, list: top.map((u) => ({ name: u.name, chips: u.chips })) };
+    this.flush();   // в выборку должны попасть свежие фишки
+    this.board = { at: now, list: this.backend.top(limit, this.users) };
     return this.board.list;
+  }
+
+  // ——— наблюдение ———
+
+  stats() {
+    return {
+      storage: this.backend.kind,
+      users: this.users.size,
+      sessions: this.sessions.size,
+      pendingWrites: this.dirtyUsers.size + this.dirtySessions.size + this.goneSessions.size,
+    };
   }
 }
 
