@@ -46,6 +46,11 @@
 <section id="screen-lobby" class="screen" hidden>
   <header class="topbar">
     <div class="brand">Ночная партия</div>
+    <nav class="pages" id="pages" role="tablist" aria-label="Разделы">
+      <button class="pages__tab is-active" data-page="tables" role="tab">Столы</button>
+      <button class="pages__tab" data-page="rating" role="tab">Рейтинг</button>
+      <button class="pages__tab" data-page="profile" role="tab">Кабинет<span class="pages__badge" id="requests-badge" title="Заявки в друзья" hidden>0</span></button>
+    </nav>
     <div class="topbar__right">
       <div class="bank">
         <span class="bank__label">В банке</span>
@@ -57,7 +62,7 @@
     </div>
   </header>
 
-  <main class="lobby">
+  <main class="lobby" id="page-tables">
     <div class="lobby__head">
       <div>
         <h2>Столы</h2>
@@ -77,9 +82,30 @@
     </div>
 
     <aside class="board-top">
-      <h3>Больше всех фишек</h3>
-      <ol id="leaderboard"></ol>
+      <h3>Друзья</h3>
+      <ul class="friends friends--mini friends--requests" id="requests-mini" hidden></ul>
+      <ul class="friends friends--mini" id="friends-mini"></ul>
+      <p class="hint" id="friends-mini-empty" hidden>Добавляйте игроков в друзья из рейтинга или прямо за столом — здесь будет видно, кто онлайн и где играет.</p>
     </aside>
+  </main>
+
+  <!-- Рейтинг -->
+  <main class="page" id="page-rating" hidden>
+    <div class="page__head">
+      <h2>Рейтинг игроков</h2>
+      <p id="rating-note">Пятьдесят лучших. Нажмите на игрока, чтобы открыть его профиль.</p>
+    </div>
+    <div class="filters" role="tablist" id="rating-filter">
+      <button class="filter is-active" data-by="chips" role="tab">По фишкам</button>
+      <button class="filter" data-by="wins" role="tab">По выигранным раздачам</button>
+      <button class="filter" data-by="sng" role="tab">По турнирам</button>
+    </div>
+    <div class="rating" id="rating"></div>
+  </main>
+
+  <!-- Личный кабинет -->
+  <main class="page" id="page-profile" hidden>
+    <div id="profile-own"></div>
   </main>
 </section>
 
@@ -120,7 +146,7 @@
         </div>
       </div>
 
-      <button class="btn btn--ghost btn--sm" id="toggle-log" aria-expanded="false" title="Лента стола"><span class="btn__ico" aria-hidden="true">☰</span><span class="btn__text">Лента</span></button>
+      <button class="btn btn--ghost btn--sm" id="toggle-log" aria-expanded="false" title="Чат стола"><span class="btn__ico" aria-hidden="true">☰</span><span class="btn__text">Чат</span></button>
     </div>
   </header>
 
@@ -150,8 +176,8 @@
 
     <aside class="side" id="side" hidden>
       <div class="side__head">
-        <span>Лента стола</span>
-        <button class="icon-btn icon-btn--sm icon-btn--close" id="close-log" title="Скрыть ленту" aria-label="Скрыть ленту"></button>
+        <span>Чат стола</span>
+        <button class="icon-btn icon-btn--sm icon-btn--close" id="close-log" title="Скрыть чат" aria-label="Скрыть чат"></button>
       </div>
       <div class="log" id="log"></div>
       <button class="log__more" id="log-more" hidden>Новые сообщения ↓</button>
@@ -239,6 +265,12 @@
       <button class="btn btn--primary" value="ok" type="submit">Открыть стол</button>
     </div>
   </form>
+</dialog>
+
+<!-- Профиль другого игрока -->
+<dialog id="profile-dialog" class="dialog dialog--profile">
+  <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="profile-close" title="Закрыть" aria-label="Закрыть"></button>
+  <div id="profile-body"></div>
 </dialog>
 
 <div class="toast" id="toast" hidden></div>

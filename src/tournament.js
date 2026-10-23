@@ -34,7 +34,7 @@ function prizeTable(seats, buyIn = SNG_BUY_IN) {
 
 class Tournament {
   // hooks.pay(player, amount, place) — приз в банк игрока,
-  // hooks.refund(player, amount) — возврат взноса до старта.
+  // hooks.onStart(players) и hooks.onPlace(player, place, prize) — для статистики игроков.
   constructor(seats, hooks = {}, buyIn = SNG_BUY_IN) {
     this.seats = seats;
     this.buyIn = buyIn;
@@ -47,7 +47,8 @@ class Tournament {
     this.finishedAt = 0;
     this.places = [];            // { place, name, prize } — по мере вылета
     this.pay = hooks.pay || (() => {});
-    this.refund = hooks.refund || (() => {});
+    this.onStart = hooks.onStart || (() => {});
+    this.onPlace = hooks.onPlace || (() => {});
   }
 
   get pool() { return this.seats * this.buyIn; }
@@ -64,6 +65,7 @@ class Tournament {
     [table.sb, table.bb] = this.blinds();
     table.minRaise = table.bb;
     table.note(`Турнир начался: ${this.seats} игроков, призовой фонд ${this.pool}`, 'result');
+    this.onStart(table.players());
   }
 
   // Уровень меняется между раздачами: посреди торговли блайнды не трогаем.
@@ -102,6 +104,7 @@ class Tournament {
     this.places.push({ place, name: p.name, prize, isBot: p.isBot });
     this.places.sort((a, b) => a.place - b.place);
     if (prize) this.pay(p, prize, place);
+    this.onPlace(p, place, prize);
     table.note(place === 1
       ? `${p.name} выигрывает турнир и забирает ${prize}`
       : `${p.name} занимает ${place} место${prize ? ` и получает ${prize}` : ''}`, 'result');

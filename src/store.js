@@ -1,6 +1,7 @@
 'use strict';
 const crypto = require('node:crypto');
 const { openStorage } = require('./db');
+const { freshStats, unlockNew, tierTotal, TIER_NAMES } = require('./achievements');
 
 const START_CHIPS = 10000;
 const RELOAD_CHIPS = 2000; // бесплатное пополнение для игроков без фишек
@@ -8,6 +9,17 @@ const RELOAD_CHIPS = 2000; // бесплатное пополнение для �
 const WRITE_EVERY = 400;            // как часто изменения уходят в базу
 const LEADERBOARD_TTL = 5_000;      // таблица лидеров пересчитывается не чаще
 const SESSION_TTL = 30 * 24 * 3600 * 1000;
+const RATING_TTL = 10_000;          // рейтинг пересчитывается не чаще
+const RATING_SIZE = 50;
+const FRIENDS_MAX = 200;
+const REQUESTS_MAX = 100;          // заявок в одну сторону — чтобы ими не засыпали
+
+// По чему строится рейтинг. Ключ уходит клиенту, значение — как достать число.
+const RATINGS = {
+  chips: (u) => u.chips,
+  wins: (u) => u.stats.handsWon,
+  sng: (u) => u.stats.sngWins * 1e9 + u.stats.sngPrizes, // победы, при равенстве — призовые
+};
 
 // Пароли считаются на пуле потоков, а не в основном цикле: иначе на входе
 // сервер замирает и перестаёт обслуживать столы.
@@ -39,6 +51,8 @@ class Store {
     this.versions = new Map();   // id -> версия (для потока), в базу не попадает
     this.publicJson = new Map(); // id -> готовое событие для потока
     this.board = { at: 0, list: [] };
+    this.ratings = new Map();    // вид рейтинга -> { at, order: [id…] }
+    this.news = new Map();       // id -> последняя открытая ачивка, для всплывашки
 
     this.load();
   }
@@ -46,14 +60,72 @@ class Store {
   load() {
     const { users, sessions } = this.backend.load(SESSION_TTL);
     for (const user of users) {
+      this.prepare(user);
       this.users.set(user.id, user);
       this.byName.set(user.name.toLowerCase(), user.id);
+    }
+    this.convertLegacyFriends();
+    for (const user of this.users.values()) {
+      // Ступени, заработанные до появления ачивок (раздачи, банк), открываем сразу.
+      if (unlockNew(user).length) this.dirtyUsers.add(user.id);
     }
     for (const [token, rec] of sessions) {
       if (this.users.has(rec.userId)) this.sessions.set(token, rec);
     }
+    if (this.dirtyUsers.size) this.schedule();
     console.log(`Хранилище: ${this.backend.kind} (${this.backend.where})`);
     if (this.users.size) console.log(`Загружено игроков: ${this.users.size}, сессий: ${this.sessions.size}`);
+  }
+
+  // У игроков, заведённых до кабинета, полей статистики нет — дополняем.
+  prepare(user) {
+    user.stats = freshStats(user.stats);
+    user.achievements = user.achievements || {};
+    // Ачивки без ступеней (старый формат: id -> время) пересчитываются заново.
+    if (Object.values(user.achievements).some((v) => typeof v !== 'object')) {
+      user.achievements = {};
+      this.dirtyUsers.add(user.id);
+    }
+    // Друзья: база отдаёт { list, in, out }, файлы — поля игрока как есть.
+    // Голый список без заявок — это прежние односторонние друзья.
+    const f = user.friends;
+    if (f && !Array.isArray(f)) {
+      user.friends = f.list || [];
+      user.friendsIn = f.in || [];
+      user.friendsOut = f.out || [];
+    } else {
+      user.friends = f || [];
+      if (!user.friendsIn && user.friends.length) user.legacyFriends = true;
+      user.friendsIn = user.friendsIn || [];
+      user.friendsOut = user.friendsOut || [];
+    }
+    user.stats.peakChips = Math.max(user.stats.peakChips, user.chips);
+    return user;
+  }
+
+  // Раньше дружба была односторонней. Взаимные пары остаются друзьями,
+  // односторонние превращаются в заявку, которую второй может принять.
+  convertLegacyFriends() {
+    const was = new Map();
+    for (const u of this.users.values()) if (u.legacyFriends) was.set(u.id, u.friends);
+    for (const [id, list] of was) {
+      const u = this.users.get(id);
+      u.friends = [];
+      for (const other of list) {
+        const o = this.users.get(other);
+        if (!o) continue;
+        const back = was.get(other) || o.friends;
+        if (back.includes(id)) {
+          if (!u.friends.includes(other)) u.friends.push(other);
+        } else {
+          if (!u.friendsOut.includes(other)) u.friendsOut.push(other);
+          if (!o.friendsIn.includes(id)) o.friendsIn.push(id);
+          this.dirtyUsers.add(other);
+        }
+      }
+      delete u.legacyFriends;
+      this.dirtyUsers.add(id);
+    }
   }
 
   // ——— запись ———
@@ -145,6 +217,7 @@ class Store {
       handsPlayed: 0,
       createdAt: Date.now(),
     };
+    this.prepare(user);
     this.users.set(user.id, user);
     this.byName.set(name.toLowerCase(), user.id);
     this.touch(user);
@@ -214,13 +287,183 @@ class Store {
     const u = this.users.get(userId);
     if (!u) return;
     u.chips += amount;
+    if (u.chips > u.stats.peakChips) { u.stats.peakChips = u.chips; this.checkAchievements(u); }
     this.touch(u);
+  }
+
+  // ——— статистика и ачивки ———
+
+  // Итог раздачи для одного игрока: что вложил, что забрал, чем закончил.
+  recordHand(userId, r) {
+    const u = this.users.get(userId);
+    if (!u) return;
+    const s = u.stats;
+    if (r.won > 0) {
+      s.handsWon += 1;
+      s.biggestPot = Math.max(s.biggestPot, r.won);
+      if (r.allIn) s.allInsWon += 1;
+    } else if (r.contributed > 0) {
+      s.handsLost += 1;
+    }
+    if (r.showdown) {
+      s.showdowns += 1;
+      if (r.won > 0) s.showdownsWon += 1;
+    }
+    if (r.result && (!s.bestHand || r.result.value > s.bestHand.value)) {
+      s.bestHand = { value: r.result.value, name: r.result.name, cards: r.result.cards };
+    }
+    if (r.cash) s.cashNet += r.won - r.contributed;
+    this.checkAchievements(u);
+    this.touch(u);
+  }
+
+  // Турнир: старт или занятое место.
+  recordSng(userId, { start = false, place = 0, prize = 0 }) {
+    const u = this.users.get(userId);
+    if (!u) return;
+    const s = u.stats;
+    if (start) s.sngPlayed += 1;
+    if (prize > 0) { s.sngCashes += 1; s.sngPrizes += prize; }
+    if (place === 1) s.sngWins += 1;
+    this.checkAchievements(u);
+    this.touch(u);
+  }
+
+  checkAchievements(u) {
+    const fresh = unlockNew(u);
+    if (fresh.length) {
+      const { a, tier } = fresh[fresh.length - 1];
+      this.news.set(u.id, {
+        id: a.id, icon: a.icon, title: a.title, tier, tierName: TIER_NAMES[tier - 1], at: u.achievements[a.id].at,
+      });
+    }
+  }
+
+  // ——— друзья ———
+
+  // Дружба взаимная: один отправляет заявку, второй принимает. Если заявка
+  // уже пришла навстречу, «добавить в друзья» её и принимает.
+  addFriend(userId, name) {
+    const u = this.users.get(userId);
+    const o = this.byNameLower(name);
+    if (!u) return { error: 'Игрок не найден' };
+    if (!o) return { error: 'Игрока с таким именем нет' };
+    if (o.id === userId) return { error: 'Себя в друзья не добавить' };
+    if (u.friends.includes(o.id)) return { ok: true, status: 'friend' };
+    if (u.friendsIn.includes(o.id)) return this.acceptFriend(userId, o.name);
+    if (u.friendsOut.includes(o.id)) return { ok: true, status: 'out' };
+    if (u.friends.length >= FRIENDS_MAX) return { error: `В друзьях может быть до ${FRIENDS_MAX} игроков` };
+    if (u.friendsOut.length >= REQUESTS_MAX) return { error: 'Слишком много заявок ждут ответа' };
+    if (o.friendsIn.length >= REQUESTS_MAX) return { error: 'У этого игрока слишком много заявок' };
+    u.friendsOut.push(o.id);
+    o.friendsIn.push(u.id);
+    this.touch(u);
+    this.touch(o);
+    return { ok: true, status: 'out' };
+  }
+
+  acceptFriend(userId, name) {
+    const u = this.users.get(userId);
+    const o = this.byNameLower(name);
+    if (!u || !o || !u.friendsIn.includes(o.id)) return { error: 'Заявки от этого игрока нет' };
+    if (u.friends.length >= FRIENDS_MAX || o.friends.length >= FRIENDS_MAX) {
+      return { error: `В друзьях может быть до ${FRIENDS_MAX} игроков` };
+    }
+    this.dropRequest(o, u);
+    if (!u.friends.includes(o.id)) u.friends.push(o.id);
+    if (!o.friends.includes(u.id)) o.friends.push(u.id);
+    for (const x of [u, o]) { this.checkAchievements(x); this.touch(x); }
+    return { ok: true, status: 'friend' };
+  }
+
+  // Отклонить входящую заявку или отозвать свою — в обоих случаях заявка исчезает.
+  declineFriend(userId, name) {
+    const u = this.users.get(userId);
+    const o = this.byNameLower(name);
+    if (!u || !o) return { error: 'Игрок не найден' };
+    this.dropRequest(o, u);
+    this.dropRequest(u, o);
+    this.touch(u);
+    this.touch(o);
+    return { ok: true, status: 'none' };
+  }
+
+  removeFriend(userId, name) {
+    const u = this.users.get(userId);
+    const o = this.byNameLower(name);
+    if (!u || !o) return { error: 'Игрок не найден' };
+    u.friends = u.friends.filter((id) => id !== o.id);
+    o.friends = o.friends.filter((id) => id !== u.id);
+    this.touch(u);
+    this.touch(o);
+    return { ok: true, status: 'none' };
+  }
+
+  // Заявка from → to больше не висит ни у одного из них.
+  dropRequest(from, to) {
+    from.friendsOut = from.friendsOut.filter((id) => id !== to.id);
+    to.friendsIn = to.friendsIn.filter((id) => id !== from.id);
+  }
+
+  // Кем приходятся друг другу двое: друзья, заявка туда или обратно, никто.
+  relation(u, o) {
+    if (u.friends.includes(o.id)) return 'friend';
+    if (u.friendsOut.includes(o.id)) return 'out';
+    if (u.friendsIn.includes(o.id)) return 'in';
+    return 'none';
+  }
+
+  byNameLower(name) {
+    const id = this.byName.get(String(name || '').trim().toLowerCase());
+    return id ? this.users.get(id) : null;
+  }
+
+  // ——— рейтинг ———
+
+  // Полный порядок держим в кэше: из него же берётся место того, кто смотрит.
+  ratingOrder(by) {
+    const now = Date.now();
+    let cached = this.ratings.get(by);
+    if (cached && now - cached.at < RATING_TTL) return cached.order;
+    const score = RATINGS[by];
+    const order = [...this.users.values()]
+      .sort((a, b) => score(b) - score(a) || a.createdAt - b.createdAt)
+      .map((u) => u.id);
+    cached = { at: now, order };
+    this.ratings.set(by, cached);
+    return order;
+  }
+
+  rating(by, viewerId) {
+    if (!RATINGS[by]) by = 'chips';
+    const order = this.ratingOrder(by);
+    const row = (id, i) => {
+      const u = this.users.get(id);
+      if (!u) return null;
+      const s = u.stats;
+      return {
+        place: i + 1,
+        name: u.name,
+        chips: u.chips,
+        hands: u.handsPlayed,
+        handsWon: s.handsWon,
+        winRate: u.handsPlayed ? Math.round((s.handsWon / u.handsPlayed) * 100) : 0,
+        sngWins: s.sngWins,
+        sngPrizes: s.sngPrizes,
+        achievements: tierTotal(u),
+        you: id === viewerId,
+      };
+    };
+    const top = order.slice(0, RATING_SIZE).map(row).filter(Boolean);
+    const at = order.indexOf(viewerId);
+    return { by, top, me: at >= RATING_SIZE ? row(viewerId, at) : null, total: order.length };
   }
 
   countHand(userId) {
     const u = this.users.get(userId);
     if (!u) return;
     u.handsPlayed += 1;
+    this.checkAchievements(u);
     this.touch(u);
   }
 
@@ -236,7 +479,11 @@ class Store {
   publicUser(id) {
     const u = this.users.get(id);
     if (!u) return null;
-    return { id: u.id, name: u.name, chips: u.chips, handsPlayed: u.handsPlayed };
+    return {
+      id: u.id, name: u.name, chips: u.chips, handsPlayed: u.handsPlayed,
+      achievement: this.news.get(id) || null,   // последняя взятая ступень — клиент покажет всплывашку
+      friendRequests: u.friendsIn.length,        // входящие заявки — значок на «Кабинете»
+    };
   }
 
   // Готовое событие для потока: строка собирается один раз до следующего изменения.

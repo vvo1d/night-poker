@@ -41,7 +41,18 @@ const MIGRATIONS = [
     );
     CREATE INDEX sessions_seen ON sessions (seen);
   `),
+  // Кабинет игрока: статистика, ачивки и друзья. Это небольшие JSON-поля:
+  // читаются целиком при старте, а искать по ним базе незачем.
+  (db) => db.exec(`
+    ALTER TABLE users ADD COLUMN stats TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE users ADD COLUMN achievements TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE users ADD COLUMN friends TEXT NOT NULL DEFAULT '[]';
+  `),
 ];
+
+function parseJson(text, fallback) {
+  try { return JSON.parse(text); } catch { return fallback; }
+}
 
 let warningsFiltered = false;
 
@@ -87,11 +98,12 @@ function sqliteBackend(file = DEFAULT_DB) {
 
   const sql = {
     saveUser: db.prepare(`INSERT INTO users
-      (id, name, name_lower, salt, hash, chips, hands_played, created_at)
-      VALUES ($id, $name, $nameLower, $salt, $hash, $chips, $hands, $created)
+      (id, name, name_lower, salt, hash, chips, hands_played, created_at, stats, achievements, friends)
+      VALUES ($id, $name, $nameLower, $salt, $hash, $chips, $hands, $created, $stats, $achievements, $friends)
       ON CONFLICT (id) DO UPDATE SET
         name = excluded.name, name_lower = excluded.name_lower,
-        chips = excluded.chips, hands_played = excluded.hands_played`),
+        chips = excluded.chips, hands_played = excluded.hands_played,
+        stats = excluded.stats, achievements = excluded.achievements, friends = excluded.friends`),
     saveSession: db.prepare(`INSERT INTO sessions (token, user_id, created, seen)
       VALUES ($token, $userId, $created, $seen)
       ON CONFLICT (token) DO UPDATE SET seen = excluded.seen`),
@@ -117,6 +129,9 @@ function sqliteBackend(file = DEFAULT_DB) {
         chips: row.chips,
         handsPlayed: row.hands_played,
         createdAt: row.created_at,
+        stats: parseJson(row.stats, {}),
+        achievements: parseJson(row.achievements, {}),
+        friends: parseJson(row.friends, []),
       }));
       const sessions = sql.liveSessions.all(Date.now() - sessionTtl)
         .map((row) => [row.token, { userId: row.user_id, created: row.created, seen: row.seen, roomId: null }]);
@@ -132,6 +147,10 @@ function sqliteBackend(file = DEFAULT_DB) {
           sql.saveUser.run({
             id: u.id, name: u.name, nameLower: u.name.toLowerCase(), salt: u.salt, hash: u.hash,
             chips: Math.round(u.chips), hands: Math.round(u.handsPlayed), created: u.createdAt,
+            stats: JSON.stringify(u.stats || {}),
+            achievements: JSON.stringify(u.achievements || {}),
+            // Друзья и заявки в обе стороны — одним полем.
+            friends: JSON.stringify({ list: u.friends || [], in: u.friendsIn || [], out: u.friendsOut || [] }),
           });
         }
         for (const [token, s] of sessions) {

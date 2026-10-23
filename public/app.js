@@ -54,14 +54,16 @@ async function cmd(payload, { quiet = false } = {}) {
 }
 
 let toastTimer = null;
-function toast(text) {
+// Ошибки — красным, хорошие новости (ачивка) — золотом.
+function toast(text, { good = false } = {}) {
   const node = $('#toast');
   node.textContent = text;
   node.hidden = false;
+  node.classList.toggle('toast--good', good);
   retrigger(node, 'toast');
-  Sound.play('error', { throttle: 400 });
+  Sound.play(good ? 'win' : 'error', { throttle: 400 });
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { node.hidden = true; }, 3200);
+  toastTimer = setTimeout(() => { node.hidden = true; }, good ? 4500 : 3200);
 }
 
 // ——— экраны ———
@@ -72,6 +74,7 @@ function show(view) {
   $('#screen-lobby').hidden = view !== 'lobby';
   $('#screen-table').hidden = view !== 'table';
   if (view !== 'table') { state.snap = null; state.cardValues.clear(); state.logSeen = new Set(); }
+  if (view === 'lobby') showPage(state.page || 'tables');
 }
 
 function setUser(user) {
@@ -81,6 +84,24 @@ function setUser(user) {
   $('#lobby-chips').textContent = fmt(user.chips);
   $('#table-chips').textContent = fmt(user.chips);
   $('#reload-chips').hidden = user.chips >= 200;
+  // Новая ачивка. Ту, что открылась до входа на страницу, заново не показываем.
+  const ach = user.achievement;
+  if (ach && state.achSeen !== undefined && ach.at > state.achSeen) {
+    toast(`${ach.icon} ${ach.title}: ${ach.tierName}`, { good: true });
+  }
+  if (ach) state.achSeen = Math.max(state.achSeen || 0, ach.at);
+  else if (state.achSeen === undefined) state.achSeen = 0;
+
+  // Заявки в друзья: число на вкладке «Кабинет», о новой — всплывашка.
+  const requests = user.friendRequests || 0;
+  const badge = $('#requests-badge');
+  badge.textContent = String(requests);
+  badge.hidden = !requests;
+  if (state.requests !== undefined && requests > state.requests) {
+    toast('Новая заявка в друзья — она в кабинете', { good: true });
+    if (state.view === 'lobby') showPage(state.page);   // обновим открытый раздел
+  }
+  state.requests = requests;
   if (before !== null && before !== user.chips) {
     retrigger($('#lobby-chips'), 'is-bump');
     retrigger($('#table-chips'), 'is-bump');
@@ -192,6 +213,9 @@ function connectStream() {
     const data = JSON.parse(e.data);
     // Общий кадр приходит без чужих и своих карт — свои подставляем из личной части.
     if (data.you && data.seats[data.you.seat]) data.seats[data.you.seat].cards = data.you.cards;
+    // Отошедший в турнире не ходит вовсе: карты за него сбрасывает стол.
+    // Ходы гасим и здесь, а не только на сервере, — так кнопки не оживают ни на миг.
+    if (data.you && data.you.sittingOut && data.tour && data.tour.status === 'running') data.you.legal = null;
     if (state.view !== 'table') show('table');
     renderTable(data);
   });
@@ -301,15 +325,404 @@ function renderLobby(data) {
     : '';
   if (data.stakes) state.stakes = data.stakes;
   if (data.sngBuyIns) state.sngBuyIns = data.sngBuyIns;
+}
 
-  const board = $('#leaderboard');
-  board.textContent = '';
-  for (const player of data.leaderboard || []) {
-    const li = el('li');
-    li.append(el('span', null, player.name));
-    li.append(el('span', null, fmt(player.chips)));
-    board.append(li);
+// ——— разделы лобби: столы, рейтинг, кабинет ———
+
+function showPage(page) {
+  state.page = page;
+  document.querySelectorAll('#pages .pages__tab').forEach((b) => {
+    b.classList.toggle('is-active', b.dataset.page === page);
+    b.setAttribute('aria-selected', String(b.dataset.page === page));
+  });
+  $('#page-tables').hidden = page !== 'tables';
+  $('#page-rating').hidden = page !== 'rating';
+  $('#page-profile').hidden = page !== 'profile';
+  if (page === 'tables') loadFriends();
+  if (page === 'rating') loadRating();
+  if (page === 'profile') loadOwnProfile();
+}
+document.querySelectorAll('#pages .pages__tab').forEach((btn) => {
+  btn.addEventListener('click', () => { Sound.play('click'); showPage(btn.dataset.page); });
+});
+
+async function getJson(url) {
+  const res = await fetch(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { toast(data.error || 'Не удалось загрузить'); return null; }
+  return data;
+}
+
+// Друзья в лобби: кто онлайн и за каким столом. Сервер не шлёт это потоком,
+// поэтому список обновляется опросом, пока открыт раздел столов.
+async function loadFriends() {
+  const data = await getJson('/api/friends');
+  if (!data) return;
+  renderFriends($('#friends-mini'), data.friends, { mini: true });
+  renderRequests($('#requests-mini'), data.incoming, () => loadFriends());
+}
+
+// Входящие заявки: принять или отклонить прямо из списка.
+function renderRequests(list, incoming, done) {
+  list.textContent = '';
+  list.hidden = !incoming.length;
+  for (const f of incoming) {
+    const li = el('li', 'friend friend--request');
+    const who = el('button', 'friend__who');
+    who.type = 'button';
+    who.append(el('span', 'friend__name', f.name));
+    who.title = 'Открыть профиль';
+    who.addEventListener('click', () => openProfile(f.name));
+    li.append(who, el('span', 'friend__status', 'хочет дружить'));
+    const yes = el('button', 'btn btn--primary btn--sm', 'Принять');
+    yes.addEventListener('click', async () => {
+      const res = await cmd({ cmd: 'acceptFriend', name: f.name });
+      if (res.ok) { Sound.play('chips'); done(); }
+    });
+    const no = el('button', 'btn btn--ghost btn--sm', 'Отклонить');
+    no.addEventListener('click', async () => {
+      const res = await cmd({ cmd: 'declineFriend', name: f.name });
+      if (res.ok) done();
+    });
+    li.append(yes, no);
+    list.append(li);
   }
+}
+setInterval(() => {
+  if (state.view === 'lobby' && state.page === 'tables' && !document.hidden) loadFriends();
+}, 15_000);
+
+function friendStatus(f) {
+  if (f.table) return `${f.online ? '' : 'не в сети · '}за столом «${f.table.name}»`;
+  return f.online ? 'онлайн' : 'не в сети';
+}
+
+function renderFriends(list, friends, { mini = false, onRemove = null, removeTitle = 'Убрать из друзей' } = {}) {
+  list.textContent = '';
+  if (mini) $('#friends-mini-empty').hidden = friends.length > 0;
+  for (const f of friends) {
+    const li = el('li', `friend${f.online ? ' is-online' : ''}`);
+    const who = el('button', 'friend__who');
+    who.type = 'button';
+    who.append(el('span', 'friend__dot'), el('span', 'friend__name', f.name));
+    who.title = 'Открыть профиль';
+    who.addEventListener('click', () => openProfile(f.name));
+    li.append(who);
+    li.append(el('span', 'friend__status', friendStatus(f)));
+    if (f.table) {
+      const go = el('button', 'btn btn--ghost btn--sm', 'К столу');
+      go.addEventListener('click', () => goToTable(f.table.id));
+      li.append(go);
+    }
+    if (onRemove) {
+      const drop = el('button', 'friend__drop');
+      drop.title = removeTitle;
+      drop.setAttribute('aria-label', `${removeTitle}: ${f.name}`);
+      drop.addEventListener('click', () => onRemove(f.name));
+      li.append(drop);
+    }
+    list.append(li);
+  }
+}
+
+function goToTable(id) {
+  if ($('#profile-dialog').open) $('#profile-dialog').close();
+  Sound.play('click');
+  cmd({ cmd: 'enterRoom', roomId: id });
+}
+
+// ——— рейтинг ———
+
+const RATING_COLS = {
+  chips: { label: 'Фишки', value: (r) => fmt(r.chips) },
+  wins: { label: 'Выиграно раздач', value: (r) => `${fmt(r.handsWon)} · ${r.winRate}%` },
+  sng: { label: 'Побед в турнирах', value: (r) => `${fmt(r.sngWins)} · ${fmt(r.sngPrizes)}` },
+};
+
+document.querySelectorAll('#rating-filter .filter').forEach((btn) => {
+  btn.addEventListener('click', () => { Sound.play('click'); loadRating(btn.dataset.by); });
+});
+
+async function loadRating(by = state.ratingBy || 'chips') {
+  state.ratingBy = by;
+  document.querySelectorAll('#rating-filter .filter').forEach((b) => {
+    b.classList.toggle('is-active', b.dataset.by === by);
+    b.setAttribute('aria-selected', String(b.dataset.by === by));
+  });
+  const data = await getJson(`/api/rating?by=${by}`);
+  if (data && state.ratingBy === by) renderRating(data);
+}
+
+function ratingRow(r, col) {
+  const row = el('button', `rating__row${r.you ? ' is-you' : ''}${r.place <= 3 ? ` is-top is-top-${r.place}` : ''}`);
+  row.type = 'button';
+  row.title = 'Открыть профиль';
+  row.append(el('span', 'rating__place', String(r.place)));
+  const who = el('span', 'rating__name', r.name);
+  if (r.you) who.append(el('span', 'rating__you', 'вы'));
+  row.append(who);
+  row.append(el('span', 'rating__hands', `${fmt(r.hands)} ${plural(r.hands, 'раздача', 'раздачи', 'раздач')}`));
+  row.append(el('span', 'rating__ach', `★ ${r.achievements}`));
+  row.append(el('span', 'rating__value', col.value(r)));
+  row.addEventListener('click', () => openProfile(r.name));
+  return row;
+}
+
+function renderRating(data) {
+  const box = $('#rating');
+  const col = RATING_COLS[data.by];
+  box.textContent = '';
+  const head = el('div', 'rating__row rating__row--head');
+  head.append(el('span', 'rating__place', '#'), el('span', 'rating__name', 'Игрок'),
+    el('span', 'rating__hands', 'Раздач'), el('span', 'rating__ach', 'Ачивки'), el('span', 'rating__value', col.label));
+  box.append(head);
+  data.top.forEach((r) => box.append(ratingRow(r, col)));
+  if (data.me) {
+    box.append(el('div', 'rating__gap', '…'));
+    box.append(ratingRow(data.me, col));
+  }
+  $('#rating-note').textContent = `Пятьдесят лучших из ${fmt(data.total)}. Нажмите на игрока, чтобы открыть его профиль.`;
+}
+
+// ——— профиль и кабинет ———
+
+async function loadOwnProfile() {
+  const data = await getJson('/api/profile');
+  if (data && state.page === 'profile') renderProfile($('#profile-own'), data);
+}
+
+async function openProfile(name) {
+  if (!name) return;
+  if (state.user && name === state.user.name && state.view === 'lobby') { showPage('profile'); return; }
+  const data = await getJson(`/api/profile?name=${encodeURIComponent(name)}`);
+  if (!data) return;
+  renderProfile($('#profile-body'), data);
+  const dialog = $('#profile-dialog');
+  if (!dialog.open) dialog.showModal();
+  Sound.play('click');
+}
+$('#profile-close').addEventListener('click', () => $('#profile-dialog').close());
+// Клик по затемнению вокруг окна закрывает его.
+$('#profile-dialog').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+
+// Профиль перерисовывается целиком: после дружбы или удаления — свежими данными.
+async function refreshProfile(data, box) {
+  const fresh = await getJson(data.own ? '/api/profile' : `/api/profile?name=${encodeURIComponent(data.name)}`);
+  if (fresh) renderProfile(box, fresh);
+}
+
+const DATE_FMT = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+
+function statCard(value, label, note = '') {
+  const card = el('div', 'stat');
+  card.append(el('b', 'stat__value', value), el('span', 'stat__label', label));
+  if (note) card.append(el('span', 'stat__note', note));
+  return card;
+}
+
+function profileSection(title, extra) {
+  const sec = el('section', 'profile__section');
+  const h = el('h3', null, title);
+  if (extra) h.append(el('span', 'profile__count', extra));
+  sec.append(h);
+  return sec;
+}
+
+// Кнопки дружбы в чужом профиле — по тому, кем вы друг другу приходитесь.
+function friendButtons(data, box) {
+  const act = (label, cls, command, after) => {
+    const b = el('button', `btn btn--sm ${cls}`, label);
+    b.addEventListener('click', async () => {
+      if (command === 'removeFriend' && !confirm(`Убрать ${data.name} из друзей?`)) return;
+      const res = await cmd({ cmd: command, name: data.name });
+      if (!res.ok) return;
+      if (after) toast(after, { good: true });
+      Sound.play('chips');
+      refreshProfile(data, box);
+      if (state.view === 'lobby' && state.page === 'tables') loadFriends();
+    });
+    return b;
+  };
+  switch (data.relation) {
+    case 'friend': {
+      const mark = el('span', 'profile__badge', 'В друзьях ✓');
+      return [mark, act('Убрать из друзей', 'btn--ghost', 'removeFriend')];
+    }
+    case 'out':
+      return [el('span', 'profile__badge profile__badge--wait', 'Заявка отправлена'),
+        act('Отозвать', 'btn--ghost', 'declineFriend')];
+    case 'in':
+      return [act('Принять заявку', 'btn--primary', 'acceptFriend', `${data.name} теперь в друзьях`),
+        act('Отклонить', 'btn--ghost', 'declineFriend')];
+    default:
+      return [act('Добавить в друзья', 'btn--primary', 'addFriend', 'Заявка отправлена — ждём ответа')];
+  }
+}
+
+// Ачивка: медаль цвета ступени, точки взятых ступеней и полоска до следующей.
+function achievementItem(a) {
+  const li = el('li', `ach__item${a.tier ? ` is-open tier-${a.tier}` : ''}`);
+  li.append(el('span', 'ach__icon', a.icon));
+  const text = el('div', 'ach__text');
+  const title = el('b', null, a.title);
+  if (a.tierName) title.append(el('span', 'ach__tier', a.tierName));
+  text.append(title);
+
+  const steps = el('span', 'ach__steps');
+  for (let i = 1; i <= a.tiers; i++) steps.append(el('i', i <= a.tier ? `tier-${i}` : ''));
+  text.append(steps);
+
+  if (a.goal) {
+    text.append(el('span', 'ach__goal', `Дальше: ${a.goal}`));
+    if (a.next !== null) {
+      const bar = el('span', 'ach__bar');
+      const fill = el('i');
+      fill.style.width = `${Math.round(a.share * 100)}%`;
+      bar.append(fill);
+      text.append(bar, el('small', null, `${fmt(Math.min(a.value, a.next))} / ${fmt(a.next)}`));
+    }
+  } else {
+    text.append(el('span', 'ach__goal', `Все ступени взяты: ${a.done.toLowerCase()}`));
+  }
+  li.append(text);
+  li.title = a.tier
+    ? `${a.title}, ${a.tierName}: ${a.done.toLowerCase()} · ${DATE_FMT.format(new Date(a.at))}`
+    : `${a.title}: ${a.goal.toLowerCase()}`;
+  return li;
+}
+
+function renderProfile(box, data) {
+  box.textContent = '';
+  const s = data.stats;
+  const root = el('div', 'profile');
+
+  // Шапка: имя, с каких пор в игре, где сейчас.
+  const head = el('header', 'profile__head');
+  head.append(el('div', 'avatar', data.name.slice(0, 1).toUpperCase()));
+  const title = el('div', 'profile__title');
+  title.append(el('h2', null, data.name));
+  const where = data.table ? ` · за столом «${data.table.name}»` : '';
+  const sub = el('p', `profile__sub${data.online ? ' is-online' : ''}`,
+    `${data.online ? 'онлайн' : 'не в сети'}${where} · в игре с ${DATE_FMT.format(new Date(data.createdAt))}`);
+  title.append(sub);
+  head.append(title);
+
+  const actions = el('div', 'profile__actions');
+  if (!data.own) actions.append(...friendButtons(data, box));
+  if (data.table && !(state.table && state.table.id === data.table.id && state.view === 'table')) {
+    const go = el('button', 'btn btn--ghost btn--sm', 'К столу');
+    go.addEventListener('click', () => goToTable(data.table.id));
+    actions.append(go);
+  }
+  head.append(actions);
+  root.append(head);
+
+  // Статистика игр.
+  const games = profileSection('Статистика');
+  const grid = el('div', 'stats');
+  const rate = s.handsPlayed ? Math.round((s.handsWon / s.handsPlayed) * 100) : 0;
+  grid.append(
+    statCard(fmt(data.chips), 'фишек в банке', `максимум ${fmt(s.peakChips)}`),
+    statCard(fmt(s.handsPlayed), 'раздач сыграно'),
+    statCard(fmt(s.handsWon), 'раздач выиграно', `${rate}% от сыгранных`),
+    statCard(fmt(s.handsLost), 'раздач проиграно', 'вложил фишки и не забрал банк'),
+    statCard(`${fmt(s.showdownsWon)} из ${fmt(s.showdowns)}`, 'вскрытий выиграно'),
+    statCard(fmt(s.biggestPot), 'крупнейший банк'),
+    statCard(fmt(s.allInsWon), 'олл-инов выиграно'),
+    statCard(`${s.cashNet > 0 ? '+' : ''}${fmt(s.cashNet)}`, 'итог кэш-игры', 'выиграно минус вложено'),
+  );
+  const best = statCard(s.bestHand ? s.bestHand.name : '—', 'лучшая комбинация');
+  best.classList.add('stat--wide');
+  if (s.bestHand && s.bestHand.cards) {
+    const cards = el('span', 'stat__cards');
+    s.bestHand.cards.forEach((c) => cards.append(miniCard(c)));
+    best.append(cards);
+  }
+  grid.append(best);
+  games.append(grid);
+  root.append(games);
+
+  const sng = profileSection('Сит-н-гоу');
+  const sngGrid = el('div', 'stats');
+  sngGrid.append(
+    statCard(fmt(s.sngPlayed), 'турниров сыграно'),
+    statCard(fmt(s.sngCashes), 'в призах'),
+    statCard(fmt(s.sngWins), 'побед'),
+    statCard(fmt(s.sngPrizes), 'получено призами'),
+  );
+  sng.append(sngGrid);
+  root.append(sng);
+
+  // Ачивки: ступень, прогресс к следующей и что для неё нужно.
+  const achSec = profileSection('Ачивки', `${data.tiers.got} из ${data.tiers.of} ступеней`);
+  const achList = el('ul', 'ach');
+  for (const a of data.achievements) achList.append(achievementItem(a));
+  achSec.append(achList);
+  root.append(achSec);
+
+  // Свои друзья и заявки — только в своём кабинете.
+  if (data.own) {
+    const { friends, incoming, outgoing } = data.friends;
+    const again = () => refreshProfile(data, box);
+    const fr = profileSection('Друзья', friends.length ? String(friends.length) : '');
+
+    const form = el('form', 'friend-add');
+    const input = document.createElement('input');
+    input.placeholder = 'Имя игрока';
+    input.maxLength = 16;
+    input.autocomplete = 'off';
+    const add = el('button', 'btn btn--sm', 'Отправить заявку');
+    add.type = 'submit';
+    form.append(input, add);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name) return;
+      const res = await cmd({ cmd: 'addFriend', name });
+      if (res.ok) {
+        toast(res.status === 'friend' ? `${name} теперь в друзьях` : `Заявка отправлена — ждём ответа ${name}`, { good: true });
+        again();
+      }
+    });
+    fr.append(form);
+
+    if (incoming.length) {
+      fr.append(el('h4', 'profile__sub-head', `Хотят дружить · ${incoming.length}`));
+      const list = el('ul', 'friends');
+      renderRequests(list, incoming, again);
+      fr.append(list);
+    }
+
+    if (friends.length) {
+      const list = el('ul', 'friends');
+      renderFriends(list, friends, {
+        onRemove: async (name) => {
+          if (!confirm(`Убрать ${name} из друзей? Вы пропадёте и из его списка.`)) return;
+          const res = await cmd({ cmd: 'removeFriend', name });
+          if (res.ok) again();
+        },
+      });
+      fr.append(list);
+    } else {
+      fr.append(el('p', 'hint', 'Пока никого. Отправьте заявку по имени или из профиля игрока — он должен её принять.'));
+    }
+
+    if (outgoing.length) {
+      fr.append(el('h4', 'profile__sub-head', `Ждут ответа · ${outgoing.length}`));
+      const list = el('ul', 'friends');
+      renderFriends(list, outgoing, {
+        removeTitle: 'Отозвать заявку',
+        onRemove: async (name) => {
+          const res = await cmd({ cmd: 'declineFriend', name });
+          if (res.ok) again();
+        },
+      });
+      fr.append(list);
+    }
+    root.append(fr);
+  }
+
+  box.append(root);
 }
 
 // ——— новый стол ———
@@ -625,7 +1038,12 @@ function renderTable(t) {
     node.append(cards);
 
     const plate = el('div', 'seat__plate');
-    plate.append(el('span', 'seat__name', seat.name + (seat.isBot ? ' •' : '')));
+    const name = el('span', `seat__name${seat.isBot ? '' : ' is-link'}`, seat.name + (seat.isBot ? ' •' : ''));
+    if (!seat.isBot) {
+      name.title = 'Открыть профиль';
+      name.addEventListener('click', () => openProfile(seat.name));
+    }
+    plate.append(name);
     plate.append(el('span', 'seat__stack', fmt(seat.stack)));
     if (seat.mucked) node.classList.add('seat--mucked');
     if (seat.revealing) node.classList.add('seat--revealing');
@@ -937,7 +1355,10 @@ function logLine(line) {
   if (kind === 'chat') {
     const split = line.text.indexOf(': ');
     if (split > 0) {
-      node.append(el('b', 'log__who', line.text.slice(0, split)));
+      const who = el('b', 'log__who is-link', line.text.slice(0, split));
+      who.title = 'Открыть профиль';
+      who.addEventListener('click', () => openProfile(who.textContent));
+      node.append(who);
       node.append(document.createTextNode(line.text.slice(split + 1)));
     } else node.textContent = line.text;
     return node;
@@ -1120,7 +1541,7 @@ function tickTimer() {
   }
 
   const t = state.table;
-  const yourTurn = reveal || !!(t && t.you && t.actingSeat === t.you.seat);
+  const yourTurn = reveal || !!(t && t.you && t.you.legal);
   const bar = $('#turnbar').firstElementChild;
   bar.style.width = yourTurn ? `${share * 100}%` : '0%';
   bar.classList.toggle('is-low', yourTurn && share < 0.25);
@@ -1332,10 +1753,19 @@ function renderActions(t) {
 
   if (!canPre) {
     if (state.pre) state.pre = null;
+    // В турнире отошедший сидит в раздачах, но ходов не делает: кнопки заблокированы,
+    // а вернуться можно прямо отсюда.
+    if (you.sittingOut && t.tour && t.tour.status === 'running') {
+      status.textContent = 'Вы пропускаете раздачи: блайнды списываются, карты сбрасываются';
+      const back = el('button', 'btn btn--sm actions__back', 'Вернуться в игру');
+      back.addEventListener('click', () => cmd({ cmd: 'sitOut', value: false }));
+      status.append(back);
+      main.append(deadButton('Фолд'), deadButton('Чек'), deadButton('Рейз'));
+      return;
+    }
     status.textContent = folded ? `${acting} · вы сбросили карты`
       : allIn ? `${acting} · вы в олл-ине`
-        : you.sittingOut && t.tour ? `${acting} · вы пропускаете раздачи, блайнды списываются`
-          : acting;
+        : acting;
     main.append(deadButton('Фолд'), deadButton('Чек'), deadButton('Рейз'));
     return;
   }

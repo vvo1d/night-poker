@@ -77,6 +77,7 @@ class Table {
     this.lastAggressorSeat = -1;
     this.onChipsReturn = hooks.onChipsReturn || (() => {});
     this.onHandStart = hooks.onHandStart || (() => {});
+    this.onHandEnd = hooks.onHandEnd || (() => {});
     this.onSeat = hooks.onSeat || (() => {});
     this.onUnseat = hooks.onUnseat || (() => {});
     this.version = 0;
@@ -302,11 +303,17 @@ class Table {
     p.lastAction = label;
   }
 
+  // Пропускающий раздачи в турнире всё равно в них участвует: платит блайнды,
+  // а карты за него сбрасывает стол.
+  awayInTour(p) {
+    return !!(this.tour && p.sittingOut && !p.isBot);
+  }
+
   setActor(seat) {
     this.actingSeat = seat;
     if (seat >= 0) {
       const p = this.seats[seat];
-      const away = this.tour && p.sittingOut && !p.isBot;
+      const away = this.awayInTour(p);
       this.deadline = Date.now() + (p.isBot ? botThinkingTime() : away ? SNG_AWAY_MS : this.timeout * 1000);
     } else {
       this.deadline = 0;
@@ -335,6 +342,7 @@ class Table {
     const p = this.byUser(userId);
     if (!p) return { error: 'Вас нет за столом' };
     if (this.actingSeat !== p.seat) return { error: 'Сейчас не ваш ход' };
+    if (this.awayInTour(p)) return { error: 'Вы пропускаете раздачи — сначала вернитесь в игру' };
     const legal = this.legalActions(p);
     if (action === 'check' && !legal.check) return { error: 'Нельзя чекнуть, есть ставка' };
     if (action === 'call' && legal.toCall === 0) action = 'check';
@@ -698,6 +706,7 @@ class Table {
   finishHand() {
     // Страховка: если раздачу закрывают в обход очереди вскрытия, банки всё равно раздаются.
     if (this.pendingWinners.length) { this.reveal = null; this.awardPots(); }
+    this.reportHand();
     const busted = [];
     for (const p of this.players()) {
       p.inHand = false;
@@ -721,6 +730,26 @@ class Table {
     this.phase = 'idle';
     this.touch();
     this.maybeStartHand();
+  }
+
+  // Итог раздачи по каждому участнику — для статистики игрока. Комбинацию
+  // засчитываем только тому, кто дошёл до вскрытия против соперника.
+  reportHand() {
+    const contested = this.results.size > 1;
+    const out = [];
+    for (const p of this.players()) {
+      if (!p.inHand) continue;
+      const showdown = contested && this.results.has(p);
+      out.push({
+        player: p,
+        won: p.won,
+        contributed: p.contributed,
+        allIn: p.allIn,
+        showdown,
+        result: showdown ? this.results.get(p) : null,
+      });
+    }
+    if (out.length) this.onHandEnd(out, this);
   }
 
   potTotal() {
@@ -750,7 +779,7 @@ class Table {
         const legal = this.legalActions(p);
         this.note(`${p.name}: время вышло`, 'action');
         this.applyAction(p, legal.check ? 'check' : 'fold');
-        if (!p.isBot) p.sittingOut = true; // отсутствующего игрока снимаем с раздач
+        if (!p.isBot) { p.sittingOut = true; this.touch(); } // отсутствующего игрока снимаем с раздач
       }
     }
   }
@@ -849,7 +878,8 @@ class Table {
       busted: !!p.busted,
       hand: this.handInfoFor(p, withStrength),
       canReveal: !!(this.reveal && this.reveal.optional && this.reveal.seat === p.seat),
-      legal: this.actingSeat === p.seat ? this.legalActions(p) : null,
+      // Отошедшему в турнире ходить нечем: стол сам сбросит его карты.
+      legal: this.actingSeat === p.seat && !this.awayInTour(p) ? this.legalActions(p) : null,
     };
   }
 

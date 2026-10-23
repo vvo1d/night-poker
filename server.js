@@ -12,6 +12,7 @@ const { Store } = require('./src/store');
 const { Table, setEvalBudget } = require('./src/table');
 const { BOT_NAMES } = require('./src/bot');
 const { Tournament, SNG_STACK, SNG_TIMEOUT, SNG_BUY_INS } = require('./src/tournament');
+const { ACHIEVEMENTS, achievementView, tierTotal } = require('./src/achievements');
 
 const PORT = Number(process.env.PORT) || 3000;
 // За обратным прокси сервер стоит слушать только петлю, чтобы снаружи
@@ -56,6 +57,8 @@ function createTable(cfg, { owner = null, sng = 0, buyIn } = {}) {
   const n = ++tableSeq;
   const tour = sng ? new Tournament(sng, {
     pay: (player, amount) => { if (!player.isBot) store.addChips(player.userId, amount); },
+    onStart: (players) => { for (const p of players) if (!p.isBot) store.recordSng(p.userId, { start: true }); },
+    onPlace: (player, place, prize) => { if (!player.isBot) store.recordSng(player.userId, { place, prize }); },
   }, buyIn) : null;
   const table = new Table({ ...cfg, id: cfg.id || `t${n}`, tour }, {
     onChipsReturn: (player, chips) => {
@@ -66,6 +69,11 @@ function createTable(cfg, { owner = null, sng = 0, buyIn } = {}) {
     },
     onHandStart: (players) => {
       for (const p of players) if (!p.isBot) store.countHand(p.userId);
+    },
+    onHandEnd: (results) => {
+      for (const r of results) {
+        if (!r.player.isBot) store.recordHand(r.player.userId, { ...r, cash: !tour });
+      }
     },
     onSeat: (player, t) => { if (!player.isBot) playerTable.set(player.userId, t); },
     onUnseat: (player) => { if (!player.isBot) playerTable.delete(player.userId); },
@@ -369,7 +377,6 @@ function lobbySnapshot(now = Date.now()) {
     totals: lobbyTotals(),
     stakes: STAKES,
     sngBuyIns: SNG_BUY_INS,
-    leaderboard: store.leaderboard(),
   });
   if (next !== lobbyJson) {
     lobbyJson = next;
@@ -377,6 +384,73 @@ function lobbySnapshot(now = Date.now()) {
     lobbyVersion += 1;
   }
   return lobbyJson;
+}
+
+// ——— кабинет, друзья, рейтинг ———
+
+function isOnline(userId) {
+  const rec = presence.get(userId);
+  return !!(rec && rec.conns > 0);
+}
+
+// Где сейчас игрок: за каким столом сидит. Нужно, чтобы друг мог подсесть.
+function whereIs(userId) {
+  const table = tableOfUser(userId);
+  return table ? { id: table.id, name: table.name, kind: table.tour ? 'sng' : 'cash' } : null;
+}
+
+function friendView(id) {
+  const u = store.user(id);
+  if (!u) return null;
+  return { name: u.name, chips: u.chips, online: isOnline(id), table: whereIs(id) };
+}
+
+// Друзья онлайн — наверх, дальше по имени.
+function sortedViews(ids) {
+  return ids.map(friendView).filter(Boolean)
+    .sort((a, b) => (b.online - a.online) || a.name.localeCompare(b.name, 'ru'));
+}
+
+// Друзья и заявки: входящие ждут ответа, исходящие — ответа от другого.
+function friendsOf(user) {
+  return {
+    friends: sortedViews(user.friends),
+    incoming: sortedViews(user.friendsIn),
+    outgoing: sortedViews(user.friendsOut),
+  };
+}
+
+function profileOf(target, viewer) {
+  const own = target.id === viewer.id;
+  const s = target.stats;
+  return {
+    name: target.name,
+    own,
+    createdAt: target.createdAt,
+    chips: target.chips,
+    online: isOnline(target.id),
+    table: whereIs(target.id),
+    relation: own ? null : store.relation(viewer, target),
+    stats: {
+      handsPlayed: target.handsPlayed,
+      handsWon: s.handsWon,
+      handsLost: s.handsLost,
+      showdowns: s.showdowns,
+      showdownsWon: s.showdownsWon,
+      allInsWon: s.allInsWon,
+      biggestPot: s.biggestPot,
+      cashNet: s.cashNet,
+      bestHand: s.bestHand ? { name: s.bestHand.name, cards: s.bestHand.cards } : null,
+      sngPlayed: s.sngPlayed,
+      sngCashes: s.sngCashes,
+      sngWins: s.sngWins,
+      sngPrizes: s.sngPrizes,
+      peakChips: s.peakChips,
+    },
+    achievements: ACHIEVEMENTS.map((a) => achievementView(a, target)),
+    tiers: { got: tierTotal(target), of: ACHIEVEMENTS.reduce((sum, a) => sum + a.tiers.length, 0) },
+    friends: own ? friendsOf(target) : null,
+  };
 }
 
 // ——— команды за столом ———
@@ -498,6 +572,14 @@ async function handleCommand(ctx, body) {
     }
     case 'reload':
       return store.reload(user.id);
+    case 'addFriend':
+      return store.addFriend(user.id, body.name);
+    case 'acceptFriend':
+      return store.acceptFriend(user.id, body.name);
+    case 'declineFriend':
+      return store.declineFriend(user.id, body.name);
+    case 'removeFriend':
+      return store.removeFriend(user.id, body.name);
     default:
       return { error: 'Неизвестная команда' };
   }
@@ -575,6 +657,27 @@ const server = http.createServer(async (req, res) => {
         rssMb: Math.round(mem.rss / 1048576),
         heapMb: Math.round(mem.heapUsed / 1048576),
       });
+    }
+
+    if (route === '/api/profile' && req.method === 'GET') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      const name = url.searchParams.get('name');
+      const target = name ? store.byNameLower(name) : ctx.user;
+      if (!target) return send(res, 404, { error: 'Игрок не найден' });
+      return send(res, 200, profileOf(target, ctx.user));
+    }
+
+    if (route === '/api/friends' && req.method === 'GET') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      return send(res, 200, friendsOf(ctx.user));
+    }
+
+    if (route === '/api/rating' && req.method === 'GET') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      return send(res, 200, store.rating(url.searchParams.get('by') || 'chips', ctx.user.id));
     }
 
     if (route === '/api/rooms' && req.method === 'GET') {
