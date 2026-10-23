@@ -1,6 +1,7 @@
 'use strict';
 const { freshDeck, shuffle, evaluate, handInfo } = require('./cards');
 const { decideBotAction, botThinkingTime } = require('./bot');
+const { SNG_AWAY_MS } = require('./tournament');
 
 const PHASES = ['preflop', 'flop', 'turn', 'river'];
 
@@ -46,7 +47,8 @@ class Player {
 
 class Table {
   constructor(config, hooks = {}) {
-    Object.assign(this, config); // id, name, maxSeats, sb, bb, minBuyIn, maxBuyIn, timeout
+    Object.assign(this, config); // id, name, maxSeats, sb, bb, minBuyIn, maxBuyIn, timeout, tour
+    this.tour = this.tour || null; // турнир, если стол — сит-н-гоу
     this.seats = new Array(this.maxSeats).fill(null);
     this.phase = 'idle';
     this.board = [];
@@ -156,6 +158,11 @@ class Table {
   leave(userId) {
     const p = this.byUser(userId);
     if (!p) return { error: 'Вас нет за столом' };
+    // Из идущего турнира не уходят: место остаётся, блайнды списываются, карты сбрасываются.
+    if (this.tour && this.tour.status === 'running') {
+      if (!p.sittingOut) this.setSittingOut(userId, true);
+      return { error: 'Турнир идёт — место сохранится, а раздачи будут пропускаться' };
+    }
     if (p.inHand && !p.folded && this.phase === 'showdown') {
       p.leaving = true;
       this.note(`${p.name} выходит из-за стола`, 'seat');
@@ -197,12 +204,19 @@ class Table {
 
   // ——— начало раздачи ———
 
+  // В турнире раздают всем, у кого есть фишки: отошедший платит блайнды и сбрасывает карты.
   eligible() {
+    if (this.tour) return this.players().filter((p) => p.stack > 0 && !p.leaving);
     return this.players().filter((p) => p.stack > 0 && !p.sittingOut && !p.leaving);
   }
 
   maybeStartHand() {
     if (this.phase !== 'idle' || this.nextStepAt) return;
+    if (this.tour) {
+      // Турнир стартует, как только заняты все места.
+      if (this.tour.status === 'registering' && this.occupied() === this.maxSeats) this.tour.start(this);
+      if (this.tour.status !== 'running') return;
+    }
     if (this.eligible().length >= 2) this.nextStepAt = Date.now() + 2000;
   }
 
@@ -210,6 +224,7 @@ class Table {
     const ready = this.eligible();
     if (ready.length < 2) { this.phase = 'idle'; this.touch(); return; }
 
+    if (this.tour) this.tour.beforeHand(this);
     this.handId = ++handCounter;
     this.handCache.clear();
     this.evalCache = {};
@@ -242,6 +257,7 @@ class Table {
       p.wonContested = false;
       p.mucked = false;
       p.inHand = ready.includes(p);
+      p.handStartStack = p.stack;
     }
 
     // Кнопка дилера сдвигается к следующему участнику раздачи.
@@ -290,7 +306,8 @@ class Table {
     this.actingSeat = seat;
     if (seat >= 0) {
       const p = this.seats[seat];
-      this.deadline = Date.now() + (p.isBot ? botThinkingTime() : this.timeout * 1000);
+      const away = this.tour && p.sittingOut && !p.isBot;
+      this.deadline = Date.now() + (p.isBot ? botThinkingTime() : away ? SNG_AWAY_MS : this.timeout * 1000);
     } else {
       this.deadline = 0;
     }
@@ -681,6 +698,7 @@ class Table {
   finishHand() {
     // Страховка: если раздачу закрывают в обход очереди вскрытия, банки всё равно раздаются.
     if (this.pendingWinners.length) { this.reveal = null; this.awardPots(); }
+    const busted = [];
     for (const p of this.players()) {
       p.inHand = false;
       p.cards = [];
@@ -688,9 +706,11 @@ class Table {
       p.mucked = false;
       p.bestCards = null;
       p.lastAction = null;
+      if (this.tour && p.stack === 0) { busted.push(p); continue; }
       if (p.leaving) { this.removePlayer(p); continue; }
       if (p.stack === 0) { p.sittingOut = true; p.busted = true; }
     }
+    if (this.tour) this.tour.bust(this, busted);
     this.board = [];
     this.pots = [];
     this.potParts = [];
@@ -767,8 +787,10 @@ class Table {
     const now = Date.now();
     return {
       id: this.id,
-      levelId: this.levelId || this.id,
+      kind: this.tour ? 'sng' : 'cash',
       name: this.name,
+      owner: this.ownerName || null,
+      tour: this.tour ? this.tour.publicState(now) : null,
       maxSeats: this.maxSeats,
       sb: this.sb,
       bb: this.bb,

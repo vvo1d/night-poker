@@ -19,7 +19,7 @@
       <span>♠</span><span>♥</span><span>♦</span><span>♣</span>
     </div>
     <h1 class="auth__title">Poker</h1>
-    <p class="auth__lede">Техасский холдем без лимита. Шесть столов, до девяти игроков, фишки только виртуальные.</p>
+    <p class="auth__lede">Техасский холдем без лимита. Свои столы с любыми блайндами и турниры сит-н-гоу, фишки только виртуальные.</p>
 
     <div class="tabs" role="tablist">
       <button class="tab is-active" data-mode="login" role="tab">Вход</button>
@@ -59,10 +59,22 @@
 
   <main class="lobby">
     <div class="lobby__head">
-      <h2>Столы</h2>
-      <p>Выберите стол по ставкам. Место занимается закупкой из вашего банка.</p>
+      <div>
+        <h2>Столы</h2>
+        <p>Садитесь за готовый стол или откройте свой — с нужными блайндами. В сит-н-гоу играют на вылет за призовой фонд.</p>
+      </div>
+      <button class="btn btn--primary" id="create-open">Создать стол</button>
     </div>
-    <ul class="rooms" id="rooms"></ul>
+    <div class="lobby__list">
+      <div class="filters" role="tablist" id="lobby-filter">
+        <button class="filter is-active" data-filter="all" role="tab">Все</button>
+        <button class="filter" data-filter="cash" role="tab">Кэш</button>
+        <button class="filter" data-filter="sng" role="tab">Сит-н-гоу</button>
+        <span class="filters__totals" id="lobby-totals"></span>
+      </div>
+      <ul class="rooms" id="rooms"></ul>
+      <p class="rooms__empty" id="rooms-empty" hidden>Здесь пока пусто — откройте свой стол.</p>
+    </div>
 
     <aside class="board-top">
       <h3>Больше всех фишек</h3>
@@ -78,6 +90,7 @@
     <div class="table-title">
       <strong id="table-name">Стол</strong>
       <span id="table-stakes"></span>
+      <span id="tour-clock" class="tour-clock" hidden></span>
     </div>
     <div class="topbar__right">
       <div class="bank"><span class="bank__label">В банке</span><strong id="table-chips">0</strong></div>
@@ -158,13 +171,72 @@
 <!-- Диалог закупки -->
 <dialog id="buyin-dialog" class="dialog">
   <form method="dialog" id="buyin-form">
-    <h3>Сесть за стол</h3>
+    <h3 id="buyin-title">Сесть за стол</h3>
     <p class="dialog__note" id="buyin-note"></p>
     <output id="buyin-value" class="dialog__value">0</output>
     <input type="range" id="buyin-range" step="1">
     <div class="dialog__row">
       <button class="btn btn--ghost" value="cancel" type="submit">Отмена</button>
       <button class="btn btn--primary" value="ok" type="submit" id="buyin-ok">Сесть</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Диалог нового стола -->
+<dialog id="create-dialog" class="dialog dialog--wide">
+  <form method="dialog" id="create-form">
+    <h3>Новый стол</h3>
+    <div class="seg" role="radiogroup" aria-label="Тип стола">
+      <label><input type="radio" name="kind" value="cash" checked><span>Кэш-игра</span></label>
+      <label><input type="radio" name="kind" value="sng"><span>Сит-н-гоу</span></label>
+    </div>
+    <label class="field">
+      <span>Название</span>
+      <input name="name" maxlength="24" placeholder="Необязательно" autocomplete="off">
+    </label>
+
+    <div data-kind="cash">
+      <div class="field">
+        <span>Блайнды</span>
+        <div class="seg seg--wrap" id="create-stakes" role="radiogroup" aria-label="Блайнды"></div>
+      </div>
+      <div class="field">
+        <span>Мест за столом</span>
+        <div class="seg" role="radiogroup" aria-label="Мест за столом">
+          <label><input type="radio" name="seats" value="2"><span>2</span></label>
+          <label><input type="radio" name="seats" value="4"><span>4</span></label>
+          <label><input type="radio" name="seats" value="6" checked><span>6</span></label>
+          <label><input type="radio" name="seats" value="9"><span>9</span></label>
+        </div>
+      </div>
+      <div class="field">
+        <span>Время на ход</span>
+        <div class="seg" role="radiogroup" aria-label="Время на ход">
+          <label><input type="radio" name="timeout" value="12"><span>12 с</span></label>
+          <label><input type="radio" name="timeout" value="25" checked><span>25 с</span></label>
+          <label><input type="radio" name="timeout" value="40"><span>40 с</span></label>
+        </div>
+      </div>
+    </div>
+
+    <div data-kind="sng" hidden>
+      <div class="field">
+        <span>Игроков</span>
+        <div class="seg" role="radiogroup" aria-label="Игроков в турнире">
+          <label><input type="radio" name="sngSeats" value="6" checked><span>6</span></label>
+          <label><input type="radio" name="sngSeats" value="9"><span>9</span></label>
+        </div>
+      </div>
+      <div class="field">
+        <span>Взнос из банка</span>
+        <div class="seg seg--wrap" id="create-buyins" role="radiogroup" aria-label="Взнос"></div>
+      </div>
+    </div>
+
+    <p class="dialog__note" id="create-note"></p>
+    <div class="dialog__row">
+      <button class="btn btn--ghost" value="cancel" type="submit">Отмена</button>
+      <button class="btn btn--primary" value="ok" type="submit">Открыть стол</button>
     </div>
   </form>
 </dialog>

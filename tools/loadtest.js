@@ -103,7 +103,7 @@ const fmt = (n) => Number(n).toLocaleString('ru-RU');
 (async function main() {
   console.log(`Цель: ${fmt(CLIENTS)} соединений, ${SEATED} за столами, ${SECONDS} с наблюдения`);
 
-  const rooms = (await request('GET', '/api/rooms')).data.rooms || [];
+  const stakes = (await request('GET', '/api/rooms')).data.stakes || [];
 
   let t0 = Date.now();
   const cookies = await pool(CLIENTS, 64, makeUser);
@@ -121,31 +121,35 @@ const fmt = (n) => Number(n).toLocaleString('ru-RU');
 
   // Сажаем людей и подсаживаем ботов: столы должны реально играть,
   // иначе обновлений нет и мерить нечего.
-  if (SEATED > 0 && rooms.length) {
+  if (SEATED > 0 && stakes.length) {
     let placed = 0;
     const seatedTables = new Set();
-    // Свободное место ищем перебором: сервер сам решает, за какой стол посадить.
-    const sitDown = async (cookie, room) => {
-      const enter = await request('POST', '/api/cmd', { cookie, body: { cmd: 'enterRoom', roomId: room.id } });
-      if (enter.status !== 200) return null;
-      const sit = await request('POST', '/api/cmd', { cookie, body: { cmd: 'sit', seat: -1, buyIn: room.minBuyIn } });
-      return sit.status === 200 ? enter.data.roomId : null;
-    };
-    const batch = Math.min(SEATED, live.length);
     const owners = new Map(); // стол -> чьё соединение им «владеет» (кто зовёт ботов)
+    const batch = Math.min(SEATED, live.length);
+    // Столы физические: каждый третий игрок открывает свой стол
+    // с очередными блайндами из списка, двое следующих садятся к нему.
+    const PER_TABLE = 3;
+    const opened = [];
+    await pool(Math.ceil(batch / PER_TABLE), 32, async (g) => {
+      const cookie = live[g * PER_TABLE];
+      const stake = g % stakes.length;
+      const r = await request('POST', '/api/cmd', {
+        cookie, body: { cmd: 'createTable', kind: 'cash', stake, seats: 6, timeout: 25 },
+      });
+      if (r.status === 200) opened[g] = { id: r.data.roomId, buyIn: stakes[stake][1] * 20 };
+    });
     await pool(batch, 32, async (i) => {
-      const room = rooms[i % rooms.length];
-      // Места разбирают наперегонки, поэтому пробуем несколько раз.
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const tableId = await sitDown(live[i], room);
-        if (tableId) {
-          placed += 1;
-          playing.set(live[i], false); // этот игрок теперь ходит сам
-          seatedTables.add(tableId);
-          if (!owners.has(tableId)) owners.set(tableId, live[i]);
-          return;
-        }
-      }
+      const table = opened[Math.floor(i / PER_TABLE)];
+      if (!table) return;
+      const cookie = live[i];
+      const enter = await request('POST', '/api/cmd', { cookie, body: { cmd: 'enterRoom', roomId: table.id } });
+      if (enter.status !== 200) return;
+      const sit = await request('POST', '/api/cmd', { cookie, body: { cmd: 'sit', seat: -1, buyIn: table.buyIn } });
+      if (sit.status !== 200) return;
+      placed += 1;
+      playing.set(cookie, false); // этот игрок теперь ходит сам
+      seatedTables.add(table.id);
+      if (!owners.has(table.id)) owners.set(table.id, cookie);
     });
     console.log(`За столами: ${placed} человек на ${seatedTables.size} столах`);
 

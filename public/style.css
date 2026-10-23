@@ -152,6 +152,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .table-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .table-title strong { font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: 17px; }
 .table-title span { font-size: 13px; color: var(--muted); }
+.table-title .tour-clock { color: var(--brass); font-variant-numeric: tabular-nums; }
 
 /* меню стола */
 .menu { position: relative; }
@@ -191,9 +192,23 @@ strong, .num { font-variant-numeric: tabular-nums; }
   flex: 1; width: min(1000px, 100%); margin: 0 auto; padding: 32px 22px 60px;
   display: grid; grid-template-columns: 1fr 220px; gap: 40px; align-items: start;
 }
-.lobby__head { grid-column: 1 / -1; }
+.lobby__head { grid-column: 1 / -1; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
 .lobby__head h2 { font-size: 26px; }
-.lobby__head p { color: var(--muted); margin: 6px 0 0; }
+.lobby__head p { color: var(--muted); margin: 6px 0 0; max-width: 60ch; }
+.lobby__head .btn { flex: 0 0 auto; }
+.lobby__list { min-width: 0; }
+
+.filters { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.filter {
+  font: inherit; font-size: 14px; color: var(--muted); background: none; border: 0; cursor: pointer;
+  border-bottom: 2px solid transparent; padding: 8px 2px; margin-right: 16px;
+  transition: color 140ms ease;
+}
+.filter:hover { color: var(--text); }
+.filter.is-active { color: var(--bone); border-bottom-color: var(--brass); }
+.filter:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.filters__totals { margin-left: auto; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rooms__empty { color: var(--muted); font-size: 14px; padding: 24px 0; margin: 0; }
 
 .rooms { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .room {
@@ -204,10 +219,15 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .room.is-new { animation: rise 380ms ease-out both; animation-delay: calc(var(--i, 0) * 45ms); }
 .room:hover { background: rgba(255, 255, 255, 0.025); }
 .room__name { font-family: Fraunces, Georgia, serif; font-size: 19px; }
+.room__tag {
+  font-family: "IBM Plex Sans", sans-serif; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--brass); border: 1px solid var(--brass-dim); border-radius: 999px;
+  padding: 1px 7px; margin-left: 8px; vertical-align: 3px;
+}
 .room__meta { font-size: 13px; color: var(--muted); margin-top: 2px; }
-.room__stats { text-align: right; }
+.room__stats { display: flex; flex-direction: column; align-items: flex-end; }
 .room__count { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
-.room__seats { display: flex; gap: 4px; }
+.room__seats { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 120px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--line); }
 .dot--human { background: var(--brass); border-color: var(--brass); }
 .dot--bot { background: #3e5860; border-color: #3e5860; }
@@ -603,7 +623,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .chat input:focus { outline: none; border-color: var(--brass-dim); }
 
 /* панель действий */
-.actionbar { border-top: 1px solid var(--line); background: var(--ink-2); }
+.actionbar { position: relative; border-top: 1px solid var(--line); background: var(--ink-2); }
 .turnbar { height: 3px; background: transparent; }
 .turnbar i { display: block; height: 100%; width: 0; background: var(--brass); transition: width 200ms linear, background 300ms ease; }
 .turnbar i.is-low { background: var(--weak); }
@@ -612,8 +632,8 @@ strong, .num { font-variant-numeric: tabular-nums; }
    не съёживался, когда приходит ваш ход. */
 .actions {
   padding: 10px 18px calc(10px + env(safe-area-inset-bottom));
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 18px;
-  min-height: 128px;
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  min-height: 70px;
 }
 .actions__status {
   flex: 1; min-width: 0; align-self: center;
@@ -623,7 +643,9 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .actions.is-your-turn .actions__status { color: var(--brass); }
 
 .acts { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-.acts__size { display: flex; justify-content: flex-end; }
+/* Выбор ставки всплывает над кнопками и не двигает стол. */
+.acts__size { position: absolute; right: 18px; bottom: calc(100% + 10px); z-index: 15; }
+.acts__size:empty { display: none; }
 .acts__main { display: flex; gap: 8px; }
 
 /* Три главные кнопки одного размера — рука привыкает к месту. */
@@ -645,14 +667,27 @@ strong, .num { font-variant-numeric: tabular-nums; }
 
 /* размер ставки */
 .raise {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-radius: 14px;
-  background: rgba(9, 16, 19, 0.5); border: 1px solid var(--line);
+  width: 340px; display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+  padding: 10px 14px 14px; border-radius: 14px;
+  background: rgba(13, 21, 25, 0.97); border: 1px solid var(--brass-dim);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  animation: rise 160ms ease-out both;
 }
-.raise--idle { opacity: 0.9; }
-.raise--dead { opacity: 0.45; }
-.raise--flat .raise__slider, .raise--flat .raise__presets { opacity: 0.4; }
-.raise__presets { display: flex; gap: 5px; }
+.raise__head { display: flex; align-items: center; justify-content: space-between; }
+.raise__title { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.raise__close {
+  position: relative; width: 24px; height: 24px; padding: 0; cursor: pointer; border-radius: 50%;
+  color: var(--muted); background: transparent; border: 1px solid var(--line);
+}
+.raise__close:hover { color: var(--text); border-color: var(--brass-dim); }
+.raise__close::before, .raise__close::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 10px; height: 1.5px; border-radius: 1px; background: currentColor;
+}
+.raise__close::before { transform: translate(-50%, -50%) rotate(45deg); }
+.raise__close::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.raise__presets { display: flex; gap: 5px; justify-content: space-between; }
+.raise__presets .raise__preset { flex: 1; }
 .raise__preset {
   font: inherit; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap;
   background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px;
@@ -662,7 +697,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .raise__preset:disabled { cursor: default; opacity: 0.5; }
 .raise__preset:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 
-.raise__dial { display: flex; align-items: center; gap: 6px; }
+.raise__dial { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .raise__step {
   width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
   font: inherit; font-size: 20px; line-height: 1; color: var(--bone); cursor: pointer;
@@ -680,7 +715,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .raise__hint { display: block; font-size: 11px; color: var(--muted); }
 
 .raise__slider {
-  -webkit-appearance: none; appearance: none; width: 150px; flex: 1 1 110px; max-width: 220px; height: 6px; margin: 0;
+  -webkit-appearance: none; appearance: none; width: 100%; height: 6px; margin: 4px 0;
   border-radius: 999px; cursor: pointer; background: #22333a;
   background-image: linear-gradient(90deg, var(--brass) var(--fill, 0%), transparent var(--fill, 0%));
 }
@@ -709,6 +744,26 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .dialog__value { display: block; font-size: 30px; color: var(--brass); font-variant-numeric: tabular-nums; margin-bottom: 8px; }
 .dialog input[type="range"] { width: 100%; accent-color: var(--brass); }
 .dialog__row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+.dialog--wide { width: min(440px, 94vw); }
+.dialog--wide .field { margin-bottom: 16px; }
+.dialog--wide .dialog__note { margin: 4px 0 0; line-height: 1.45; }
+
+/* переключатель вариантов кнопками */
+.seg { display: flex; gap: 6px; margin-bottom: 16px; }
+.field .seg { margin-bottom: 0; }
+.seg--wrap { flex-wrap: wrap; }
+.seg label { flex: 1; position: relative; cursor: pointer; }
+.seg--wrap label { flex: 0 1 auto; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.field .seg span, .seg span {
+  display: block; text-align: center; white-space: nowrap; margin: 0;
+  font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums;
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.seg label:hover span { border-color: var(--brass-dim); }
+.seg input:checked + span { background: rgba(201, 162, 74, 0.14); border-color: var(--brass); color: var(--bone); }
+.seg input:focus-visible + span { outline: 2px solid var(--brass); outline-offset: 2px; }
 
 .toast {
   position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
@@ -803,7 +858,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
   .topbar { padding: 10px 12px; }
   .actions {
     padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
-    flex-direction: column; align-items: stretch; gap: 8px; min-height: 186px;
+    flex-direction: column; align-items: stretch; gap: 8px; min-height: 96px;
   }
   .actions__status { text-align: center; white-space: normal; }
   .acts { width: 100%; align-items: stretch; }
@@ -812,13 +867,14 @@ strong, .num { font-variant-numeric: tabular-nums; }
   .btn--act { flex: 1; min-width: 0; padding: 10px 4px; font-size: 14px; }
   .btn--act .btn__key { display: none; }
   .menu__panel { min-width: 190px; }
-  .raise { flex-wrap: wrap; justify-content: center; width: 100%; gap: 8px; padding: 8px; }
-  .raise__presets { order: 1; width: 100%; justify-content: center; flex-wrap: wrap; }
-  .raise__dial { order: 2; }
-  .raise__slider { order: 3; flex: 1 1 120px; }
-  .raise__preset { padding: 6px 9px; }
+  /* На телефоне панель ставки встаёт в поток над кнопками: всплывая, она закрыла бы свои карты. */
+  .acts__size { position: static; }
+  .raise { width: 100%; padding: 8px 10px 10px; gap: 8px; box-shadow: none; }
+  .raise__preset { padding: 6px 4px; }
   .room { grid-template-columns: 1fr auto; }
   .room__seats { display: none; }
+  .lobby__head { flex-direction: column; align-items: stretch; }
+  .filters__totals { display: none; }
   .seat__kick { opacity: 0.55; }
 
   .topbar--table { gap: 10px; }
@@ -850,13 +906,13 @@ strong, .num { font-variant-numeric: tabular-nums; }
   .seat--you .card--sm .card__r { font-size: 17px; }
   .board { min-height: 63px; min-width: 252px; }
   .seat__plate { padding: 4px 7px; }
-  .actions { min-height: 104px; padding: 8px 18px calc(8px + env(safe-area-inset-bottom)); }
+  .actions { min-height: 64px; padding: 8px 18px calc(8px + env(safe-area-inset-bottom)); }
   .btn--act { min-height: 42px; }
   .meter--bar { padding: 5px 14px 7px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card--deal, .card--flip .card__inner, .bet.is-new, .seat__win,
+  .card--deal, .card--flip .card__inner, .bet.is-new, .seat__win, .raise,
   .room.is-new, .auth, .auth__mark span, .dialog[open], .toast, .felt__msg.is-win { animation: none; }
   .card--win, .meter.is-up .meter__name, .pot.is-bump strong, .bank strong.is-bump,
   .room__live--hot::before { animation: none; }
