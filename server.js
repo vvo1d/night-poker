@@ -211,8 +211,20 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
   '.woff2': 'font/woff2',
+  '.xml': 'application/xml; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
+
+// Страницы сайта: главная — для поиска и новичков, игра — на /play.
+const PAGES = { '/': 'index.html', '/play': 'play.html', '/play/': 'play.html' };
+// Старые и служебные адреса страниц ведут на основные, чтобы у поиска не было дублей.
+const PAGE_ALIASES = { '/index.html': '/', '/play.html': '/play' };
+// Картинки меняются редко — браузер может не переспрашивать о них сутки.
+const LONG_CACHE = new Set(['.png', '.jpg', '.svg', '.ico', '.woff2']);
 
 // Статика читается с диска один раз и дальше отдаётся из памяти.
 // Файлы клиента маленькие, а запросов при большом онлайне много.
@@ -243,22 +255,36 @@ function staticFile(file) {
   return entry;
 }
 
+function cacheFor(file) {
+  return LONG_CACHE.has(path.extname(file)) ? 'public, max-age=86400' : 'no-cache';
+}
+
 function serveStatic(req, res, urlPath) {
-  const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
+  if (PAGE_ALIASES[urlPath]) {
+    res.writeHead(301, { Location: PAGE_ALIASES[urlPath] });
+    return res.end();
+  }
+  // Кто уже вошёл, приходит играть, а не читать о покере: с главной — сразу за столы.
+  if (urlPath === '/' && sessionOf(req)) {
+    res.writeHead(302, { Location: '/play', 'Cache-Control': 'no-store', Vary: 'Cookie' });
+    return res.end();
+  }
+  const rel = PAGES[urlPath] || urlPath.replace(/^\/+/, '');
   const file = path.join(PUBLIC_DIR, rel);
   if (!file.startsWith(PUBLIC_DIR)) return send(res, 403, 'Доступ запрещён');
 
   const entry = staticFile(file);
   if (!entry) return send(res, 404, 'Страница не найдена');
   if (req.headers['if-none-match'] === entry.etag) {
-    res.writeHead(304, { ETag: entry.etag, 'Cache-Control': 'no-cache' });
+    res.writeHead(304, { ETag: entry.etag, 'Cache-Control': cacheFor(file) });
     return res.end();
   }
   res.writeHead(200, {
     'Content-Type': entry.type,
     'Content-Length': entry.body.length,
-    'Cache-Control': 'no-cache',
+    'Cache-Control': cacheFor(file),
     ETag: entry.etag,
+    ...(urlPath === '/' ? { Vary: 'Cookie' } : {}),
   });
   res.end(entry.body);
 }
@@ -361,12 +387,14 @@ function lobbyTables() {
 
 function lobbyTotals() {
   let players = 0;
+  let humans = 0;
   let playing = 0;
   for (const table of tables.values()) {
     players += table.occupied();
+    humans += table.humans();
     if (table.phase !== 'idle') playing += 1;
   }
-  return { tables: tables.size, players, playing };
+  return { tables: tables.size, players, humans, playing };
 }
 
 function lobbySnapshot(now = Date.now()) {
@@ -591,7 +619,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const route = url.pathname;
 
-  if (req.method === 'GET' && !route.startsWith('/api/')) return serveStatic(req, res, route);
+  if ((req.method === 'GET' || req.method === 'HEAD') && !route.startsWith('/api/')) return serveStatic(req, res, route);
 
   try {
     if (route === '/api/register' && req.method === 'POST') {
@@ -900,6 +928,6 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 server.listen(PORT, HOST, 1024, () => {
-  console.log(`Покер-сервер работает: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
+  console.log(`THPoker работает: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
   console.log(`Столов открыто: ${tables.size}`);
 });

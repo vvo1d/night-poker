@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Играть — THPoker</title>
+<meta name="description" content="THPoker — бесплатный онлайн покер на виртуальные фишки: техасский холдем, сит-н-гоу и свои столы с друзьями.">
+<!-- Страница самой игры: в поиске должна быть главная, а не экран входа -->
+<meta name="robots" content="noindex, follow">
+<link rel="canonical" href="https://thpoker.ru/">
+<meta name="theme-color" content="#0d1317">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+</head>
+<body>
+
+<!-- Экран входа -->
+<section id="screen-auth" class="screen">
+  <div class="auth">
+    <div class="auth__mark" aria-hidden="true">
+      <span>♠</span><span>♥</span><span>♦</span><span>♣</span>
+    </div>
+    <h1 class="auth__title">THPoker</h1>
+    <p class="auth__lede">Техасский холдем без лимита. Свои столы с любыми блайндами и турниры сит-н-гоу, фишки только виртуальные.</p>
+
+    <div class="tabs" role="tablist">
+      <button class="tab is-active" data-mode="login" role="tab">Вход</button>
+      <button class="tab" data-mode="register" role="tab">Регистрация</button>
+    </div>
+
+    <form id="auth-form" autocomplete="on">
+      <label class="field">
+        <span>Имя за столом</span>
+        <input name="name" required minlength="3" maxlength="16" autocomplete="username" placeholder="Например, Марго">
+      </label>
+      <label class="field">
+        <span>Пароль</span>
+        <input name="password" type="password" required minlength="6" autocomplete="current-password" placeholder="Минимум 6 символов">
+      </label>
+      <p class="hint" id="auth-hint">Новым игрокам сразу начисляется 10 000 фишек.</p>
+      <p class="error" id="auth-error" hidden></p>
+      <button class="btn btn--primary btn--wide" type="submit" id="auth-submit">Войти</button>
+    </form>
+  </div>
+</section>
+
+<!-- Лобби -->
+<section id="screen-lobby" class="screen" hidden>
+  <header class="topbar">
+    <a class="brand" href="/" title="На главную">THPoker</a>
+    <nav class="pages" id="pages" role="tablist" aria-label="Разделы">
+      <button class="pages__tab is-active" data-page="tables" role="tab">Столы</button>
+      <button class="pages__tab" data-page="rating" role="tab">Рейтинг</button>
+      <button class="pages__tab" data-page="profile" role="tab">Кабинет<span class="pages__badge" id="requests-badge" title="Заявки в друзья" hidden>0</span></button>
+    </nav>
+    <div class="topbar__right">
+      <div class="bank">
+        <span class="bank__label">В банке</span>
+        <strong id="lobby-chips">0</strong>
+        <button class="btn btn--ghost btn--sm" id="reload-chips" hidden>Пополнить</button>
+      </div>
+      <button class="icon-btn" data-sound-toggle title="Звук" aria-pressed="true"><span>♪</span></button>
+      <button class="btn btn--ghost btn--sm" id="logout">Выйти</button>
+    </div>
+  </header>
+
+  <main class="lobby" id="page-tables">
+    <div class="lobby__head">
+      <div>
+        <h2>Столы</h2>
+        <p>Садитесь за готовый стол или откройте свой — с нужными блайндами. В сит-н-гоу играют на вылет за призовой фонд.</p>
+      </div>
+      <button class="btn btn--primary" id="create-open">Создать стол</button>
+    </div>
+    <div class="lobby__list">
+      <div class="filters" role="tablist" id="lobby-filter">
+        <button class="filter is-active" data-filter="all" role="tab">Все</button>
+        <button class="filter" data-filter="cash" role="tab">Кэш</button>
+        <button class="filter" data-filter="sng" role="tab">Сит-н-гоу</button>
+        <span class="filters__totals" id="lobby-totals"></span>
+      </div>
+      <ul class="rooms" id="rooms"></ul>
+      <p class="rooms__empty" id="rooms-empty" hidden>Здесь пока пусто — откройте свой стол.</p>
+    </div>
+
+    <aside class="board-top">
+      <h3>Друзья</h3>
+      <ul class="friends friends--mini friends--requests" id="requests-mini" hidden></ul>
+      <ul class="friends friends--mini" id="friends-mini"></ul>
+      <p class="hint" id="friends-mini-empty" hidden>Добавляйте игроков в друзья из рейтинга или прямо за столом — здесь будет видно, кто онлайн и где играет.</p>
+    </aside>
+  </main>
+
+  <!-- Рейтинг -->
+  <main class="page" id="page-rating" hidden>
+    <div class="page__head">
+      <h2>Рейтинг игроков</h2>
+      <p id="rating-note">Пятьдесят лучших. Нажмите на игрока, чтобы открыть его профиль.</p>
+    </div>
+    <div class="filters" role="tablist" id="rating-filter">
+      <button class="filter is-active" data-by="chips" role="tab">По фишкам</button>
+      <button class="filter" data-by="wins" role="tab">По выигранным раздачам</button>
+      <button class="filter" data-by="sng" role="tab">По турнирам</button>
+    </div>
+    <div class="rating" id="rating"></div>
+  </main>
+
+  <!-- Личный кабинет -->
+  <main class="page" id="page-profile" hidden>
+    <div id="profile-own"></div>
+  </main>
+</section>
+
+<!-- Стол -->
+<section id="screen-table" class="screen" hidden>
+  <header class="topbar topbar--table">
+    <button class="btn btn--ghost btn--sm" id="back-to-lobby">←<span class="back__text"> К столам</span></button>
+    <div class="table-title">
+      <strong id="table-name">Стол</strong>
+      <span id="table-stakes"></span>
+      <span id="tour-clock" class="tour-clock" hidden></span>
+    </div>
+    <div class="topbar__right">
+      <div class="bank"><span class="bank__label">В банке</span><strong id="table-chips">0</strong></div>
+      <button class="icon-btn" data-sound-toggle title="Звук" aria-pressed="true"><span>♪</span></button>
+
+      <!-- Распоряжения столом: они не нужны каждый ход и не должны занимать место внизу -->
+      <div class="menu" id="table-menu">
+        <button class="btn btn--ghost btn--sm" id="menu-toggle" aria-expanded="false" aria-haspopup="true" title="Действия со столом"><span class="btn__ico" aria-hidden="true">⋮</span><span class="btn__text">Стол ▾</span></button>
+        <div class="menu__panel" id="menu-panel" role="menu" hidden>
+          <label class="pick" title="Что делать со своими картами в конце раздачи">
+            <span class="pick__label">Карты в конце</span>
+            <select id="reveal-mode">
+              <option value="ask">спрашивать</option>
+              <option value="always">показывать</option>
+              <option value="never">скрывать</option>
+            </select>
+          </label>
+          <label class="pick" title="Показывать силу собранной руки">
+            <span class="pick__label">Силомер руки</span>
+            <input type="checkbox" id="meter-mode" checked>
+          </label>
+          <div class="menu__sep"></div>
+          <button class="menu__item" id="menu-topup" role="menuitem">Докупить фишки</button>
+          <button class="menu__item" id="menu-sitout" role="menuitem">Пропустить раздачи</button>
+          <button class="menu__item" id="menu-bot" role="menuitem">Позвать бота</button>
+          <button class="menu__item menu__item--danger" id="menu-stand" role="menuitem">Встать из-за стола</button>
+        </div>
+      </div>
+
+      <button class="btn btn--ghost btn--sm" id="toggle-log" aria-expanded="false" title="Чат стола"><span class="btn__ico" aria-hidden="true">☰</span><span class="btn__text">Чат</span></button>
+    </div>
+  </header>
+
+  <div class="table-wrap">
+    <div class="felt" id="felt">
+      <div class="felt__inner">
+        <div class="pots" id="pots"></div>
+        <div class="pot" id="pot"><span>всего в игре</span><strong id="pot-amount">0</strong></div>
+        <div class="board" id="board"></div>
+        <div class="felt__msg" id="felt-msg"></div>
+      </div>
+      <div id="bets"></div>
+      <div id="seats"></div>
+      <div class="fly" id="fly" aria-hidden="true"></div>
+
+      <!-- Силомер руки -->
+      <div class="meter" id="meter" hidden>
+        <div class="meter__top">
+          <span class="meter__label" id="meter-label">Ваша рука</span>
+          <span class="meter__pct" id="meter-pct">—</span>
+        </div>
+        <div class="meter__name" id="meter-name">—</div>
+        <div class="meter__bar"><i id="meter-fill"></i><b id="meter-pin"></b></div>
+        <div class="meter__note" id="meter-note"></div>
+      </div>
+    </div>
+
+    <aside class="side" id="side" hidden>
+      <div class="side__head">
+        <span>Чат стола</span>
+        <button class="icon-btn icon-btn--sm icon-btn--close" id="close-log" title="Скрыть чат" aria-label="Скрыть чат"></button>
+      </div>
+      <div class="log" id="log"></div>
+      <button class="log__more" id="log-more" hidden>Новые сообщения ↓</button>
+      <form class="chat" id="chat-form">
+        <input id="chat-input" maxlength="140" placeholder="Сказать что-нибудь за столом" autocomplete="off">
+        <button class="btn btn--sm" type="submit">Отправить</button>
+      </form>
+    </aside>
+  </div>
+
+  <footer class="actionbar">
+    <div class="turnbar" id="turnbar"><i></i></div>
+    <div class="actions" id="actions"></div>
+  </footer>
+</section>
+
+<!-- Диалог закупки -->
+<dialog id="buyin-dialog" class="dialog">
+  <form method="dialog" id="buyin-form">
+    <h3 id="buyin-title">Сесть за стол</h3>
+    <p class="dialog__note" id="buyin-note"></p>
+    <output id="buyin-value" class="dialog__value">0</output>
+    <input type="range" id="buyin-range" step="1">
+    <div class="dialog__row">
+      <button class="btn btn--ghost" value="cancel" type="submit">Отмена</button>
+      <button class="btn btn--primary" value="ok" type="submit" id="buyin-ok">Сесть</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Диалог нового стола -->
+<dialog id="create-dialog" class="dialog dialog--wide">
+  <form method="dialog" id="create-form">
+    <h3>Новый стол</h3>
+    <div class="seg" role="radiogroup" aria-label="Тип стола">
+      <label><input type="radio" name="kind" value="cash" checked><span>Кэш-игра</span></label>
+      <label><input type="radio" name="kind" value="sng"><span>Сит-н-гоу</span></label>
+    </div>
+    <label class="field">
+      <span>Название</span>
+      <input name="name" maxlength="24" placeholder="Необязательно" autocomplete="off">
+    </label>
+
+    <div data-kind="cash">
+      <div class="field">
+        <span>Блайнды</span>
+        <div class="seg seg--wrap" id="create-stakes" role="radiogroup" aria-label="Блайнды"></div>
+      </div>
+      <div class="field">
+        <span>Мест за столом</span>
+        <div class="seg" role="radiogroup" aria-label="Мест за столом">
+          <label><input type="radio" name="seats" value="2"><span>2</span></label>
+          <label><input type="radio" name="seats" value="4"><span>4</span></label>
+          <label><input type="radio" name="seats" value="6" checked><span>6</span></label>
+          <label><input type="radio" name="seats" value="9"><span>9</span></label>
+        </div>
+      </div>
+      <div class="field">
+        <span>Время на ход</span>
+        <div class="seg" role="radiogroup" aria-label="Время на ход">
+          <label><input type="radio" name="timeout" value="12"><span>12 с</span></label>
+          <label><input type="radio" name="timeout" value="25" checked><span>25 с</span></label>
+          <label><input type="radio" name="timeout" value="40"><span>40 с</span></label>
+        </div>
+      </div>
+    </div>
+
+    <div data-kind="sng" hidden>
+      <div class="field">
+        <span>Игроков</span>
+        <div class="seg" role="radiogroup" aria-label="Игроков в турнире">
+          <label><input type="radio" name="sngSeats" value="6" checked><span>6</span></label>
+          <label><input type="radio" name="sngSeats" value="9"><span>9</span></label>
+        </div>
+      </div>
+      <div class="field">
+        <span>Взнос из банка</span>
+        <div class="seg seg--wrap" id="create-buyins" role="radiogroup" aria-label="Взнос"></div>
+      </div>
+    </div>
+
+    <p class="dialog__note" id="create-note"></p>
+    <div class="dialog__row">
+      <button class="btn btn--ghost" value="cancel" type="submit">Отмена</button>
+      <button class="btn btn--primary" value="ok" type="submit">Открыть стол</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Профиль другого игрока -->
+<dialog id="profile-dialog" class="dialog dialog--profile">
+  <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="profile-close" title="Закрыть" aria-label="Закрыть"></button>
+  <div id="profile-body"></div>
+</dialog>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/sound.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

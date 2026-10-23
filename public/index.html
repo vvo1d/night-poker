@@ -3,279 +3,336 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Poker — техасский холдем</title>
+<title>Онлайн покер без денег — бесплатный техасский холдем | THPoker</title>
+<meta name="description" content="Бесплатный онлайн покер на виртуальные фишки: техасский холдем, турниры сит-н-гоу и свои столы с друзьями. Играйте в браузере с телефона и компьютера — без денег, без скачивания, 10 000 фишек на старте.">
+<meta name="keywords" content="онлайн покер без денег, бесплатный покер, покер онлайн бесплатно, техасский холдем онлайн, покер на фишки, покер с друзьями, сит-н-гоу, покер в браузере">
+<link rel="canonical" href="https://thpoker.ru/">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#0d1317">
+<meta name="color-scheme" content="dark">
+
+<!-- Превью ссылки в мессенджерах и соцсетях -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="THPoker">
+<meta property="og:locale" content="ru_RU">
+<meta property="og:url" content="https://thpoker.ru/">
+<meta property="og:title" content="THPoker — онлайн покер без денег">
+<meta property="og:description" content="Техасский холдем, турниры сит-н-гоу и столы с друзьями на виртуальные фишки. Бесплатно, прямо в браузере.">
+<meta property="og:image" content="https://thpoker.ru/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="THPoker — бесплатный онлайн покер">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="THPoker — онлайн покер без денег">
+<meta name="twitter:description" content="Техасский холдем, турниры сит-н-гоу и столы с друзьями на виртуальные фишки. Бесплатно, прямо в браузере.">
+<meta name="twitter:image" content="https://thpoker.ru/og.png">
+<meta name="yandex-verification" content="487653e03c8702b9" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>♠</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/landing.css">
+
+<!-- Разметка для поисковиков: что это за сайт, игра и ответы на частые вопросы -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://thpoker.ru/#site",
+      "url": "https://thpoker.ru/",
+      "name": "THPoker",
+      "alternateName": "THPoker — онлайн покер без денег",
+      "inLanguage": "ru-RU"
+    },
+    {
+      "@type": ["VideoGame", "WebApplication"],
+      "@id": "https://thpoker.ru/#game",
+      "name": "THPoker",
+      "url": "https://thpoker.ru/",
+      "description": "Бесплатный онлайн покер на виртуальные фишки: техасский холдем без лимита, турниры сит-н-гоу на 6 и 9 игроков, свои столы с друзьями и боты для тренировки.",
+      "genre": ["Покер", "Карточная игра"],
+      "gamePlatform": ["Web browser", "Android", "iOS"],
+      "applicationCategory": "GameApplication",
+      "operatingSystem": "Любая с современным браузером",
+      "playMode": ["MultiPlayer", "SinglePlayer"],
+      "numberOfPlayers": { "@type": "QuantitativeValue", "minValue": 2, "maxValue": 9 },
+      "inLanguage": "ru-RU",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "RUB" },
+      "image": "https://thpoker.ru/og.png"
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://thpoker.ru/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Это правда бесплатно?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Да. На сайте нет платежей вообще: при регистрации вы получаете 10 000 виртуальных фишек, а если они закончатся, банк можно бесплатно пополнить." }
+        },
+        {
+          "@type": "Question",
+          "name": "Можно ли выиграть или вывести деньги?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Нет. Фишки виртуальные: их нельзя купить, продать или обменять на деньги. THPoker — игра для удовольствия и тренировки, а не азартная игра." }
+        },
+        {
+          "@type": "Question",
+          "name": "Нужно ли что-то скачивать?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Нет. Покер работает прямо в браузере — на компьютере, телефоне и планшете. Достаточно открыть сайт и войти." }
+        },
+        {
+          "@type": "Question",
+          "name": "Что нужно для регистрации?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Только имя за столом и пароль. Почта и телефон не нужны." }
+        },
+        {
+          "@type": "Question",
+          "name": "Как сыграть в покер с друзьями онлайн?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Откройте свой стол кнопкой «Создать стол», выберите блайнды и число мест и позовите друзей: стол появится в лобби, а друзья увидят, за каким столом вы сидите, и смогут подсесть в один клик." }
+        },
+        {
+          "@type": "Question",
+          "name": "Что такое сит-н-гоу?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Короткий турнир на один стол на 6 или 9 игроков. Все платят одинаковый взнос виртуальными фишками, играют на вылет, блайнды растут каждые две минуты, а призовые места делят фонд." }
+        },
+        {
+          "@type": "Question",
+          "name": "Можно ли играть, если никого нет онлайн?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Да. За любой стол можно посадить ботов — с ними удобно учиться и пробовать новые приёмы." }
+        }
+      ]
+    }
+  ]
+}
+</script>
 </head>
 <body>
 
-<!-- Экран входа -->
-<section id="screen-auth" class="screen">
-  <div class="auth">
-    <div class="auth__mark" aria-hidden="true">
-      <span>♠</span><span>♥</span><span>♦</span><span>♣</span>
-    </div>
-    <h1 class="auth__title">Poker</h1>
-    <p class="auth__lede">Техасский холдем без лимита. Свои столы с любыми блайндами и турниры сит-н-гоу, фишки только виртуальные.</p>
-
-    <div class="tabs" role="tablist">
-      <button class="tab is-active" data-mode="login" role="tab">Вход</button>
-      <button class="tab" data-mode="register" role="tab">Регистрация</button>
-    </div>
-
-    <form id="auth-form" autocomplete="on">
-      <label class="field">
-        <span>Имя за столом</span>
-        <input name="name" required minlength="3" maxlength="16" autocomplete="username" placeholder="Например, Марго">
-      </label>
-      <label class="field">
-        <span>Пароль</span>
-        <input name="password" type="password" required minlength="6" autocomplete="current-password" placeholder="Минимум 6 символов">
-      </label>
-      <p class="hint" id="auth-hint">Новым игрокам сразу начисляется 10 000 фишек.</p>
-      <p class="error" id="auth-error" hidden></p>
-      <button class="btn btn--primary btn--wide" type="submit" id="auth-submit">Войти</button>
-    </form>
-  </div>
-</section>
-
-<!-- Лобби -->
-<section id="screen-lobby" class="screen" hidden>
-  <header class="topbar">
-    <div class="brand">Ночная партия</div>
-    <nav class="pages" id="pages" role="tablist" aria-label="Разделы">
-      <button class="pages__tab is-active" data-page="tables" role="tab">Столы</button>
-      <button class="pages__tab" data-page="rating" role="tab">Рейтинг</button>
-      <button class="pages__tab" data-page="profile" role="tab">Кабинет<span class="pages__badge" id="requests-badge" title="Заявки в друзья" hidden>0</span></button>
+<header class="nav">
+  <div class="wrap nav__in">
+    <a class="logo" href="/" aria-label="THPoker — на главную"><span class="logo__mark" aria-hidden="true">♠</span>THPoker</a>
+    <nav class="nav__links" aria-label="Разделы страницы">
+      <a href="#modes">Режимы</a>
+      <a href="#features">Возможности</a>
+      <a href="#rules">Правила</a>
+      <a href="#faq">Вопросы</a>
     </nav>
-    <div class="topbar__right">
-      <div class="bank">
-        <span class="bank__label">В банке</span>
-        <strong id="lobby-chips">0</strong>
-        <button class="btn btn--ghost btn--sm" id="reload-chips" hidden>Пополнить</button>
-      </div>
-      <button class="icon-btn" data-sound-toggle title="Звук" aria-pressed="true"><span>♪</span></button>
-      <button class="btn btn--ghost btn--sm" id="logout">Выйти</button>
-    </div>
-  </header>
-
-  <main class="lobby" id="page-tables">
-    <div class="lobby__head">
-      <div>
-        <h2>Столы</h2>
-        <p>Садитесь за готовый стол или откройте свой — с нужными блайндами. В сит-н-гоу играют на вылет за призовой фонд.</p>
-      </div>
-      <button class="btn btn--primary" id="create-open">Создать стол</button>
-    </div>
-    <div class="lobby__list">
-      <div class="filters" role="tablist" id="lobby-filter">
-        <button class="filter is-active" data-filter="all" role="tab">Все</button>
-        <button class="filter" data-filter="cash" role="tab">Кэш</button>
-        <button class="filter" data-filter="sng" role="tab">Сит-н-гоу</button>
-        <span class="filters__totals" id="lobby-totals"></span>
-      </div>
-      <ul class="rooms" id="rooms"></ul>
-      <p class="rooms__empty" id="rooms-empty" hidden>Здесь пока пусто — откройте свой стол.</p>
-    </div>
-
-    <aside class="board-top">
-      <h3>Друзья</h3>
-      <ul class="friends friends--mini friends--requests" id="requests-mini" hidden></ul>
-      <ul class="friends friends--mini" id="friends-mini"></ul>
-      <p class="hint" id="friends-mini-empty" hidden>Добавляйте игроков в друзья из рейтинга или прямо за столом — здесь будет видно, кто онлайн и где играет.</p>
-    </aside>
-  </main>
-
-  <!-- Рейтинг -->
-  <main class="page" id="page-rating" hidden>
-    <div class="page__head">
-      <h2>Рейтинг игроков</h2>
-      <p id="rating-note">Пятьдесят лучших. Нажмите на игрока, чтобы открыть его профиль.</p>
-    </div>
-    <div class="filters" role="tablist" id="rating-filter">
-      <button class="filter is-active" data-by="chips" role="tab">По фишкам</button>
-      <button class="filter" data-by="wins" role="tab">По выигранным раздачам</button>
-      <button class="filter" data-by="sng" role="tab">По турнирам</button>
-    </div>
-    <div class="rating" id="rating"></div>
-  </main>
-
-  <!-- Личный кабинет -->
-  <main class="page" id="page-profile" hidden>
-    <div id="profile-own"></div>
-  </main>
-</section>
-
-<!-- Стол -->
-<section id="screen-table" class="screen" hidden>
-  <header class="topbar topbar--table">
-    <button class="btn btn--ghost btn--sm" id="back-to-lobby">←<span class="back__text"> К столам</span></button>
-    <div class="table-title">
-      <strong id="table-name">Стол</strong>
-      <span id="table-stakes"></span>
-      <span id="tour-clock" class="tour-clock" hidden></span>
-    </div>
-    <div class="topbar__right">
-      <div class="bank"><span class="bank__label">В банке</span><strong id="table-chips">0</strong></div>
-      <button class="icon-btn" data-sound-toggle title="Звук" aria-pressed="true"><span>♪</span></button>
-
-      <!-- Распоряжения столом: они не нужны каждый ход и не должны занимать место внизу -->
-      <div class="menu" id="table-menu">
-        <button class="btn btn--ghost btn--sm" id="menu-toggle" aria-expanded="false" aria-haspopup="true" title="Действия со столом"><span class="btn__ico" aria-hidden="true">⋮</span><span class="btn__text">Стол ▾</span></button>
-        <div class="menu__panel" id="menu-panel" role="menu" hidden>
-          <label class="pick" title="Что делать со своими картами в конце раздачи">
-            <span class="pick__label">Карты в конце</span>
-            <select id="reveal-mode">
-              <option value="ask">спрашивать</option>
-              <option value="always">показывать</option>
-              <option value="never">скрывать</option>
-            </select>
-          </label>
-          <label class="pick" title="Показывать силу собранной руки">
-            <span class="pick__label">Силомер руки</span>
-            <input type="checkbox" id="meter-mode" checked>
-          </label>
-          <div class="menu__sep"></div>
-          <button class="menu__item" id="menu-topup" role="menuitem">Докупить фишки</button>
-          <button class="menu__item" id="menu-sitout" role="menuitem">Пропустить раздачи</button>
-          <button class="menu__item" id="menu-bot" role="menuitem">Позвать бота</button>
-          <button class="menu__item menu__item--danger" id="menu-stand" role="menuitem">Встать из-за стола</button>
-        </div>
-      </div>
-
-      <button class="btn btn--ghost btn--sm" id="toggle-log" aria-expanded="false" title="Чат стола"><span class="btn__ico" aria-hidden="true">☰</span><span class="btn__text">Чат</span></button>
-    </div>
-  </header>
-
-  <div class="table-wrap">
-    <div class="felt" id="felt">
-      <div class="felt__inner">
-        <div class="pots" id="pots"></div>
-        <div class="pot" id="pot"><span>всего в игре</span><strong id="pot-amount">0</strong></div>
-        <div class="board" id="board"></div>
-        <div class="felt__msg" id="felt-msg"></div>
-      </div>
-      <div id="bets"></div>
-      <div id="seats"></div>
-      <div class="fly" id="fly" aria-hidden="true"></div>
-
-      <!-- Силомер руки -->
-      <div class="meter" id="meter" hidden>
-        <div class="meter__top">
-          <span class="meter__label" id="meter-label">Ваша рука</span>
-          <span class="meter__pct" id="meter-pct">—</span>
-        </div>
-        <div class="meter__name" id="meter-name">—</div>
-        <div class="meter__bar"><i id="meter-fill"></i><b id="meter-pin"></b></div>
-        <div class="meter__note" id="meter-note"></div>
-      </div>
-    </div>
-
-    <aside class="side" id="side" hidden>
-      <div class="side__head">
-        <span>Чат стола</span>
-        <button class="icon-btn icon-btn--sm icon-btn--close" id="close-log" title="Скрыть чат" aria-label="Скрыть чат"></button>
-      </div>
-      <div class="log" id="log"></div>
-      <button class="log__more" id="log-more" hidden>Новые сообщения ↓</button>
-      <form class="chat" id="chat-form">
-        <input id="chat-input" maxlength="140" placeholder="Сказать что-нибудь за столом" autocomplete="off">
-        <button class="btn btn--sm" type="submit">Отправить</button>
-      </form>
-    </aside>
+    <a class="btn btn--primary btn--sm" href="/play">Играть</a>
   </div>
+</header>
 
-  <footer class="actionbar">
-    <div class="turnbar" id="turnbar"><i></i></div>
-    <div class="actions" id="actions"></div>
-  </footer>
-</section>
-
-<!-- Диалог закупки -->
-<dialog id="buyin-dialog" class="dialog">
-  <form method="dialog" id="buyin-form">
-    <h3 id="buyin-title">Сесть за стол</h3>
-    <p class="dialog__note" id="buyin-note"></p>
-    <output id="buyin-value" class="dialog__value">0</output>
-    <input type="range" id="buyin-range" step="1">
-    <div class="dialog__row">
-      <button class="btn btn--ghost" value="cancel" type="submit">Отмена</button>
-      <button class="btn btn--primary" value="ok" type="submit" id="buyin-ok">Сесть</button>
-    </div>
-  </form>
-</dialog>
-
-<!-- Диалог нового стола -->
-<dialog id="create-dialog" class="dialog dialog--wide">
-  <form method="dialog" id="create-form">
-    <h3>Новый стол</h3>
-    <div class="seg" role="radiogroup" aria-label="Тип стола">
-      <label><input type="radio" name="kind" value="cash" checked><span>Кэш-игра</span></label>
-      <label><input type="radio" name="kind" value="sng"><span>Сит-н-гоу</span></label>
-    </div>
-    <label class="field">
-      <span>Название</span>
-      <input name="name" maxlength="24" placeholder="Необязательно" autocomplete="off">
-    </label>
-
-    <div data-kind="cash">
-      <div class="field">
-        <span>Блайнды</span>
-        <div class="seg seg--wrap" id="create-stakes" role="radiogroup" aria-label="Блайнды"></div>
-      </div>
-      <div class="field">
-        <span>Мест за столом</span>
-        <div class="seg" role="radiogroup" aria-label="Мест за столом">
-          <label><input type="radio" name="seats" value="2"><span>2</span></label>
-          <label><input type="radio" name="seats" value="4"><span>4</span></label>
-          <label><input type="radio" name="seats" value="6" checked><span>6</span></label>
-          <label><input type="radio" name="seats" value="9"><span>9</span></label>
+<main>
+  <!-- Первый экран -->
+  <section class="hero">
+    <div class="wrap hero__in">
+      <div class="hero__text">
+        <p class="eyebrow">Техасский холдем · без денег · в браузере</p>
+        <h1>Онлайн покер без денег — играйте бесплатно</h1>
+        <p class="lede">THPoker — бесплатный покер на виртуальные фишки. Кэш-столы с любыми блайндами, турниры сит-н-гоу, свои столы с друзьями и боты для тренировки. Без вложений, без скачивания — с телефона и компьютера.</p>
+        <div class="hero__cta">
+          <a class="btn btn--primary btn--lg" href="/play">Играть бесплатно</a>
+          <a class="btn btn--ghost btn--lg" href="#how">Как начать</a>
         </div>
+        <ul class="hero__facts">
+          <li><b>10 000</b> фишек на старте</li>
+          <li>Регистрация — <b>имя и пароль</b></li>
+          <li id="live" hidden></li>
+        </ul>
       </div>
-      <div class="field">
-        <span>Время на ход</span>
-        <div class="seg" role="radiogroup" aria-label="Время на ход">
-          <label><input type="radio" name="timeout" value="12"><span>12 с</span></label>
-          <label><input type="radio" name="timeout" value="25" checked><span>25 с</span></label>
-          <label><input type="radio" name="timeout" value="40"><span>40 с</span></label>
+
+      <!-- Стол на первом экране: CSS, без картинок, чтобы страница открывалась мгновенно -->
+      <div class="table" aria-hidden="true">
+        <div class="table__felt">
+          <div class="table__pot"><i class="chip chip--gold"></i><i class="chip chip--red"></i><i class="chip chip--green"></i><span>банк 2 450</span></div>
+          <div class="table__board">
+            <span class="card card--s">A<i>♠</i></span>
+            <span class="card card--s">K<i>♠</i></span>
+            <span class="card card--s">Q<i>♠</i></span>
+            <span class="card card--h">7<i>♥</i></span>
+            <span class="card card--d">2<i>♦</i></span>
+          </div>
+          <div class="table__hand">
+            <span class="card card--s card--lift">J<i>♠</i></span>
+            <span class="card card--s card--lift">10<i>♠</i></span>
+          </div>
+          <div class="table__label">Флеш-рояль</div>
         </div>
       </div>
     </div>
+  </section>
 
-    <div data-kind="sng" hidden>
-      <div class="field">
-        <span>Игроков</span>
-        <div class="seg" role="radiogroup" aria-label="Игроков в турнире">
-          <label><input type="radio" name="sngSeats" value="6" checked><span>6</span></label>
-          <label><input type="radio" name="sngSeats" value="9"><span>9</span></label>
+  <!-- Режимы игры -->
+  <section class="section" id="modes">
+    <div class="wrap">
+      <h2>Во что можно сыграть</h2>
+      <p class="section__lede">Все режимы — техасский холдем без лимита. Ставки — только виртуальными фишками.</p>
+      <div class="grid grid--4">
+        <article class="card-box">
+          <span class="card-box__icon" aria-hidden="true">♣</span>
+          <h3>Кэш-столы</h3>
+          <p>Садитесь за стол с блайндами от 1/2 до 100/200 и играйте сколько хотите. Встали из-за стола — фишки вернулись в банк.</p>
+        </article>
+        <article class="card-box">
+          <span class="card-box__icon" aria-hidden="true">♚</span>
+          <h3>Турниры сит-н-гоу</h3>
+          <p>Турнир на 6 или 9 игроков: одинаковый стек, игра на вылет, блайнды растут каждые 2 минуты. Призовые места делят фонд.</p>
+        </article>
+        <article class="card-box">
+          <span class="card-box__icon" aria-hidden="true">♥</span>
+          <h3>Покер с друзьями</h3>
+          <p>Откройте свой стол с нужными блайндами и числом мест — от хедз-апа до девяти игроков — и позовите друзей.</p>
+        </article>
+        <article class="card-box">
+          <span class="card-box__icon" aria-hidden="true">♦</span>
+          <h3>Игра с ботами</h3>
+          <p>Нет соперников — посадите ботов. Хорошая тренировка для новичка: можно спокойно разобраться в правилах.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- Возможности -->
+  <section class="section section--alt" id="features">
+    <div class="wrap">
+      <h2>Почему играть в THPoker</h2>
+      <div class="grid grid--3 features">
+        <div class="feature">
+          <h3>Честная раздача</h3>
+          <p>Колода тасуется криптографическим генератором случайных чисел на сервере. Чужие карты не видит никто, пока их не откроют на вскрытии.</p>
+        </div>
+        <div class="feature">
+          <h3>Подсказка силы руки</h3>
+          <p>Силомер показывает собранную комбинацию и насколько она сильнее случайных рук соперника. Новичку — понятно, опытному — можно выключить.</p>
+        </div>
+        <div class="feature">
+          <h3>Статистика и ачивки</h3>
+          <p>В личном кабинете — выигранные и проигранные раздачи, лучшая комбинация, крупнейший банк и ачивки со ступенями от бронзы до платины.</p>
+        </div>
+        <div class="feature">
+          <h3>Рейтинг игроков</h3>
+          <p>Соревнуйтесь в рейтинге по фишкам, выигранным раздачам и победам в турнирах.</p>
+        </div>
+        <div class="feature">
+          <h3>Друзья</h3>
+          <p>Добавляйте игроков в друзья и смотрите, кто онлайн и за каким столом, — подсесть можно в один клик.</p>
+        </div>
+        <div class="feature">
+          <h3>Удобно с телефона</h3>
+          <p>Стол подстраивается под экран смартфона: крупные карты, большие кнопки, ползунок ставки под пальцем.</p>
         </div>
       </div>
-      <div class="field">
-        <span>Взнос из банка</span>
-        <div class="seg seg--wrap" id="create-buyins" role="radiogroup" aria-label="Взнос"></div>
+    </div>
+  </section>
+
+  <!-- Как начать -->
+  <section class="section" id="how">
+    <div class="wrap">
+      <h2>Как начать играть в покер онлайн</h2>
+      <ol class="steps">
+        <li>
+          <h3>Зарегистрируйтесь</h3>
+          <p>Придумайте имя за столом и пароль — почта и телефон не нужны. На счёт сразу придут 10 000 фишек.</p>
+        </li>
+        <li>
+          <h3>Выберите стол</h3>
+          <p>Сядьте за готовый стол, откройте свой или запишитесь на сит-н-гоу. Место занимается закупкой из банка.</p>
+        </li>
+        <li>
+          <h3>Играйте</h3>
+          <p>Фолд, чек, колл и рейз — кнопками или с клавиатуры. Кончились фишки — пополните банк бесплатно.</p>
+        </li>
+      </ol>
+      <p class="center"><a class="btn btn--primary btn--lg" href="/play">Начать игру</a></p>
+    </div>
+  </section>
+
+  <!-- Правила и комбинации: полезный текст, который ищут новички -->
+  <section class="section section--alt" id="rules">
+    <div class="wrap rules">
+      <div class="rules__text">
+        <h2>Правила техасского холдема коротко</h2>
+        <p>Каждый игрок получает две закрытые карты, на стол по очереди выкладываются пять общих: флоп — три карты, тёрн — четвёртая, ривер — пятая. Перед раздачей двое игроков ставят обязательные ставки — малый и большой блайнд.</p>
+        <p>На каждой улице идёт круг торговли: можно сбросить карты (фолд), пропустить ход без ставки (чек), уравнять (колл) или повысить (рейз). В холдеме без лимита поставить можно хоть все фишки сразу — это олл-ин.</p>
+        <p>Банк забирает тот, у кого лучшая пятёрка из семи карт — двух своих и пяти общих, или тот, кто остался один, когда остальные сбросили карты.</p>
+      </div>
+      <div class="rules__table">
+        <h3>Комбинации в покере — от старшей к младшей</h3>
+        <ol class="combos">
+          <li><b>Флеш-рояль</b><span class="hand"><i class="m m--s">A♠</i><i class="m m--s">K♠</i><i class="m m--s">Q♠</i><i class="m m--s">J♠</i><i class="m m--s">10♠</i></span></li>
+          <li><b>Стрит-флеш</b><span class="hand"><i class="m m--h">9♥</i><i class="m m--h">8♥</i><i class="m m--h">7♥</i><i class="m m--h">6♥</i><i class="m m--h">5♥</i></span></li>
+          <li><b>Каре</b><span class="hand"><i class="m m--s">Q♠</i><i class="m m--h">Q♥</i><i class="m m--d">Q♦</i><i class="m m--c">Q♣</i><i class="m m--s">4♠</i></span></li>
+          <li><b>Фулл-хаус</b><span class="hand"><i class="m m--s">K♠</i><i class="m m--h">K♥</i><i class="m m--d">K♦</i><i class="m m--c">7♣</i><i class="m m--s">7♠</i></span></li>
+          <li><b>Флеш</b><span class="hand"><i class="m m--d">A♦</i><i class="m m--d">J♦</i><i class="m m--d">8♦</i><i class="m m--d">6♦</i><i class="m m--d">2♦</i></span></li>
+          <li><b>Стрит</b><span class="hand"><i class="m m--c">10♣</i><i class="m m--h">9♥</i><i class="m m--s">8♠</i><i class="m m--d">7♦</i><i class="m m--c">6♣</i></span></li>
+          <li><b>Сет (тройка)</b><span class="hand"><i class="m m--s">8♠</i><i class="m m--h">8♥</i><i class="m m--d">8♦</i><i class="m m--c">K♣</i><i class="m m--s">3♠</i></span></li>
+          <li><b>Две пары</b><span class="hand"><i class="m m--s">J♠</i><i class="m m--h">J♥</i><i class="m m--d">4♦</i><i class="m m--c">4♣</i><i class="m m--s">A♠</i></span></li>
+          <li><b>Пара</b><span class="hand"><i class="m m--h">10♥</i><i class="m m--c">10♣</i><i class="m m--s">K♠</i><i class="m m--d">7♦</i><i class="m m--h">2♥</i></span></li>
+          <li><b>Старшая карта</b><span class="hand"><i class="m m--s">A♠</i><i class="m m--d">Q♦</i><i class="m m--h">9♥</i><i class="m m--c">6♣</i><i class="m m--s">3♠</i></span></li>
+        </ol>
       </div>
     </div>
+  </section>
 
-    <p class="dialog__note" id="create-note"></p>
-    <div class="dialog__row">
-      <button class="btn btn--ghost" value="cancel" type="submit">Отмена</button>
-      <button class="btn btn--primary" value="ok" type="submit">Открыть стол</button>
+  <!-- Вопросы: тот же текст лежит в разметке FAQPage в head -->
+  <section class="section" id="faq">
+    <div class="wrap wrap--narrow">
+      <h2>Частые вопросы</h2>
+      <div class="faq">
+        <details open>
+          <summary>Это правда бесплатно?</summary>
+          <p>Да. На сайте нет платежей вообще: при регистрации вы получаете 10 000 виртуальных фишек, а если они закончатся, банк можно бесплатно пополнить.</p>
+        </details>
+        <details>
+          <summary>Можно ли выиграть или вывести деньги?</summary>
+          <p>Нет. Фишки виртуальные: их нельзя купить, продать или обменять на деньги. THPoker — игра для удовольствия и тренировки, а не азартная игра.</p>
+        </details>
+        <details>
+          <summary>Нужно ли что-то скачивать?</summary>
+          <p>Нет. Покер работает прямо в браузере — на компьютере, телефоне и планшете. Достаточно открыть сайт и войти.</p>
+        </details>
+        <details>
+          <summary>Что нужно для регистрации?</summary>
+          <p>Только имя за столом и пароль. Почта и телефон не нужны.</p>
+        </details>
+        <details>
+          <summary>Как сыграть в покер с друзьями онлайн?</summary>
+          <p>Откройте свой стол кнопкой «Создать стол», выберите блайнды и число мест и позовите друзей: стол появится в лобби, а друзья увидят, за каким столом вы сидите, и смогут подсесть в один клик.</p>
+        </details>
+        <details>
+          <summary>Что такое сит-н-гоу?</summary>
+          <p>Короткий турнир на один стол на 6 или 9 игроков. Все платят одинаковый взнос виртуальными фишками, играют на вылет, блайнды растут каждые две минуты, а призовые места делят фонд.</p>
+        </details>
+        <details>
+          <summary>Можно ли играть, если никого нет онлайн?</summary>
+          <p>Да. За любой стол можно посадить ботов — с ними удобно учиться и пробовать новые приёмы.</p>
+        </details>
+      </div>
     </div>
-  </form>
-</dialog>
+  </section>
 
-<!-- Профиль другого игрока -->
-<dialog id="profile-dialog" class="dialog dialog--profile">
-  <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="profile-close" title="Закрыть" aria-label="Закрыть"></button>
-  <div id="profile-body"></div>
-</dialog>
+  <section class="final">
+    <div class="wrap final__in">
+      <h2>Садитесь за стол — фишки уже ждут</h2>
+      <p>10 000 фишек, турниры и столы с друзьями. Бесплатно и без денег.</p>
+      <a class="btn btn--primary btn--lg" href="/play">Играть в покер онлайн</a>
+    </div>
+  </section>
+</main>
 
-<div class="toast" id="toast" hidden></div>
+<footer class="footer">
+  <div class="wrap footer__in">
+    <a class="logo logo--sm" href="/"><span class="logo__mark" aria-hidden="true">♠</span>THPoker</a>
+    <p>Бесплатный онлайн покер на виртуальные фишки. Фишки нельзя купить, продать или вывести — это не азартная игра на деньги.</p>
+  </div>
+</footer>
 
-<script src="/sound.js"></script>
-<script src="/app.js"></script>
+<script src="/landing.js" defer></script>
 </body>
 </html>

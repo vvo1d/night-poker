@@ -1,6 +1,6 @@
 # Служба игрового сервера. Класть в /etc/systemd/system/night-poker.service
 [Unit]
-Description=Ночная партия — покерный сервер
+Description=THPoker — покерный сервер
 After=network-online.target
 Wants=network-online.target
 
