@@ -1,0 +1,103 @@
+/* Админ-панель: поверх стилей игры (style.css) — свои таблицы, плитки и графики. */
+
+body.admin { min-height: 100%; }
+.adm { width: min(1200px, 100%); margin: 0 auto; padding: 24px 22px 60px; }
+.adm__denied { color: var(--muted); padding: 40px 0; }
+.adm__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.adm__bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.adm__count { font-size: 13px; color: var(--muted); }
+.adm__search, .adm__select, .adm__text, .user-card__form input {
+  font: inherit; font-size: 14px; color: var(--text); background: #0b1215;
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+}
+.adm__search { width: min(320px, 100%); }
+.adm__text { width: 100%; resize: vertical; margin-bottom: 12px; }
+.adm__split { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+.panel { background: var(--ink-2); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+.panel--narrow { max-width: 640px; }
+.panel h3 { font-size: 17px; margin-bottom: 8px; }
+.panel__note { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+.muted { color: var(--muted); }
+code { font-size: 12px; color: var(--brass); }
+
+/* плитки с главными числами */
+.tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--ink-2); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; }
+.tile__value { font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: 30px; color: var(--bone); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile__label { font-size: 13px; color: var(--text); margin-top: 4px; }
+.tile__note { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* графики: по одному ряду, столбики по дням */
+.charts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.chart { margin: 0; background: var(--ink-2); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px 10px; }
+.chart__cap { display: flex; flex-direction: column; margin-bottom: 8px; }
+.chart__cap b { font-weight: 600; color: var(--bone); }
+.chart__cap span { font-size: 12px; color: var(--muted); }
+.chart__svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart__bar { fill: var(--brass-dim); }
+.chart__bar.is-today { fill: var(--brass); }
+.chart__hit { fill: transparent; cursor: crosshair; }
+.chart__hit:hover + .chart__hit { fill: transparent; }
+.chart__grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 4; }
+.chart__base { stroke: #35505a; stroke-width: 1; }
+.chart__axis { fill: var(--muted); font-size: 11px; font-family: "IBM Plex Sans", sans-serif; }
+.chart__table summary { font-size: 12px; color: var(--muted); cursor: pointer; margin-top: 6px; }
+.chart-tip {
+  position: fixed; z-index: 50; pointer-events: none; padding: 5px 10px; border-radius: 8px;
+  font-size: 12px; color: var(--bone); background: #0b1215; border: 1px solid var(--brass-dim);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5); white-space: nowrap;
+}
+
+/* воронка */
+.funnel { display: flex; flex-direction: column; gap: 10px; }
+.funnel__row { display: grid; grid-template-columns: 180px 1fr auto; align-items: center; gap: 10px; font-size: 13px; }
+.funnel__label { color: var(--text); }
+.funnel__bar { height: 10px; border-radius: 999px; background: var(--ink-3); overflow: hidden; }
+.funnel__bar i { display: block; height: 100%; border-radius: 999px; background: var(--brass); }
+.funnel__value { font-weight: 600; color: var(--bone); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* таблицы */
+.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tbl th { text-align: left; font-weight: 500; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.tbl td { padding: 7px 8px; border-bottom: 1px solid var(--line); color: var(--text); vertical-align: top; }
+.tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tbl--click tr:not(:first-child) { cursor: pointer; }
+.tbl--click tr:not(:first-child):hover td { background: rgba(255, 255, 255, 0.03); }
+.tbl--mini td { padding: 3px 6px; }
+.tbl td.players { font-size: 12px; color: var(--muted); max-width: 420px; }
+.badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10px; line-height: 16px; color: var(--muted); border: 1px solid var(--line); vertical-align: 1px; }
+.badge--bad { color: #eab6ad; border-color: #7a4238; }
+.badge--ok { color: var(--strong); border-color: rgba(79, 157, 106, 0.5); }
+.dot-online { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--strong); margin-right: 6px; vertical-align: 1px; }
+
+/* карточка игрока */
+.user-card { position: sticky; top: 16px; }
+.user-card__head { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; }
+.user-card__head h3 { margin: 0 6px 0 0; }
+.user-card h4 { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 500; margin: 16px 0 6px; }
+.user-card__info { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+.user-card__info dt { color: var(--muted); }
+.user-card__info dd { margin: 0; color: var(--text); }
+.user-card__form { display: flex; gap: 6px; flex-wrap: wrap; }
+.user-card__form input { flex: 1 1 120px; min-width: 0; padding: 6px 8px; }
+.user-card__row { display: flex; gap: 8px; flex-wrap: wrap; }
+.user-card__log { list-style: none; margin: 0; padding: 0; font-size: 12px; color: var(--muted); max-height: 200px; overflow: auto; }
+.user-card__log li { padding: 3px 0; border-bottom: 1px solid var(--line); }
+
+@media (max-width: 1000px) {
+  .tiles { grid-template-columns: repeat(2, 1fr); }
+  .charts, .adm__grid, .adm__split { grid-template-columns: 1fr; }
+  .user-card { position: static; }
+}
+@media (max-width: 620px) {
+  .adm { padding: 16px 12px 40px; }
+  .funnel__row { grid-template-columns: 1fr auto; }
+  .funnel__bar { grid-column: 1 / -1; grid-row: 2; }
+  .topbar .pages { order: 3; width: 100%; overflow-x: auto; }
+  .topbar { flex-wrap: wrap; }
+}
+
+/* турниры */
+.mtt-form { margin-bottom: 16px; }
+.mtt-form .adm__search { width: auto; flex: 1 1 160px; }
+.mtt-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }

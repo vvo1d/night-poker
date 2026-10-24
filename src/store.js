@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const { openStorage } = require('./db');
 const { freshStats, unlockNew, tierTotal, TIER_NAMES, category } = require('./achievements');
 const daily = require('./daily');
+const seasons = require('./seasons');
 
 const START_CHIPS = 10000;
 const RELOAD_CHIPS = 2000; // бесплатное пополнение для игроков без фишек
@@ -20,6 +21,8 @@ const RATINGS = {
   chips: (u) => u.chips,
   wins: (u) => u.stats.handsWon,
   sng: (u) => u.stats.sngWins * 1e9 + u.stats.sngPrizes, // победы, при равенстве — призовые
+  // Очки текущего сезона: у тех, кто в этом месяце ещё не играл, — ноль.
+  season: (u) => (u.meta.season && u.meta.season.key === seasons.seasonKey() ? u.meta.season.points : 0),
 };
 
 // Пароли считаются на пуле потоков, а не в основном цикле: иначе на входе
@@ -75,6 +78,8 @@ class Store {
       // Ступени, заработанные до появления ачивок (раздачи, банк), открываем сразу.
       if (unlockNew(user).length) this.dirtyUsers.add(user.id);
     }
+    // Сервер мог стоять в момент смены сезона — подводим итоги сейчас.
+    this.seasonSweep();
     for (const [token, rec] of sessions) {
       if (this.users.has(rec.userId)) this.sessions.set(token, rec);
     }
@@ -106,6 +111,8 @@ class Store {
       user.friendsOut = user.friendsOut || [];
     }
     user.stats.peakChips = Math.max(user.stats.peakChips, user.chips);
+    user.meta = user.meta || {};
+    if (!Array.isArray(user.meta.days)) user.meta.days = [];
     return user;
   }
 
@@ -201,7 +208,7 @@ class Store {
     return null;
   }
 
-  async register(name, password) {
+  async register(name, password, source = null) {
     name = String(name || '').trim();
     password = String(password || '');
     const bad = this.checkName(name);
@@ -222,10 +229,12 @@ class Store {
       chips: START_CHIPS,
       handsPlayed: 0,
       createdAt: Date.now(),
+      meta: { source: cleanSource(source) },
     };
     this.prepare(user);
     this.users.set(user.id, user);
     this.byName.set(name.toLowerCase(), user.id);
+    this.markActive(user);
     this.touch(user);
     return { user };
   }
@@ -234,6 +243,7 @@ class Store {
     const id = this.byName.get(String(name || '').trim().toLowerCase());
     const user = id && this.users.get(id);
     if (!user) return { error: 'Игрок с таким именем не найден' };
+    if (this.isBanned(user)) return { error: 'Аккаунт заблокирован' };
     if (!user.hash) return { error: 'Этот аккаунт входит через Telegram' };
     const attempt = await scrypt(String(password || ''), user.salt);
     const stored = Buffer.from(user.hash, 'hex');
@@ -241,6 +251,75 @@ class Store {
       return { error: 'Неверный пароль' };
     }
     return { user };
+  }
+
+  // ——— администрирование ———
+
+  // Что сделал администратор — остаётся в истории игрока.
+  adminNote(u, by, text) {
+    u.meta.log = [...(u.meta.log || []), { at: Date.now(), by, text }].slice(-50);
+    console.log(`Админ ${by}: ${u.name} — ${text}`);
+    this.touch(u);
+  }
+
+  adjustChips(userId, amount, by, reason = '') {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    amount = Math.round(Number(amount) || 0);
+    if (!amount) return { error: 'Укажите сумму' };
+    if (u.chips + amount < 0) return { error: `В банке только ${u.chips}` };
+    this.addChips(userId, amount);
+    this.adminNote(u, by, `${amount > 0 ? '+' : ''}${amount} фишек${reason ? ` (${reason})` : ''}`);
+    return { ok: true, chips: u.chips };
+  }
+
+  ban(userId, by, reason = '') {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    u.meta.banned = { at: Date.now(), by, reason: String(reason).slice(0, 200) };
+    // Все его сессии закрываются сразу.
+    for (const [token, s] of this.sessions) if (s.userId === userId) this.destroySession(token);
+    this.adminNote(u, by, `заблокирован${reason ? `: ${reason}` : ''}`);
+    return { ok: true };
+  }
+
+  unban(userId, by) {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    delete u.meta.banned;
+    this.adminNote(u, by, 'разблокирован');
+    return { ok: true };
+  }
+
+  // Новый пароль от администратора — например, если игрок его забыл.
+  async setPassword(userId, password, by) {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    u.salt = crypto.randomBytes(16).toString('hex');
+    u.hash = (await scrypt(password, u.salt)).toString('hex');
+    this.adminNote(u, by, 'задан новый пароль');
+    return { ok: true };
+  }
+
+  isBanned(u) { return !!(u && u.meta && u.meta.banned); }
+
+  // ——— для аналитики ———
+
+  // День, когда игрок заходил. Храним последние 120 дней — для удержания хватает.
+  markActive(u, now = Date.now()) {
+    const day = daily.dayKey(now);
+    const days = u.meta.days;
+    if (days[days.length - 1] === day) return;
+    days.push(day);
+    if (days.length > 120) days.splice(0, days.length - 120);
+    this.touch(u);
+  }
+
+  // Первая посадка за стол — главный шаг воронки после регистрации.
+  markSit(u, now = Date.now()) {
+    if (u.meta.firstSitAt) return;
+    u.meta.firstSitAt = now;
+    this.touch(u);
   }
 
   // ——— Telegram ———
@@ -259,10 +338,11 @@ class Store {
   }
 
   // Вход через Telegram: свой аккаунт, а при первом входе — новый, без пароля.
-  telegramUser(tg) {
+  telegramUser(tg, source = null) {
     const known = this.byTg.get(tg.id);
     if (known && this.users.has(known)) {
       const u = this.users.get(known);
+      if (this.isBanned(u)) return { error: 'Аккаунт заблокирован' };
       if (tg.username && u.tg.username !== tg.username) { u.tg.username = tg.username; this.touch(u); }
       return { user: u, created: false };
     }
@@ -275,8 +355,10 @@ class Store {
       handsPlayed: 0,
       createdAt: Date.now(),
       tg: { id: tg.id, username: tg.username || null },
+      meta: { source: cleanSource(source) || 'telegram' },
     };
     this.prepare(user);
+    this.markActive(user);
     this.users.set(user.id, user);
     this.byName.set(user.name.toLowerCase(), user.id);
     this.byTg.set(tg.id, user.id);
@@ -386,18 +468,23 @@ class Store {
     if (r.result && category(r.result.value) >= 4) daily.progress(u, 'straightPlus');
     if (r.withFriend) daily.progress(u, 'friendHand');
 
+    // Очки сезона: за раздачу и за банк, выигранный у человека.
+    this.seasonPoints(u, 'hand');
+    if (r.won > 0 && r.withHuman) this.seasonPoints(u, 'winVsHuman');
+
     this.checkAchievements(u);
     this.touch(u);
   }
 
   // Турнир: старт или занятое место.
-  recordSng(userId, { start = false, place = 0, prize = 0 }) {
+  recordSng(userId, { start = false, place = 0, prize = 0, humans = 0, seats = 0 }) {
     const u = this.users.get(userId);
     if (!u) return;
     const s = u.stats;
     if (start) { s.sngPlayed += 1; daily.progress(u, 'sngPlay'); }
     if (prize > 0) { s.sngCashes += 1; s.sngPrizes += prize; daily.progress(u, 'sngCash'); }
     if (place === 1) s.sngWins += 1;
+    if (place) this.seasonPoints(u, 'sng', seasons.sngPoints(place, humans, seats));
     this.checkAchievements(u);
     this.touch(u);
   }
@@ -419,7 +506,59 @@ class Store {
     const res = daily.claimQuest(u, String(questId));
     if (res.error) return res;
     this.addChips(userId, res.reward);
+    this.seasonPoints(u, 'quest');
     return res;
+  }
+
+  // Турнир по расписанию: участие, место и приз.
+  recordMtt(userId, { start = false, place = 0, prize = 0 }) {
+    const u = this.users.get(userId);
+    if (!u) return;
+    const s = u.stats;
+    if (start) {
+      s.mttPlayed += 1;
+      daily.progress(u, 'sngPlay');
+      this.seasonPoints(u, 'mtt', 5);
+    }
+    if (prize > 0) { s.mttCashes += 1; s.mttPrizes += prize; daily.progress(u, 'sngCash'); }
+    if (place === 1) s.mttWins += 1;
+    if (place) this.seasonPoints(u, 'mtt', place === 1 ? 60 : prize > 0 ? 25 : 0);
+    this.checkAchievements(u);
+    this.touch(u);
+  }
+
+  // ——— сезоны ———
+
+  // Очки сезона. Если по дороге закрылся прошлый сезон — выдаём за него награду.
+  seasonPoints(u, kind, amount) {
+    const finished = seasons.add(u, kind, amount);
+    if (finished) this.seasonReward(u, finished);
+    this.touch(u);
+  }
+
+  seasonReward(u, result) {
+    if (result.reward > 0) this.addChips(u.id, result.reward);
+    const league = seasons.LEAGUES.find((l) => l.id === result.league);
+    this.news.set(u.id, {
+      id: `season-${result.key}`, icon: '🏆', title: `Сезон «${result.name}» — ${league.name}`,
+      tierName: result.reward ? `награда ${result.reward}` : 'спасибо за игру', at: Date.now(),
+    });
+    this.touch(u);
+  }
+
+  // Смена сезона: у всех, кто играл в прошлом, подводим итог и выдаём награды.
+  seasonSweep(now = Date.now()) {
+    const key = seasons.seasonKey(now);
+    if (this.seasonChecked === key) return 0;
+    this.seasonChecked = key;
+    let done = 0;
+    for (const u of this.users.values()) {
+      if (!u.meta.season || u.meta.season.key === key) continue;
+      const finished = seasons.ensure(u, now);
+      if (finished) { this.seasonReward(u, finished); done += 1; } else this.touch(u);
+    }
+    if (done) console.log(`Сезон закрыт: награды получили ${done} игроков`);
+    return done;
   }
 
   checkAchievements(u) {
@@ -544,6 +683,8 @@ class Store {
         sngWins: s.sngWins,
         sngPrizes: s.sngPrizes,
         achievements: tierTotal(u),
+        season: RATINGS.season(u),
+        league: seasons.leagueOf(RATINGS.season(u)).id,
         you: id === viewerId,
       };
     };
@@ -577,6 +718,7 @@ class Store {
       achievement: this.news.get(id) || null,   // последняя взятая ступень — клиент покажет всплывашку
       friendRequests: u.friendsIn.length,        // входящие заявки — значок на «Кабинете»
       daily: daily.view(u),                      // бонус за вход и задания дня
+      season: seasons.view(u),                   // очки и лига текущего сезона
       telegram: u.tg ? (u.tg.username ? `@${u.tg.username}` : 'привязан') : null,
       hasPassword: !!u.hash,
     };
@@ -621,6 +763,12 @@ class Store {
       pendingWrites: this.dirtyUsers.size + this.dirtySessions.size + this.goneSessions.size,
     };
   }
+}
+
+// Источник прихода — коротко и только безопасные символы: он попадает в отчёты.
+function cleanSource(source) {
+  const s = String(source || '').toLowerCase().replace(/[^a-z0-9а-яё._-]/gi, '').slice(0, 40);
+  return s || null;
 }
 
 module.exports = { Store, START_CHIPS, RELOAD_CHIPS };

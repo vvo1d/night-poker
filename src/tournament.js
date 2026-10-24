@@ -59,6 +59,7 @@ class Tournament {
 
   start(table) {
     this.status = 'running';
+    this.humans = table.players().filter((p) => !p.isBot).length;   // от этого зависят очки сезона
     this.startedAt = Date.now();
     this.levelAt = this.startedAt;
     this.level = 0;

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Админка — THPoker</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/admin.css">
+</head>
+<body class="admin">
+
+<header class="topbar">
+  <a class="brand" href="/play">THPoker</a>
+  <nav class="pages" id="tabs" role="tablist" aria-label="Разделы админки">
+    <button class="pages__tab is-active" data-tab="overview" role="tab">Обзор</button>
+    <button class="pages__tab" data-tab="users" role="tab">Игроки</button>
+    <button class="pages__tab" data-tab="tables" role="tab">Столы</button>
+    <button class="pages__tab" data-tab="tournaments" role="tab">Турниры</button>
+    <button class="pages__tab" data-tab="announce" role="tab">Объявление</button>
+  </nav>
+  <div class="topbar__right"><a class="btn btn--ghost btn--sm" href="/play">В игру</a></div>
+</header>
+
+<main class="adm">
+  <p class="adm__denied" id="denied" hidden>Эта страница — только для администратора. Войдите в игру под аккаунтом из списка <code>ADMIN_NAMES</code>.</p>
+
+  <!-- Обзор -->
+  <section id="tab-overview">
+    <div class="tiles" id="tiles"></div>
+    <div class="charts">
+      <figure class="chart" id="chart-registered"></figure>
+      <figure class="chart" id="chart-active"></figure>
+      <figure class="chart" id="chart-hands"></figure>
+    </div>
+    <div class="adm__grid">
+      <section class="panel">
+        <h3>Воронка за 30 дней</h3>
+        <div class="funnel" id="funnel"></div>
+      </section>
+      <section class="panel">
+        <h3>Возвращаемость новых игроков</h3>
+        <p class="panel__note">Из пришедших в этот день — сколько зашли на следующий день и через неделю.</p>
+        <table class="tbl" id="cohorts"></table>
+      </section>
+      <section class="panel">
+        <h3>Откуда приходят</h3>
+        <p class="panel__note">Источник — метка <code>utm_source</code>, сайт, с которого перешли, или приглашение.</p>
+        <table class="tbl" id="sources"></table>
+      </section>
+      <section class="panel">
+        <h3>Сервер</h3>
+        <table class="tbl" id="server"></table>
+      </section>
+    </div>
+  </section>
+
+  <!-- Игроки -->
+  <section id="tab-users" hidden>
+    <div class="adm__bar">
+      <input class="adm__search" id="user-q" placeholder="Имя или @telegram" autocomplete="off">
+      <select class="adm__select" id="user-sort">
+        <option value="recent">Недавно заходили</option>
+        <option value="new">Новые</option>
+        <option value="chips">Больше фишек</option>
+        <option value="hands">Больше раздач</option>
+      </select>
+      <span class="adm__count" id="user-count"></span>
+    </div>
+    <div class="adm__split">
+      <table class="tbl tbl--click" id="users"></table>
+      <aside class="panel user-card" id="user-card" hidden></aside>
+    </div>
+  </section>
+
+  <!-- Столы -->
+  <section id="tab-tables" hidden>
+    <div class="adm__bar"><button class="btn btn--sm" id="tables-reload">Обновить</button><span class="adm__count" id="tables-count"></span></div>
+    <table class="tbl" id="tables"></table>
+  </section>
+
+  <!-- Турниры по расписанию -->
+  <section id="tab-tournaments" hidden>
+    <div id="mtt-admin"></div>
+  </section>
+
+  <!-- Объявление -->
+  <section id="tab-announce" hidden>
+    <section class="panel panel--narrow">
+      <h3>Объявление для всех игроков</h3>
+      <p class="panel__note">Показывается полосой над лобби. Пустой текст — снять объявление.</p>
+      <textarea class="adm__text" id="announce-text" maxlength="300" rows="3" placeholder="Например: в субботу в 20:00 — турнир с призом 100 000 фишек"></textarea>
+      <div class="adm__bar"><button class="btn btn--primary btn--sm" id="announce-save">Опубликовать</button><span class="adm__count" id="announce-state"></span></div>
+    </section>
+  </section>
+</main>
+
+<div class="chart-tip" id="tip" hidden></div>
+<div class="toast" id="toast" hidden></div>
+<script src="/admin.js"></script>
+</body>
+</html>

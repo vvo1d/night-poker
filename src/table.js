@@ -12,6 +12,12 @@ const REVEAL_STEP = 600;   // пауза перед обязательным в�
 const REVEAL_ASK = 5000;   // сколько человек думает, показывать ли проигравшую руку
 const REVEAL_BOT = 500;    // бот решает быстро
 
+// Реакции за столом: эмодзи и готовые фразы облачком над местом игрока.
+const REACTIONS = ['👍', '😂', '😮', '😡', '🔥', '👏', '🤔', '😎'];
+const PHRASES = ['Хорошо сыграно', 'Удачи всем', 'Повезло!', 'Ну ты даёшь', 'Спасибо', 'Думаю…', 'Блеф?', 'Ещё раздачу!'];
+const REACTION_MS = 3500;  // сколько облачко висит над местом
+const REACTION_GAP = 2000; // не чаще раза в две секунды — иначе это спам
+
 let handCounter = 0;
 
 // Сколько тяжёлых расчётов силы руки разрешено за один тик сервера.
@@ -109,6 +115,18 @@ class Table {
   chat(name, text) {
     this.note(`${name}: ${text}`, 'chat');
     this.touch();
+  }
+
+  react(userId, text) {
+    const p = this.byUser(userId);
+    if (!p) return { error: 'Реагировать могут только те, кто сидит за столом' };
+    if (!REACTIONS.includes(text) && !PHRASES.includes(text)) return { error: 'Такой реакции нет' };
+    const now = Date.now();
+    if (p.reaction && now - p.reaction.at < REACTION_GAP) return { error: 'Не так часто' };
+    this.reactSeq = (this.reactSeq || 0) + 1;
+    p.reaction = { id: this.reactSeq, text, at: now };
+    this.touch();
+    return { ok: true };
   }
 
   touch() { this.version++; }
@@ -865,6 +883,9 @@ class Table {
           champion: this.phase === 'showdown' && p.wonContested,
           cards: p.inHand ? (p.showCards ? p.cards : p.cards.map(() => '??')) : [],
           best: p.bestCards || null,
+          // Свежая реакция: клиент сам уберёт облачко, когда выйдет время.
+          reaction: p.reaction && now - p.reaction.at < REACTION_MS
+            ? { id: p.reaction.id, text: p.reaction.text, ago: now - p.reaction.at } : null,
         };
       }),
     };
@@ -947,4 +968,4 @@ class Table {
   }
 }
 
-module.exports = { Table, setEvalBudget };
+module.exports = { Table, setEvalBudget, REACTIONS, PHRASES, REACTION_MS };

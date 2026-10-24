@@ -2,6 +2,7 @@ User-agent: *
 Allow: /
 Disallow: /api/
 Disallow: /play
+Disallow: /admin
 
 Host: https://thpoker.ru
 Sitemap: https://thpoker.ru/sitemap.xml

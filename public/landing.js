@@ -29,6 +29,23 @@ document.addEventListener('touchend', (e) => {
 
 // Живой счётчик: сколько людей сейчас за столами. Страница полностью
 // работает и без него — это лишь знак, что играют прямо сейчас.
+// Откуда пришёл игрок: метка utm_source, сайт-источник или приглашение.
+// Запоминаем первый визит — он и есть настоящий источник.
+const SOURCE_KEY = 'thp-source';
+function captureSource(fallback) {
+  try {
+    if (localStorage.getItem(SOURCE_KEY)) return;
+    const params = new URLSearchParams(location.search);
+    let source = params.get('utm_source') || params.get('ref');
+    if (!source && document.referrer) {
+      const host = new URL(document.referrer).hostname.replace(/^www\./, '');
+      if (host && host !== location.hostname) source = host;
+    }
+    localStorage.setItem(SOURCE_KEY, source || fallback || 'direct');
+  } catch { /* без памяти браузера источник не узнать */ }
+}
+captureSource();
+
 (async function live() {
   const node = document.getElementById('live');
   if (!node) return;

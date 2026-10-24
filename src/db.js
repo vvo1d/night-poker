@@ -52,6 +52,10 @@ const MIGRATIONS = [
   (db) => db.exec(`
     ALTER TABLE users ADD COLUMN telegram TEXT;
   `),
+  // Служебное по игроку: откуда пришёл, в какие дни играл, бан, сезон.
+  (db) => db.exec(`
+    ALTER TABLE users ADD COLUMN meta TEXT NOT NULL DEFAULT '{}';
+  `),
 ];
 
 function parseJson(text, fallback) {
@@ -102,13 +106,13 @@ function sqliteBackend(file = DEFAULT_DB) {
 
   const sql = {
     saveUser: db.prepare(`INSERT INTO users
-      (id, name, name_lower, salt, hash, chips, hands_played, created_at, stats, achievements, friends, telegram)
-      VALUES ($id, $name, $nameLower, $salt, $hash, $chips, $hands, $created, $stats, $achievements, $friends, $telegram)
+      (id, name, name_lower, salt, hash, chips, hands_played, created_at, stats, achievements, friends, telegram, meta)
+      VALUES ($id, $name, $nameLower, $salt, $hash, $chips, $hands, $created, $stats, $achievements, $friends, $telegram, $meta)
       ON CONFLICT (id) DO UPDATE SET
         name = excluded.name, name_lower = excluded.name_lower, salt = excluded.salt, hash = excluded.hash,
         chips = excluded.chips, hands_played = excluded.hands_played,
         stats = excluded.stats, achievements = excluded.achievements, friends = excluded.friends,
-        telegram = excluded.telegram`),
+        telegram = excluded.telegram, meta = excluded.meta`),
     saveSession: db.prepare(`INSERT INTO sessions (token, user_id, created, seen)
       VALUES ($token, $userId, $created, $seen)
       ON CONFLICT (token) DO UPDATE SET seen = excluded.seen`),
@@ -138,6 +142,7 @@ function sqliteBackend(file = DEFAULT_DB) {
         achievements: parseJson(row.achievements, {}),
         friends: parseJson(row.friends, []),
         tg: row.telegram ? parseJson(row.telegram, null) : null,
+        meta: parseJson(row.meta, {}),
       }));
       const sessions = sql.liveSessions.all(Date.now() - sessionTtl)
         .map((row) => [row.token, { userId: row.user_id, created: row.created, seen: row.seen, roomId: null }]);
@@ -158,6 +163,7 @@ function sqliteBackend(file = DEFAULT_DB) {
             // Друзья и заявки в обе стороны — одним полем.
             friends: JSON.stringify({ list: u.friends || [], in: u.friendsIn || [], out: u.friendsOut || [] }),
             telegram: u.tg ? JSON.stringify(u.tg) : null,
+            meta: JSON.stringify(u.meta || {}),
           });
         }
         for (const [token, s] of sessions) {

@@ -19,6 +19,10 @@ const DEFAULT_STATS = {
   sngWins: 0,
   sngPrizes: 0,       // сколько получено призами
   peakChips: 0,       // максимум фишек в банке
+  mttPlayed: 0,       // турниры по расписанию
+  mttCashes: 0,
+  mttWins: 0,
+  mttPrizes: 0,
 };
 
 function freshStats(saved) {

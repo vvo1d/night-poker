@@ -75,10 +75,12 @@
         <button class="btn btn--ghost btn--sm" id="reload-chips" hidden>Пополнить</button>
       </div>
       <button class="icon-btn" data-sound-toggle title="Звук" aria-pressed="true"><span>♪</span></button>
+      <a class="btn btn--ghost btn--sm" id="admin-link" href="/admin" hidden>Админка</a>
       <button class="btn btn--ghost btn--sm" id="logout">Выйти</button>
     </div>
   </header>
 
+  <p class="announce" id="announce" hidden></p>
   <main class="lobby" id="page-tables">
     <div class="lobby__head">
       <div>
@@ -89,6 +91,12 @@
     </div>
     <!-- Бонус за вход и задания дня -->
     <section class="today" id="today" aria-label="Сегодня" hidden></section>
+
+    <!-- Турниры по расписанию -->
+    <section class="mtts" id="mtts" hidden>
+      <h3>Турниры по расписанию</h3>
+      <div class="mtts__list" id="mtts-list"></div>
+    </section>
 
     <div class="lobby__list">
       <div class="filters" role="tablist" id="lobby-filter">
@@ -119,8 +127,10 @@
       <h2>Рейтинг игроков</h2>
       <p id="rating-note">Пятьдесят лучших. Нажмите на игрока, чтобы открыть его профиль.</p>
     </div>
+    <div class="season-card" id="season-card" hidden></div>
     <div class="filters" role="tablist" id="rating-filter">
-      <button class="filter is-active" data-by="chips" role="tab">По фишкам</button>
+      <button class="filter is-active" data-by="season" role="tab">Сезон</button>
+      <button class="filter" data-by="chips" role="tab">По фишкам</button>
       <button class="filter" data-by="wins" role="tab">По выигранным раздачам</button>
       <button class="filter" data-by="sng" role="tab">По турнирам</button>
     </div>
@@ -161,6 +171,10 @@
           <label class="pick" title="Показывать силу собранной руки">
             <span class="pick__label">Силомер руки</span>
             <input type="checkbox" id="meter-mode" checked>
+          </label>
+          <label class="pick" title="Показывать эмодзи и фразы соперников над их местами">
+            <span class="pick__label">Реакции соперников</span>
+            <input type="checkbox" id="react-mode" checked>
           </label>
           <div class="menu__sep"></div>
           <button class="menu__item" id="menu-topup" role="menuitem">Докупить фишки</button>
@@ -215,6 +229,14 @@
 
   <footer class="actionbar">
     <div class="turnbar" id="turnbar"><i></i></div>
+    <!-- Реакции: кнопка и выбор эмодзи или фразы -->
+    <div class="react" id="react" hidden>
+      <button class="react__toggle" id="react-toggle" type="button" title="Реакция (E)" aria-label="Реакция" aria-expanded="false">😊</button>
+      <div class="react__panel" id="react-panel" hidden>
+        <div class="react__emoji" id="react-emoji"></div>
+        <div class="react__phrases" id="react-phrases"></div>
+      </div>
+    </div>
     <div class="actions" id="actions"></div>
   </footer>
 </section>

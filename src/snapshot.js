@@ -35,6 +35,7 @@ function tableRecord(table) {
     createdAt: table.createdAt,
     private: !!table.private,
     invite: table.invite,
+    mttId: table.mttId || null,
     sng: tour ? {
       seats: tour.seats,
       buyIn: tour.buyIn,
@@ -50,6 +51,28 @@ function tableRecord(table) {
   };
 }
 
+// Кому сколько вернуть со стола, если он закрывается не по правилам игры:
+// перезапуск сервера или администратор закрыл стол.
+function refunds(rec) {
+  const out = [];
+  const humans = rec.players.filter((p) => !p.isBot);
+  const sng = rec.sng;
+  if (!sng) {
+    // Кэш: стек плюс вложенное в недоигранную раздачу.
+    for (const p of humans) out.push({ userId: p.userId, amount: p.chips });
+  } else if (sng.status === 'registering') {
+    // Турнир не начался — возвращаем взносы.
+    for (const p of humans) out.push({ userId: p.userId, amount: sng.buyIn });
+  } else if (sng.status === 'running') {
+    // Турнир оборвался: невыплаченную часть фонда делим по стекам,
+    // как делят призы при договорной остановке турнира.
+    const left = sng.seats * sng.buyIn - sng.paid;
+    const total = rec.players.reduce((s, p) => s + p.chips, 0);
+    if (total > 0) for (const p of humans) out.push({ userId: p.userId, amount: Math.floor((left * p.chips) / total) });
+  }
+  return out.filter((r) => r.amount > 0);
+}
+
 class Snapshot {
   constructor(dir) {
     this.file = path.join(dir, 'tables.json');
@@ -59,9 +82,10 @@ class Snapshot {
 
   // Запись атомарная: сначала во временный файл, потом переименование.
   // Пишем, только если что-то изменилось.
-  save(tables) {
+  // extra — то, что хранится рядом со столами (турниры по расписанию).
+  save(tables, extra = {}) {
     if (this.paused) return false;
-    const json = JSON.stringify({ savedAt: Date.now(), tables: [...tables.values()].map(tableRecord) });
+    const json = JSON.stringify({ savedAt: Date.now(), tables: [...tables.values()].map(tableRecord), ...extra });
     const body = json.slice(json.indexOf(',"tables"'));   // время записи не считается изменением
     if (body === this.last) return false;
     try {
@@ -99,27 +123,17 @@ class Snapshot {
     };
 
     for (const rec of snap.tables) {
-      const humans = rec.players.filter((p) => !p.isBot);
+      // Столы турниров по расписанию разбирает сам турнир (см. mttRefunds).
+      if (rec.mttId) continue;
       const sng = rec.sng;
-      if (!sng) {
-        // Кэш: стек плюс вложенное в недоигранную раздачу.
-        for (const p of humans) give(p.userId, p.chips);
-      } else if (sng.status === 'registering') {
-        // Турнир не начался — возвращаем взносы.
-        for (const p of humans) give(p.userId, sng.buyIn);
-      } else if (sng.status === 'running') {
-        // Турнир оборвался: невыплаченную часть фонда делим по стекам,
-        // как делят призы при договорной остановке турнира.
-        const left = sng.seats * sng.buyIn - sng.paid;
-        const total = rec.players.reduce((s, p) => s + p.chips, 0);
-        if (total > 0) for (const p of humans) give(p.userId, Math.floor((left * p.chips) / total));
-      }
+      for (const r of refunds(rec)) give(r.userId, r.amount);
 
       // Стол игрока открываем заново, чтобы ссылка-приглашение продолжала работать.
       // Оборвавшийся или законченный турнир не открываем: его уже не доиграть.
       const reopenable = !rec.house && (!sng || sng.status === 'registering');
       if (reopenable && reopen(rec)) sum.tables += 1;
     }
+    sum.snap = snap;
     return sum;
   }
 
@@ -130,4 +144,20 @@ class Snapshot {
   }
 }
 
-module.exports = { Snapshot, handIsLive };
+// Турнир по расписанию оборвался перезапуском: невыплаченный фонд делим по стекам
+// всех, кто ещё сидел за его столами.
+function mttRefunds(snap) {
+  const out = [];
+  for (const m of snap.mttsRunning || []) {
+    const players = snap.tables.filter((t) => t.mttId === m.id).flatMap((t) => t.players);
+    const total = players.reduce((s, p) => s + p.chips, 0);
+    if (!total) continue;
+    for (const p of players) {
+      const amount = Math.floor((m.poolLeft * p.chips) / total);
+      if (!p.isBot && amount > 0) out.push({ userId: p.userId, amount });
+    }
+  }
+  return out;
+}
+
+module.exports = { Snapshot, handIsLive, tableRecord, refunds, mttRefunds };

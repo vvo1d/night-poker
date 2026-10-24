@@ -72,6 +72,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .btn:active:not(:disabled) { transform: translateY(1px) scale(0.99); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .btn--primary { background: var(--brass); border-color: var(--brass); color: #1a1305; }
 .btn--primary:hover:not(:disabled) { background: #d9b25c; border-color: #d9b25c; }
 .btn--ghost { background: transparent; }
@@ -244,6 +245,13 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .board-top h3 { font-size: 15px; margin-bottom: 10px; }
 .board-top .hint { margin: 0; }
 
+.announce {
+  margin: 0; padding: 10px 22px; text-align: center; font-size: 14px; color: var(--bone);
+  background: linear-gradient(90deg, rgba(201, 162, 74, 0.08), rgba(201, 162, 74, 0.18), rgba(201, 162, 74, 0.08));
+  border-bottom: 1px solid var(--brass-dim);
+}
+.announce::before { content: '📣 '; }
+
 /* ——— сегодня: бонус и задания ——— */
 
 .today { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: -12px; }
@@ -270,6 +278,31 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .today__quest.is-claimed { opacity: 0.6; }
 .today__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; }
 .today__foot .btn { margin-top: 0; }
+
+/* ——— турниры по расписанию ——— */
+
+.mtts { grid-column: 1 / -1; }
+.mtts h3 { font-size: 17px; margin-bottom: 10px; }
+.mtts__list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.mtt {
+  display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-radius: 14px;
+  background: var(--ink-2); border: 1px solid var(--line);
+}
+.mtt--registering { border-color: var(--brass-dim); }
+.mtt--running { border-color: rgba(79, 157, 106, 0.6); }
+.mtt--cancelled, .mtt--finished { opacity: 0.75; }
+.mtt.is-me { box-shadow: inset 3px 0 0 var(--brass); }
+.mtt__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.mtt__name { font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: 18px; color: var(--bone); }
+.mtt__fee { font-size: 12px; color: var(--brass); white-space: nowrap; }
+.mtt__when { font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; }
+.mtt--running .mtt__when::before {
+  content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px;
+  background: var(--strong); animation: blink 1.8s ease-in-out infinite;
+}
+.mtt__pool { font-size: 12px; color: var(--muted); }
+.mtt__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; min-height: 32px; }
+.mtt__count { font-size: 12px; color: var(--muted); }
 
 /* ——— разделы лобби ——— */
 
@@ -299,6 +332,37 @@ strong, .num { font-variant-numeric: tabular-nums; }
 
 .is-link { cursor: pointer; }
 .is-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* сезон и лиги */
+.league {
+  --lg: #b07a4b; --lg-hi: #e0ad7d;
+  display: inline-block; width: 14px; height: 14px; border-radius: 4px; margin-right: 8px; vertical-align: -2px;
+  background: linear-gradient(135deg, var(--lg-hi), var(--lg)); transform: rotate(45deg) scale(0.8);
+}
+.league--silver { --lg: #9aa6aa; --lg-hi: #e4ecee; }
+.league--gold { --lg: #c9a24a; --lg-hi: #f0d68f; }
+.league--platinum { --lg: #7fb7c9; --lg-hi: #e3f6fb; }
+.league--diamond { --lg: #6f7fe8; --lg-hi: #c7f0ff; }
+.league--big {
+  width: auto; height: auto; transform: none; margin: 0; padding: 6px 12px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; color: #1a1305; vertical-align: 0;
+}
+.season-card { margin-bottom: 18px; }
+.season {
+  padding: 16px 18px; border-radius: 14px; background: var(--ink-2); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.season__head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.season__title { display: flex; flex-direction: column; flex: 1; min-width: 160px; line-height: 1.3; }
+.season__title b { color: var(--bone); font-weight: 600; }
+.season__title span { font-size: 12px; color: var(--muted); }
+.season__points { font-family: Fraunces, Georgia, serif; font-size: 24px; font-weight: 500; color: var(--brass); }
+.season__bar { height: 6px; border-radius: 999px; background: var(--ink-3); overflow: hidden; }
+.season__bar i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--brass-dim), var(--brass)); }
+.season__note { margin: 0; font-size: 13px; color: var(--text); }
+.season__how { margin: 0; font-size: 12px; color: var(--muted); }
+.season__history { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.season__past { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; }
 
 /* рейтинг */
 .rating { display: flex; flex-direction: column; margin-top: 4px; }
@@ -832,7 +896,54 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .chat input:focus { outline: none; border-color: var(--brass-dim); }
 
 /* панель действий */
-.actionbar { position: relative; border-top: 1px solid var(--line); background: var(--ink-2); }
+.actionbar {
+  position: relative; border-top: 1px solid var(--line); background: var(--ink-2);
+  display: grid; grid-template-columns: auto minmax(0, 1fr);
+}
+.actionbar > .turnbar, .actionbar > .meter { grid-column: 1 / -1; }
+.actionbar > .actions { grid-column: 2; }
+
+/* реакции: кнопка слева в панели, выбор всплывает вверх */
+.react { grid-column: 1; align-self: center; position: relative; padding-left: 14px; }
+.react__toggle {
+  width: 44px; height: 44px; border-radius: 50%; font-size: 22px; line-height: 1; cursor: pointer;
+  background: var(--ink-3); border: 1px solid var(--line);
+  transition: border-color 120ms ease, transform 80ms ease;
+}
+.react__toggle:hover, .react__toggle[aria-expanded="true"] { border-color: var(--brass-dim); }
+.react__toggle:active { transform: scale(0.95); }
+.react__toggle:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.react__panel {
+  position: absolute; left: 10px; bottom: calc(100% + 14px); z-index: 25; width: 300px;
+  padding: 10px; border-radius: 14px; background: rgba(13, 21, 25, 0.98); border: 1px solid var(--brass-dim);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55); animation: rise 140ms ease-out both;
+}
+.react__emoji { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
+.react__phrases { display: flex; flex-wrap: wrap; gap: 6px; }
+.react__item {
+  font: inherit; font-size: 13px; color: var(--text); cursor: pointer; white-space: nowrap;
+  background: var(--ink-3); border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px;
+}
+.react__item:hover { border-color: var(--brass-dim); color: var(--bone); }
+.react__item--emoji { font-size: 24px; padding: 6px 0; border-radius: 10px; }
+
+/* облачко над местом игрока */
+.seat__bubble {
+  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); z-index: 6;
+  max-width: 150px; padding: 5px 11px; border-radius: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 13px; font-weight: 500; color: #1a1305; background: var(--bone);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); pointer-events: none;
+}
+.seat__bubble::after {
+  content: ''; position: absolute; left: 50%; top: 100%; transform: translateX(-50%);
+  border: 6px solid transparent; border-top-color: var(--bone);
+}
+.seat__bubble--emoji { font-size: 30px; padding: 2px 8px; background: rgba(241, 235, 221, 0.95); }
+.seat__bubble.is-new { animation: bubbleIn 260ms cubic-bezier(0.2, 1.4, 0.5, 1) both; }
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translate(-50%, 8px) scale(0.6); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
 .turnbar { height: 3px; background: transparent; }
 .turnbar i { display: block; height: 100%; width: 0; background: var(--brass); transition: width 200ms linear, background 300ms ease; }
 .turnbar i.is-low { background: var(--weak); }
@@ -1114,6 +1225,9 @@ strong, .num { font-variant-numeric: tabular-nums; }
   .acts__main { gap: 6px; }
   .btn--act { flex: 1; min-width: 0; padding: 10px 4px; font-size: 14px; }
   .btn--act .btn__key { display: none; }
+  .react { padding-left: 8px; align-self: end; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .react__toggle { width: 40px; height: 40px; font-size: 20px; }
+  .react__panel { width: min(300px, calc(100vw - 20px)); left: 4px; }
   .menu__panel { min-width: 190px; }
   /* На телефоне панель ставки встаёт в поток над кнопками: всплывая, она закрыла бы свои карты. */
   .acts__size { position: static; }
@@ -1180,7 +1294,7 @@ strong, .num { font-variant-numeric: tabular-nums; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .card--deal, .card--flip .card__inner, .bet.is-new, .seat__win, .raise,
+  .card--deal, .card--flip .card__inner, .bet.is-new, .seat__win, .raise, .seat__bubble.is-new, .react__panel,
   .room.is-new, .auth, .auth__mark span, .dialog[open], .toast, .felt__msg.is-win { animation: none; }
   .card--win, .meter.is-up .meter__name, .pot.is-bump strong, .bank strong.is-bump,
   .room__live--hot::before { animation: none; }

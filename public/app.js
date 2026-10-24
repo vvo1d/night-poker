@@ -96,6 +96,32 @@ function toast(text, { good = false } = {}) {
   toastTimer = setTimeout(() => { node.hidden = true; }, good ? 4500 : 3200);
 }
 
+// Откуда пришёл игрок: метка utm_source, сайт-источник или приглашение.
+// Запоминаем первый визит — он и есть настоящий источник.
+const SOURCE_KEY = 'thp-source';
+function captureSource(fallback) {
+  try {
+    if (localStorage.getItem(SOURCE_KEY)) return;
+    const params = new URLSearchParams(location.search);
+    let source = params.get('utm_source') || params.get('ref');
+    if (!source && document.referrer) {
+      const host = new URL(document.referrer).hostname.replace(/^www\./, '');
+      if (host && host !== location.hostname) source = host;
+    }
+    localStorage.setItem(SOURCE_KEY, source || fallback || 'direct');
+  } catch { /* без памяти браузера источник не узнать */ }
+}
+captureSource(new URLSearchParams(location.search).get('join') ? 'invite' : null);
+
+function currentSource() {
+  try { return localStorage.getItem(SOURCE_KEY); } catch { return null; }
+}
+
+// Цель в Яндекс Метрике — если счётчик подключён.
+function goal(name) {
+  if (window.ym && state.config && state.config.metrika) window.ym(Number(state.config.metrika), 'reachGoal', name);
+}
+
 // ——— экраны ———
 
 function show(view) {
@@ -209,7 +235,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
 $('#auth-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
-  const payload = { name: form.name.value, password: form.password.value };
+  const payload = { name: form.name.value, password: form.password.value, source: currentSource() };
   const { ok, data } = await post(authMode === 'login' ? '/api/login' : '/api/register', payload);
   if (!ok || data.error) {
     const err = $('#auth-error');
@@ -220,12 +246,14 @@ $('#auth-form').addEventListener('submit', async (e) => {
     return;
   }
   form.password.value = '';
+  if (authMode === 'register') goal('register');
   afterLogin(data.user);
 });
 
 // Вошли любым способом: в лобби, поток событий и — если пришли по приглашению — за стол.
 function afterLogin(user) {
   setUser(user);
+  fetch('/api/me').then((r) => r.json()).then((d) => { $('#admin-link').hidden = !d.admin; }).catch(() => {});
   show('lobby');
   Sound.play('chips');
   connectStream();
@@ -377,7 +405,105 @@ function renderLobby(data) {
     : '';
   if (data.stakes) state.stakes = data.stakes;
   if (data.sngBuyIns) state.sngBuyIns = data.sngBuyIns;
+
+  // Объявление администратора — полосой над лобби.
+  const note = $('#announce');
+  note.hidden = !data.announcement;
+  note.textContent = data.announcement ? data.announcement.text : '';
 }
+
+// ——— турниры по расписанию ———
+
+async function loadMtts() {
+  const data = await getJson('/api/mtt').catch(() => null);
+  if (!data) return;
+  // Часы сервера и браузера могут расходиться — считаем отсчёт от серверного времени.
+  state.mttSkew = data.now - Date.now();
+  state.mtts = data.list;
+  renderMtts();
+}
+
+const TIME = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+const DAY = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'Europe/Moscow' });
+
+function startText(at) {
+  const left = at - (Date.now() + (state.mttSkew || 0));
+  const today = DAY.format(new Date()) === DAY.format(new Date(at));
+  const when = `${today ? 'сегодня' : DAY.format(new Date(at))} в ${TIME.format(new Date(at))} мск`;
+  if (left <= 0) return `${when} · стартует…`;
+  const h = Math.floor(left / 3600000);
+  const m = Math.floor((left % 3600000) / 60000);
+  const s = Math.floor((left % 60000) / 1000);
+  return `${when} · через ${h ? `${h}:${String(m).padStart(2, '0')}` : m}:${String(s).padStart(2, '0')}`;
+}
+
+function renderMtts() {
+  const list = state.mtts || [];
+  $('#mtts').hidden = !list.length;
+  const box = $('#mtts-list');
+  box.textContent = '';
+  for (const m of list) {
+    const card = el('article', `mtt mtt--${m.status}${m.me ? ' is-me' : ''}`);
+    const head = el('div', 'mtt__head');
+    head.append(el('b', 'mtt__name', m.name));
+    head.append(el('span', 'mtt__fee', m.buyIn ? `взнос ${fmt(m.buyIn)}` : 'бесплатно'));
+    card.append(head);
+
+    const when = el('span', 'mtt__when');
+    if (m.status === 'registering') {
+      when.dataset.startAt = m.startAt;
+      when.textContent = startText(m.startAt);
+    } else if (m.status === 'running') {
+      when.textContent = `идёт · осталось ${fmt(m.alive)} из ${fmt(m.registered)} · столов ${m.tables}`;
+    } else if (m.status === 'finished') {
+      when.textContent = m.winner ? `завершён · победил ${m.winner}` : 'завершён';
+    } else {
+      when.textContent = `отменён: ${m.cancelReason || ''}`;
+    }
+    card.append(when);
+
+    card.append(el('span', 'mtt__pool', `фонд ${fmt(m.pool)}${m.status === 'registering' && m.guarantee ? ' гарантирован' : ''}`
+      + (m.prizes.length ? ` · ${m.prizes.map(fmt).join(' / ')}…` : '')));
+
+    const foot = el('div', 'mtt__foot');
+    foot.append(el('span', 'mtt__count', m.status === 'registering'
+      ? `записалось ${fmt(m.registered)} · нужно от ${m.minPlayers}`
+      : m.myPlace ? `ваше место — ${m.myPlace.place}${m.myPlace.prize ? `, приз ${fmt(m.myPlace.prize)}` : ''}` : ''));
+    if (m.status === 'registering') {
+      const btn = el('button', `btn btn--sm ${m.me ? 'btn--ghost' : 'btn--primary'}`, m.me ? 'Отменить запись' : 'Записаться');
+      btn.addEventListener('click', async () => {
+        if (!m.me && m.buyIn && !confirm(`Взнос ${fmt(m.buyIn)} спишется из банка. Если передумаете до старта — вернётся. Записаться?`)) return;
+        const res = await cmd({ cmd: m.me ? 'mttUnregister' : 'mttRegister', id: m.id });
+        if (res.ok) {
+          if (!m.me) { goal('mtt_register'); toast(`Вы записаны на «${m.name}» — к старту игра сама посадит вас за стол`, { good: true }); }
+          loadMtts();
+        }
+      });
+      foot.append(btn);
+    } else if (m.status === 'running' && m.watch) {
+      const btn = el('button', 'btn btn--sm btn--ghost', 'Смотреть');
+      btn.addEventListener('click', () => cmd({ cmd: 'mttWatch', id: m.id }));
+      foot.append(btn);
+    }
+    card.append(foot);
+    box.append(card);
+  }
+}
+
+// Отсчёт до старта тикает раз в секунду; за 5 минут — напоминание записавшимся.
+setInterval(() => {
+  document.querySelectorAll('.mtt__when[data-start-at]').forEach((node) => {
+    node.textContent = startText(Number(node.dataset.startAt));
+  });
+  for (const m of state.mtts || []) {
+    const left = m.startAt - (Date.now() + (state.mttSkew || 0));
+    state.mttReminded = state.mttReminded || new Set();
+    if (m.me && m.status === 'registering' && left < 5 * 60000 && left > 0 && !state.mttReminded.has(m.id)) {
+      state.mttReminded.add(m.id);
+      toast(`«${m.name}» начнётся через ${Math.ceil(left / 60000)} мин — не уходите далеко`, { good: true });
+    }
+  }
+}, 1000);
 
 // ——— сегодня: бонус за вход и задания дня ———
 
@@ -444,7 +570,7 @@ function showPage(page) {
   $('#page-tables').hidden = page !== 'tables';
   $('#page-rating').hidden = page !== 'rating';
   $('#page-profile').hidden = page !== 'profile';
-  if (page === 'tables') loadFriends();
+  if (page === 'tables') { loadFriends(); loadMtts(); }
   if (page === 'rating') loadRating();
   if (page === 'profile') loadOwnProfile();
 }
@@ -520,7 +646,7 @@ function renderRequests(list, incoming, done) {
   }
 }
 setInterval(() => {
-  if (state.view === 'lobby' && state.page === 'tables' && !document.hidden) loadFriends();
+  if (state.view === 'lobby' && state.page === 'tables' && !document.hidden) { loadFriends(); loadMtts(); }
 }, 15_000);
 
 function friendStatus(f) {
@@ -565,6 +691,7 @@ function goToTable(id) {
 // ——— рейтинг ———
 
 const RATING_COLS = {
+  season: { label: 'Очки сезона', value: (r) => fmt(r.season) },
   chips: { label: 'Фишки', value: (r) => fmt(r.chips) },
   wins: { label: 'Выиграно раздач', value: (r) => `${fmt(r.handsWon)} · ${r.winRate}%` },
   sng: { label: 'Побед в турнирах', value: (r) => `${fmt(r.sngWins)} · ${fmt(r.sngPrizes)}` },
@@ -574,7 +701,7 @@ document.querySelectorAll('#rating-filter .filter').forEach((btn) => {
   btn.addEventListener('click', () => { Sound.play('click'); loadRating(btn.dataset.by); });
 });
 
-async function loadRating(by = state.ratingBy || 'chips') {
+async function loadRating(by = state.ratingBy || 'season') {
   state.ratingBy = by;
   document.querySelectorAll('#rating-filter .filter').forEach((b) => {
     b.classList.toggle('is-active', b.dataset.by === by);
@@ -589,7 +716,9 @@ function ratingRow(r, col) {
   row.type = 'button';
   row.title = 'Открыть профиль';
   row.append(el('span', 'rating__place', String(r.place)));
-  const who = el('span', 'rating__name', r.name);
+  const who = el('span', 'rating__name');
+  if (col === RATING_COLS.season) who.append(leagueBadge(r.league));
+  who.append(document.createTextNode(r.name));
   if (r.you) who.append(el('span', 'rating__you', 'вы'));
   row.append(who);
   row.append(el('span', 'rating__hands', `${fmt(r.hands)} ${plural(r.hands, 'раздача', 'раздачи', 'раздач')}`));
@@ -599,8 +728,59 @@ function ratingRow(r, col) {
   return row;
 }
 
+// ——— сезон и лиги ———
+
+const LEAGUE_NAMES = { bronze: 'Бронза', silver: 'Серебро', gold: 'Золото', platinum: 'Платина', diamond: 'Бриллиант' };
+
+function leagueBadge(id, { big = false } = {}) {
+  const b = el('span', `league league--${id}${big ? ' league--big' : ''}`, big ? LEAGUE_NAMES[id] : '');
+  b.title = LEAGUE_NAMES[id] || '';
+  return b;
+}
+
+function daysLeft(ts) {
+  const ms = ts - Date.now();
+  const d = Math.floor(ms / 86400000);
+  if (d >= 1) return `${d} ${plural(d, 'день', 'дня', 'дней')}`;
+  const h = Math.max(1, Math.floor(ms / 3600000));
+  return `${h} ч`;
+}
+
+// Карточка сезона: лига, очки, сколько до следующей и сколько до конца.
+function seasonCard(season, { own = true } = {}) {
+  const card = el('div', 'season');
+  const head = el('div', 'season__head');
+  head.append(leagueBadge(season.league.id, { big: true }));
+  const title = el('div', 'season__title');
+  title.append(el('b', null, `Сезон «${season.name}»`));
+  title.append(el('span', null, `до конца ${daysLeft(season.endsAt)}`));
+  head.append(title, el('b', 'season__points', `${fmt(season.points)} очк.`));
+  card.append(head);
+
+  const next = season.next;
+  const bar = el('div', 'season__bar');
+  const fill = el('i');
+  const from = LEAGUE_MIN[season.league.id] || 0;
+  fill.style.width = next ? `${Math.min(100, ((season.points - from) / (next.min - from)) * 100)}%` : '100%';
+  bar.append(fill);
+  card.append(bar);
+  card.append(el('p', 'season__note', next
+    ? `${own ? 'До' : 'Игроку до'} лиги «${next.name}» — ${fmt(next.min - season.points)} очк. Награда в конце сезона: ${fmt(next.reward)} фишек.`
+    : `Высшая лига! Награда в конце сезона: ${fmt(season.league.reward)} фишек.`));
+  if (own) {
+    card.append(el('p', 'season__how',
+      'Очки: +1 за раздачу, +2 за банк, выигранный у человека (до 100 в день), +5 за задание дня, до +40 за призовое место в сит-н-гоу.'));
+  }
+  return card;
+}
+const LEAGUE_MIN = { bronze: 0, silver: 100, gold: 300, platinum: 700, diamond: 1500 };
+
 function renderRating(data) {
   const box = $('#rating');
+  const sc = $('#season-card');
+  sc.hidden = data.by !== 'season' || !state.user || !state.user.season;
+  sc.textContent = '';
+  if (!sc.hidden) sc.append(seasonCard(state.user.season));
   const col = RATING_COLS[data.by];
   box.textContent = '';
   const head = el('div', 'rating__row rating__row--head');
@@ -740,6 +920,17 @@ function renderProfile(box, data) {
 
   const actions = el('div', 'profile__actions');
   if (!data.own) actions.append(...friendButtons(data, box));
+  // Публичная страница профиля — ей можно поделиться где угодно.
+  const share = el('button', 'btn btn--ghost btn--sm', data.own ? 'Поделиться профилем' : 'Ссылка на профиль');
+  share.addEventListener('click', async () => {
+    const url = `${location.origin}/u/${encodeURIComponent(data.name)}`;
+    if (navigator.share && data.own) {
+      navigator.share({ title: `${data.name} — THPoker`, url }).catch(() => {});
+      return;
+    }
+    try { await navigator.clipboard.writeText(url); toast('Ссылка на профиль скопирована', { good: true }); } catch { prompt('Ссылка на профиль:', url); }
+  });
+  actions.append(share);
   if (data.table && !(state.table && state.table.id === data.table.id && state.view === 'table')) {
     const go = el('button', 'btn btn--ghost btn--sm', 'К столу');
     go.addEventListener('click', () => goToTable(data.table.id));
@@ -747,6 +938,22 @@ function renderProfile(box, data) {
   }
   head.append(actions);
   root.append(head);
+
+  // Сезон: лига сейчас и прошлые итоги.
+  if (data.season) {
+    const sec = profileSection('Сезон');
+    sec.append(seasonCard(data.season, { own: data.own }));
+    if (data.season.history.length) {
+      const hist = el('div', 'season__history');
+      for (const h of data.season.history) {
+        const item = el('span', 'season__past');
+        item.append(leagueBadge(h.league), document.createTextNode(` ${h.name} · ${fmt(h.points)} очк.`));
+        hist.append(item);
+      }
+      sec.append(hist);
+    }
+    root.append(sec);
+  }
 
   // Статистика игр.
   const games = profileSection('Статистика');
@@ -1078,7 +1285,9 @@ function renderTable(t) {
   const tour = t.tour;
   const stage = t.phase === 'idle' ? 'ожидание' : `${PHASE_LABEL[t.phase]} · раздача №${t.handId}`;
   $('#table-stakes').textContent = !tour ? `блайнды ${fmt(t.sb)}/${fmt(t.bb)} · ${stage}`
-    : tour.status === 'registering' ? `сит-н-гоу · регистрация · взнос ${fmt(tour.buyIn)}`
+    : tour.kind === 'mtt' ? (tour.status === 'finished' ? 'турнир завершён'
+      : `уровень ${tour.level} · ${fmt(t.sb)}/${fmt(t.bb)} · осталось ${fmt(tour.alive)} из ${fmt(tour.entrants)} · ${stage}`)
+      : tour.status === 'registering' ? `сит-н-гоу · регистрация · взнос ${fmt(tour.buyIn)}`
       : tour.status === 'finished' ? 'сит-н-гоу · турнир завершён'
         : `уровень ${tour.level} · блайнды ${fmt(t.sb)}/${fmt(t.bb)} · ${stage}`;
   // Часы уровня тикают сами между кадрами — см. tickTimer.
@@ -1218,6 +1427,9 @@ function renderTable(t) {
     if (t.buttonSeat === i && t.phase !== 'idle') node.append(el('div', 'seat__badge', 'D'));
     if (seat.won > 0 && t.phase === 'showdown') node.append(el('div', 'seat__win', `+${fmt(seat.won)}`));
 
+    const bubble = reactionBubble(seat);
+    if (bubble) node.append(bubble);
+
     if (seat.isBot && t.you && (!tour || tour.status === 'registering')) {
       const kick = el('button', 'seat__kick');
       kick.title = 'Убрать бота';
@@ -1249,6 +1461,8 @@ function renderTable(t) {
 
   checkPre(t);
   renderMenu(t);
+  $('#react').hidden = !t.you;
+  if (!t.you) closeReact();
   // Только что открыли приватный стол — сразу даём ссылку для друзей.
   if (state.inviteFor && t.id === state.inviteFor) { state.inviteFor = null; openInvite(t); }
   renderActions(t);
@@ -1432,7 +1646,7 @@ function placeMeter() {
   meter.classList.toggle('meter--bar', asBar);
   const target = asBar ? $('.actionbar') : $('#felt');
   if (meter.parentElement !== target) {
-    if (asBar) target.insertBefore(meter, $('#actions'));
+    if (asBar) target.insertBefore(meter, $('#react'));
     else target.append(meter);
   }
 }
@@ -1951,6 +2165,84 @@ function deadButton(label) {
   return btn;
 }
 
+// ——— реакции ———
+
+const REACT_KEY = 'night-poker-reactions';
+function reactionsOn() {
+  try { return localStorage.getItem(REACT_KEY) !== 'off'; } catch { return true; }
+}
+$('#react-mode').checked = reactionsOn();
+$('#react-mode').addEventListener('change', (e) => {
+  try { localStorage.setItem(REACT_KEY, e.target.checked ? 'on' : 'off'); } catch { /* без памяти — до перезагрузки */ }
+  Sound.play('click');
+  if (state.table) renderTable(state.table);
+});
+
+const REACTION_MS = 3500;
+state.reactionSeen = new Map();   // id реакции -> когда клиент её впервые увидел
+
+// Облачко над местом. Время считаем от первого показа: кадры стола приходят
+// не по часам, а когда что-то меняется.
+function reactionBubble(seat) {
+  const r = seat.reaction;
+  if (!r) return null;
+  if (!seat.you && !reactionsOn()) return null;
+  const now = performance.now();
+  let first = state.reactionSeen.get(r.id);
+  const fresh = first === undefined;
+  if (fresh) {
+    first = now - r.ago;
+    state.reactionSeen.set(r.id, first);
+    if (state.reactionSeen.size > 200) state.reactionSeen.delete(state.reactionSeen.keys().next().value);
+  }
+  const left = REACTION_MS - (now - first);
+  if (left <= 0) return null;
+  const emoji = (state.config.reactions || []).includes(r.text);
+  const node = el('div', `seat__bubble${emoji ? ' seat__bubble--emoji' : ''}${fresh ? ' is-new' : ''}`, r.text);
+  node.dataset.reaction = r.id;
+  // Кадр может не прийти, пока облачко висит, — убираем его сами.
+  setTimeout(() => {
+    document.querySelectorAll(`[data-reaction="${r.id}"]`).forEach((n) => n.remove());
+  }, left);
+  if (fresh && !seat.you) Sound.play('click', { throttle: 200 });
+  return node;
+}
+
+function closeReact() {
+  $('#react-panel').hidden = true;
+  $('#react-toggle').setAttribute('aria-expanded', 'false');
+}
+
+function fillReactPanel() {
+  const emoji = $('#react-emoji');
+  if (emoji.children.length || !state.config.reactions) return;
+  const send = (text) => { closeReact(); cmd({ cmd: 'react', text }); };
+  for (const e of state.config.reactions) {
+    const b = el('button', 'react__item react__item--emoji', e);
+    b.type = 'button';
+    b.addEventListener('click', () => send(e));
+    emoji.append(b);
+  }
+  for (const p of state.config.phrases || []) {
+    const b = el('button', 'react__item', p);
+    b.type = 'button';
+    b.addEventListener('click', () => send(p));
+    $('#react-phrases').append(b);
+  }
+}
+
+$('#react-toggle').addEventListener('click', (e) => {
+  e.stopPropagation();
+  fillReactPanel();
+  const panel = $('#react-panel');
+  panel.hidden = !panel.hidden;
+  $('#react-toggle').setAttribute('aria-expanded', String(!panel.hidden));
+  Sound.play('click');
+});
+document.addEventListener('click', (e) => {
+  if (!$('#react-panel').hidden && !$('#react').contains(e.target)) closeReact();
+});
+
 // ——— меню стола ———
 // Разметка постоянная: перерисовывать её на каждый кадр нельзя, иначе
 // открытое меню будет закрываться само.
@@ -2244,7 +2536,8 @@ $('#buyin-range').addEventListener('input', (e) => {
 
 $('#buyin-form').addEventListener('submit', (e) => {
   if (e.submitter && e.submitter.value === 'ok' && pendingSeat !== null) {
-    cmd({ cmd: 'sit', seat: pendingSeat, buyIn: Number($('#buyin-range').value) });
+    cmd({ cmd: 'sit', seat: pendingSeat, buyIn: Number($('#buyin-range').value) })
+      .then((res) => { if (res.ok) goal(state.table && state.table.tour ? 'sng_register' : 'sit'); });
     Sound.play('chips');
   }
   pendingSeat = null;
@@ -2291,6 +2584,11 @@ document.addEventListener('keydown', (e) => {
   // Ползунок рейза — тоже поле ввода, но горячие клавиши стола на нём должны работать.
   const typing = e.target.tagName === 'INPUT' && !e.target.classList.contains('raise__slider');
   if (state.view !== 'table' || typing) return;
+  if ((e.key === 'e' || e.key === 'у') && state.table && state.table.you) {
+    $('#react-toggle').click();
+    return;
+  }
+  if (e.key === 'Escape') closeReact();
   if (e.key === 'm' || e.key === 'ь') {
     Sound.setEnabled(!Sound.isEnabled());
     paintSoundButtons();
@@ -2391,10 +2689,13 @@ function telegramWidget(box, onauth, onReady = () => {}) {
 }
 
 async function telegramLogin(payload) {
-  const { ok, data } = await post('/api/telegram/login', payload);
+  const { ok, data } = await post('/api/telegram/login', { ...payload, source: currentSource() });
   if (!ok || data.error) { toast(data.error || 'Не удалось войти через Telegram'); return false; }
   afterLogin(data.user);
-  if (data.created) toast(`Добро пожаловать, ${data.user.name}! На счету 10 000 фишек`, { good: true });
+  if (data.created) {
+    goal('register');
+    toast(`Добро пожаловать, ${data.user.name}! На счету 10 000 фишек`, { good: true });
+  }
   return true;
 }
 
@@ -2466,6 +2767,7 @@ function telegramSection() {
   const data = await res.json().catch(() => ({}));
   if (data.user) {
     setUser(data.user);
+    $('#admin-link').hidden = !data.admin;
     show(data.roomId ? 'table' : 'lobby');
     connectStream();
     joinInvite();

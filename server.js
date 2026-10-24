@@ -9,12 +9,19 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const { Store } = require('./src/store');
-const { Table, setEvalBudget } = require('./src/table');
+const { Table, setEvalBudget, REACTIONS, PHRASES } = require('./src/table');
 const { BOT_NAMES } = require('./src/bot');
 const { Tournament, SNG_STACK, SNG_TIMEOUT, SNG_BUY_INS } = require('./src/tournament');
 const { ACHIEVEMENTS, achievementView, tierTotal } = require('./src/achievements');
-const { Snapshot } = require('./src/snapshot');
+const { Snapshot, mttRefunds } = require('./src/snapshot');
 const telegram = require('./src/telegram');
+const { LoginGuard, waitText } = require('./src/limits');
+const analytics = require('./src/analytics');
+const { dayKey } = require('./src/daily');
+const seasons = require('./src/seasons');
+const { createAdmin } = require('./src/admin');
+const pages = require('./src/pages');
+const { MttManager } = require('./src/mtt');
 
 const PORT = Number(process.env.PORT) || 3000;
 // За обратным прокси сервер стоит слушать только петлю, чтобы снаружи
@@ -29,6 +36,8 @@ const APP_URL = process.env.APP_URL || 'https://thpoker.ru';
 // Режим вебхука: Telegram сам приносит сообщения на /api/telegram/webhook.
 // Нужен, если хостинг не выпускает сервер к api.telegram.org.
 const TG_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
+// Номер счётчика Яндекс Метрики: если задан, счётчик встаёт на все страницы сайта.
+const METRIKA_ID = /^\d+$/.test(process.env.YANDEX_METRIKA_ID || '') ? process.env.YANDEX_METRIKA_ID : '';
 
 // Столы заведения: стоят всегда, даже пустые, — чтобы было куда сесть сразу.
 const ROOM_CONFIGS = [
@@ -57,6 +66,7 @@ const TABLES_MAX = 5000;
 const LOBBY_LIMIT = 150;             // столько столов уходит в лобби — самые живые
 const EVAL_PER_TICK = 8;             // тяжёлых разборов руки за тик (по ~4 мс каждый)
 
+const handsByDay = new Map();   // день -> раздач сыграно (для админки; живёт до перезапуска)
 const tables = new Map();       // tableId -> Table, в порядке создания
 const playerTable = new Map();  // userId -> Table (чтобы не перебирать все столы)
 const invites = new Map();      // код приглашения -> Table
@@ -77,9 +87,12 @@ function dropTable(table) {
   invites.delete(table.invite);
 }
 
-function createTable(cfg, { owner = null, sng = 0, buyIn, invite = null, privateTable = false, createdAt = 0 } = {}) {
+function createTable(cfg, {
+  owner = null, sng = 0, buyIn, invite = null, privateTable = false, createdAt = 0, mttTour = null, mttId = null,
+} = {}) {
   const n = ++tableSeq;
-  const tour = sng ? new Tournament(sng, {
+  // Стол турнира по расписанию получает «переходник» от турнира, сит-н-гоу — свой Tournament.
+  const tour = mttTour || (sng ? new Tournament(sng, {
     pay: (player, amount) => { if (!player.isBot) store.addChips(player.userId, amount); },
     onStart: (players) => {
       for (const p of players) {
@@ -89,8 +102,10 @@ function createTable(cfg, { owner = null, sng = 0, buyIn, invite = null, private
         if (!isOnline(p.userId)) notify(p.userId, `Турнир начался — вас ждут за столом. Пока вас нет, блайнды списываются.`);
       }
     },
-    onPlace: (player, place, prize) => { if (!player.isBot) store.recordSng(player.userId, { place, prize }); },
-  }, buyIn) : null;
+    onPlace: (player, place, prize) => {
+      if (!player.isBot) store.recordSng(player.userId, { place, prize, humans: tour.humans, seats: tour.seats });
+    },
+  }, buyIn) : null);
   const table = new Table({ ...cfg, id: cfg.id || `t${n}`, tour }, {
     onChipsReturn: (player, chips) => {
       if (player.isBot) return;
@@ -99,6 +114,7 @@ function createTable(cfg, { owner = null, sng = 0, buyIn, invite = null, private
       if (chips > 0) store.addChips(player.userId, chips);
     },
     onHandStart: (players) => {
+      handsByDay.set(dayKey(), (handsByDay.get(dayKey()) || 0) + 1);
       for (const p of players) if (!p.isBot) store.countHand(p.userId);
     },
     onHandEnd: (results) => {
@@ -108,13 +124,15 @@ function createTable(cfg, { owner = null, sng = 0, buyIn, invite = null, private
         // Сыграл раздачу за одним столом с другом — для задания дня.
         const me = store.user(r.player.userId);
         const withFriend = !!me && humans.some((id) => id !== me.id && me.friends.includes(id));
-        store.recordHand(r.player.userId, { ...r, cash: !tour, withFriend });
+        store.recordHand(r.player.userId, { ...r, cash: !tour, withFriend, withHuman: humans.length > 1 });
       }
     },
     onSeat: (player, t) => { if (!player.isBot) playerTable.set(player.userId, t); },
-    onUnseat: (player) => { if (!player.isBot) playerTable.delete(player.userId); },
+    // Пересаженного в турнире уже записали за новый стол — старый не должен его стереть.
+    onUnseat: (player, t) => { if (!player.isBot && playerTable.get(player.userId) === t) playerTable.delete(player.userId); },
   });
-  table.house = !owner;
+  table.house = !owner && !mttId;
+  table.mttId = mttId;
   table.ownerId = owner ? owner.id : null;
   table.ownerName = owner ? owner.name : null;
   table.private = !!privateTable;          // приватный стол не виден в лобби — только по ссылке
@@ -164,7 +182,7 @@ function createUserTable(user, body) {
 // Пустые столы игроков закрываются, столы заведения стоят всегда.
 function dropIdleTables(now) {
   for (const table of tables.values()) {
-    if (table.house || table.occupied()) continue;
+    if (table.house || table.mttId || table.occupied()) continue;
     const tour = table.tour;
     const idle = tour
       ? (tour.status === 'finished' ? now - tour.finishedAt > SNG_DONE_MS
@@ -175,6 +193,30 @@ function dropIdleTables(now) {
 }
 
 for (const cfg of ROOM_CONFIGS) createTable(cfg);
+
+// ——— турниры по расписанию ———
+
+const mtts = new MttManager({
+  createTable: (cfg, tour, mtt) => createTable(cfg, { mttTour: tour, mttId: mtt.id }),
+  dropTable: (table) => dropTable(table),
+  pay: (entry, amount) => store.addChips(entry.userId, amount),
+  refund: (entry, amount) => store.addChips(entry.userId, amount),
+  record: (entry, info) => store.recordMtt(entry.userId, info),
+  notify: (userId, text) => notify(userId, text),
+  isOnline: (userId) => isOnline(userId),
+});
+
+// Что из турниров кладётся в снимок рядом со столами.
+function mttSnapshot() {
+  return {
+    mtts: mtts.snapshot().filter((m) => m.status === 'registering'),
+    mttsRunning: [...mtts.list.values()].filter((m) => m.status === 'running').map((m) => ({
+      id: m.id,
+      poolLeft: m.prizes.reduce((a, b) => a + b, 0) - m.places.reduce((s, p) => s + p.prize, 0),
+    })),
+  };
+}
+function saveSnapshot() { return snapshot.save(tables, mttSnapshot()); }
 
 // ——— Telegram ———
 
@@ -230,6 +272,13 @@ function reopenTable(rec) {
     if (n > tableSeq) tableSeq = n;
   }
   if (restored) {
+    // Регистрации на турниры — как были; оборвавшиеся турниры — фонд по стекам.
+    mtts.restore(restored.snap.mtts || []);
+    for (const r of mttRefunds(restored.snap)) {
+      store.addChips(r.userId, r.amount);
+      restored.players += 1;
+      restored.chips += r.amount;
+    }
     console.log(`Снимок столов разобран: фишки вернулись ${restored.players} игрокам `
       + `(${restored.chips}), столов открыто заново: ${restored.tables}`);
     // Снимок убираем, только когда возвращённые фишки легли в базу.
@@ -322,7 +371,7 @@ const MIME = {
 };
 
 // Страницы сайта: главная — для поиска и новичков, игра — на /play.
-const PAGES = { '/': 'index.html', '/play': 'play.html', '/play/': 'play.html' };
+const PAGES = { '/': 'index.html', '/play': 'play.html', '/play/': 'play.html', '/admin': 'admin.html' };
 // Старые и служебные адреса страниц ведут на основные, чтобы у поиска не было дублей.
 const PAGE_ALIASES = { '/index.html': '/', '/play.html': '/play' };
 // Картинки меняются редко — браузер может не переспрашивать о них сутки.
@@ -340,11 +389,26 @@ try {
   // Слежение недоступно — тогда кэш живёт до перезапуска.
 }
 
+// Счётчик Метрики вставляется в страницы при отдаче, а не лежит в файлах:
+// на локальной машине и на тестовом сервере он не нужен.
+function withMetrika(html) {
+  if (!METRIKA_ID || html.includes('mc.yandex.ru')) return html;
+  const snippet = `<script>(function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+m[i].l=1*new Date();for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r)return;}
+k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+(window,document,"script","https://mc.yandex.ru/metrika/tag.js","ym");
+ym(${METRIKA_ID},"init",{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});</script>
+<noscript><div><img src="https://mc.yandex.ru/watch/${METRIKA_ID}" style="position:absolute;left:-9999px" alt=""></div></noscript>
+`;
+  return html.replace('</head>', `${snippet}</head>`);
+}
+
 function staticFile(file) {
   let entry = staticCache.get(file);
   if (entry !== undefined) return entry;
   try {
-    const body = fs.readFileSync(file);
+    let body = fs.readFileSync(file);
+    if (path.extname(file) === '.html' && METRIKA_ID) body = Buffer.from(withMetrika(body.toString('utf8')));
     entry = {
       body,
       type: MIME[path.extname(file)] || 'application/octet-stream',
@@ -371,7 +435,9 @@ function serveStatic(req, res, urlPath) {
     res.writeHead(302, { Location: '/play', 'Cache-Control': 'no-store', Vary: 'Cookie' });
     return res.end();
   }
-  const rel = PAGES[urlPath] || urlPath.replace(/^\/+/, '');
+  // Статьи живут по чистым адресам: /articles/ и /articles/название.
+  const article = /^\/articles(?:\/([a-z0-9-]+))?\/?$/.exec(urlPath);
+  const rel = PAGES[urlPath] || (article ? `articles/${article[1] || 'index'}.html` : urlPath.replace(/^\/+/, ''));
   const file = path.join(PUBLIC_DIR, rel);
   if (!file.startsWith(PUBLIC_DIR)) return send(res, 403, 'Доступ запрещён');
 
@@ -393,12 +459,28 @@ function serveStatic(req, res, urlPath) {
 
 // ——— сессии ———
 
+const loginGuard = new LoginGuard();
+
+// Настоящий адрес игрока. За nginx сокет всегда смотрит на петлю, а адрес
+// приходит заголовком X-Real-IP; верим ему только от своего прокси.
+function isDirectLocal(req) {
+  const remote = req.socket.remoteAddress || '';
+  return (remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1') && !req.headers['x-real-ip'];
+}
+
+function clientIp(req) {
+  const remote = req.socket.remoteAddress || '';
+  const local = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+  const forwarded = req.headers['x-real-ip'];
+  return local && forwarded ? String(forwarded) : remote;
+}
+
 function sessionOf(req) {
   const token = cookies(req).sid;
   const session = store.session(token);
   if (!session) return null;
   const user = store.user(session.userId);
-  if (!user) return null;
+  if (!user || store.isBanned(user)) return null;
   return { token, session, user };
 }
 
@@ -478,7 +560,8 @@ function tableInfo(table) {
 // и турниры, где идёт регистрация, видны всегда.
 function lobbyTables() {
   const rank = (t) => (t.house ? 3 : t.tour && t.tour.status === 'registering' ? 2 : 0) * 100 + t.humans();
-  const list = [...tables.values()].filter((t) => !t.private);
+  // Столы турниров по расписанию показываются в своём разделе, не в общем списке.
+  const list = [...tables.values()].filter((t) => !t.private && !t.mttId);
   if (list.length > LOBBY_LIMIT) {
     list.sort((a, b) => rank(b) - rank(a));
     list.length = LOBBY_LIMIT;
@@ -505,8 +588,10 @@ function lobbySnapshot(now = Date.now()) {
   const next = JSON.stringify({
     rooms: lobbyTables(),
     totals: lobbyTotals(),
+    announcement: admin.getAnnouncement(),
     stakes: STAKES,
     sngBuyIns: SNG_BUY_INS,
+    mtts: mtts.overview(null),
   });
   if (next !== lobbyJson) {
     lobbyJson = next;
@@ -542,9 +627,7 @@ function inviteInfo(table) {
   };
 }
 
-const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
+const { escapeHtml } = pages;
 
 // Страница ссылки-приглашения. Мессенджер по ней строит превью («Анна зовёт
 // за стол…»), а человек сразу уходит в игру с кодом приглашения.
@@ -642,6 +725,7 @@ function profileOf(target, viewer) {
     online: isOnline(target.id),
     table: whereIs(target.id),
     relation: own ? null : store.relation(viewer, target),
+    season: seasons.view(target),
     stats: {
       handsPlayed: target.handsPlayed,
       handsWon: s.handsWon,
@@ -727,6 +811,7 @@ async function handleCommand(ctx, body) {
       // Взнос списываем до посадки: последний участник сразу запускает турнир.
       store.addChips(user.id, -pay);
       const res = table.sit({ id: user.id, name: user.name }, seat, stack);
+      if (!res.error) store.markSit(user);
       if (res.error) { store.addChips(user.id, pay); return res; }
       return { ok: true };
     }
@@ -789,6 +874,11 @@ async function handleCommand(ctx, body) {
       if (p.inHand && table.phase !== 'idle') { p.leaving = true; return { ok: true, pending: true }; }
       return table.removePlayer(p);
     }
+    case 'react': {
+      const table = room();
+      if (!table) return { error: 'Сначала сядьте за стол' };
+      return table.react(user.id, String(body.text || ''));
+    }
     case 'chat': {
       const table = room();
       if (!table) return { error: 'Сначала войдите в комнату' };
@@ -798,6 +888,26 @@ async function handleCommand(ctx, body) {
     }
     case 'reload':
       return store.reload(user.id);
+    case 'mttRegister': {
+      const mtt = mtts.get(String(body.id));
+      if (!mtt) return { error: 'Турнир не найден' };
+      const res = mtt.register({ userId: user.id, name: user.name }, store.user(user.id).chips);
+      if (res.pay) store.addChips(user.id, -res.pay);
+      return res.error ? res : { ok: true };
+    }
+    case 'mttUnregister': {
+      const mtt = mtts.get(String(body.id));
+      if (!mtt) return { error: 'Турнир не найден' };
+      return mtt.unregister(user.id);
+    }
+    case 'mttWatch': {
+      // Смотреть идущий турнир — за самым полным его столом.
+      const mtt = mtts.get(String(body.id));
+      const info = mtt && mtt.info();
+      if (!info || !info.watch) return { error: 'Сейчас смотреть нечего' };
+      if (!tableOfUser(user.id)) session.roomId = info.watch;
+      return { ok: true, roomId: session.roomId };
+    }
     case 'claimBonus':
       return store.claimBonus(user.id);
     case 'claimQuest':
@@ -826,7 +936,7 @@ async function handleCommand(ctx, body) {
 
 // ——— маршруты ———
 
-const MONEY_CMDS = new Set(['sit', 'standUp', 'leaveRoom', 'topUp', 'createTable', 'addBot', 'kickBot']);
+const MONEY_CMDS = new Set(['sit', 'standUp', 'leaveRoom', 'topUp', 'createTable', 'addBot', 'kickBot', 'mttRegister', 'mttUnregister']);
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -835,27 +945,53 @@ const server = http.createServer(async (req, res) => {
   if ((req.method === 'GET' || req.method === 'HEAD') && route.startsWith('/t/')) {
     return invitePage(req, res, decodeURIComponent(route.slice(3)).replace(/\/$/, ''));
   }
+  // Публичный профиль игрока — со своим превью для соцсетей.
+  if ((req.method === 'GET' || req.method === 'HEAD') && route.startsWith('/u/')) {
+    const user = store.byNameLower(decodeURIComponent(route.slice(3)).replace(/\/$/, ''));
+    if (!user || store.isBanned(user)) return send(res, 404, 'Игрок не найден');
+    const origin = `${SECURE_COOKIE ? 'https' : 'http'}://${req.headers.host}`;
+    const html = withMetrika(pages.profilePage(user, origin));
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(html), 'Cache-Control': 'no-cache' });
+    return res.end(html);
+  }
   if ((req.method === 'GET' || req.method === 'HEAD') && !route.startsWith('/api/')) return serveStatic(req, res, route);
 
   try {
+    if (await admin.handle(req, res, route, url)) return;
+
     if (route === '/api/register' && req.method === 'POST') {
+      const ip = clientIp(req);
+      // Прямой запрос с самой машины (без nginx) — это нагрузочный тест или администратор.
+      const wait = isDirectLocal(req) ? 0 : loginGuard.canRegister(ip);
+      if (wait) return send(res, 429, { error: `С этого адреса уже много новых аккаунтов. Попробуйте через ${waitText(wait)}` });
       const body = await readBody(req);
-      const { user, error } = await store.register(body.name, body.password);
+      const { user, error } = await store.register(body.name, body.password, body.source);
       if (error) return send(res, 400, { error });
+      loginGuard.registered(ip);
       const token = store.createSession(user.id);
       return send(res, 200, { user: store.publicUser(user.id) }, { 'Set-Cookie': sessionCookie(token) });
     }
 
     if (route === '/api/login' && req.method === 'POST') {
       const body = await readBody(req);
+      const ip = clientIp(req);
+      const name = String(body.name || '').trim().toLowerCase();
+      const wait = loginGuard.check(ip, name);
+      if (wait) return send(res, 429, { error: `Слишком много неудачных попыток. Попробуйте через ${waitText(wait)}` });
       const { user, error } = await store.login(body.name, body.password);
-      if (error) return send(res, 400, { error });
+      if (error) { loginGuard.failed(ip, name); return send(res, 400, { error }); }
+      loginGuard.succeeded(ip, name);
       const token = store.createSession(user.id);
       return send(res, 200, { user: store.publicUser(user.id) }, { 'Set-Cookie': sessionCookie(token) });
     }
 
     if (route === '/api/config' && req.method === 'GET') {
-      return send(res, 200, { telegramBot: bot && bot.username ? bot.username : null });
+      return send(res, 200, {
+        telegramBot: bot && bot.username ? bot.username : null,
+        reactions: REACTIONS,
+        phrases: PHRASES,
+        metrika: METRIKA_ID || null,
+      });
     }
 
     // Вход через Telegram: виджет на сайте присылает data, Mini App — initData.
@@ -863,7 +999,8 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const tg = telegramIdentity(body);
       if (!tg) return send(res, 400, { error: 'Telegram не подтвердил вход — попробуйте ещё раз' });
-      const { user, created } = store.telegramUser(tg);
+      const { user, created, error } = store.telegramUser(tg, body.source);
+      if (error) return send(res, 403, { error });
       const token = store.createSession(user.id);
       return send(res, 200, { user: store.publicUser(user.id), created }, { 'Set-Cookie': sessionCookie(token) });
     }
@@ -906,6 +1043,7 @@ const server = http.createServer(async (req, res) => {
       if (!ctx) return send(res, 200, { user: null });
       return send(res, 200, {
         user: store.publicUser(ctx.user.id),
+        admin: admin.isAdmin(ctx.user),
         roomId: ctx.session.roomId,
         leaderboard: store.leaderboard(),
       });
@@ -961,6 +1099,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, store.rating(url.searchParams.get('by') || 'chips', ctx.user.id));
     }
 
+    if (route === '/api/mtt' && req.method === 'GET') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      return send(res, 200, { list: mtts.overview(ctx.user.id), now: Date.now() });
+    }
+
     if (route === '/api/invite' && req.method === 'GET') {
       const table = invites.get(url.searchParams.get('code') || '');
       if (!table) return send(res, 404, { error: 'Стол по этой ссылке уже закрыт' });
@@ -978,7 +1122,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const result = await handleCommand(ctx, body);
       // Команды, которые двигают фишки между банком и столом, сразу попадают в снимок.
-      if (MONEY_CMDS.has(body.cmd) && !result.error) snapshot.save(tables);
+      if (MONEY_CMDS.has(body.cmd) && !result.error) saveSnapshot();
       pushAll();
       if (result.error) return send(res, 400, result);
       return send(res, 200, { ...result, user: store.publicUser(ctx.user.id) });
@@ -1001,6 +1145,104 @@ function sessionCookie(token) {
     + `; Max-Age=${60 * 60 * 24 * 30}`;
 }
 
+// ——— админка ———
+
+const admin = createAdmin({
+  store,
+  tables,
+  handsByDay,
+  send,
+  readBody,
+  requireAuth,
+  tableOfUser,
+  isOnline,
+  dropTable,
+  saveSnapshot: () => saveSnapshot(),
+  pushAll: () => pushAll(),
+  reopenHouse: (id) => {
+    const cfg = ROOM_CONFIGS.find((c) => c.id === id);
+    if (cfg) createTable(cfg);
+  },
+  // Заблокированного выкидываем из потока: следующий запрос он уже не пройдёт.
+  dropStreams: (userId) => {
+    for (const client of clients) {
+      if (client.ctx.user.id !== userId) continue;
+      try { client.res.end(); } catch { /* уже закрыт */ }
+      clients.delete(client);
+    }
+  },
+  onlineCount: () => {
+    let n = 0;
+    for (const rec of presence.values()) if (rec.conns > 0) n += 1;
+    return n;
+  },
+  serverStats: () => {
+    let seated = 0;
+    for (const t of tables.values()) seated += t.humans();
+    const mem = process.memoryUsage();
+    return {
+      uptimeSec: Math.round((Date.now() - metrics.startedAt) / 1000),
+      connections: clients.size,
+      tables: tables.size,
+      seated,
+      lagMs: lagStats(),
+      rssMb: Math.round(mem.rss / 1048576),
+      storage: store.stats().storage,
+    };
+  },
+  // Объявление уходит в лобби — пересобираем его сводку сразу.
+  announcementChanged: () => { lobbyAt = 0; pushAll(); },
+  // Турниры по расписанию: список, разовый турнир, старт сейчас, отмена, боты для проверки.
+  extra: async (req, res, route, url, ctx) => {
+    if (route === '/api/admin/mtt' && req.method === 'GET') {
+      send(res, 200, { list: [...mtts.list.values()].sort((a, b) => a.startAt - b.startAt).map((m) => m.info()) });
+      return true;
+    }
+    if (route !== '/api/admin/mtt' || req.method !== 'POST') return false;
+    const body = await readBody(req);
+    const by = ctx.user.name;
+    if (body.action === 'create') {
+      const name = String(body.name || '').trim().slice(0, 40);
+      const startAt = Number(body.startAt);
+      const buyIn = Math.max(0, Math.round(Number(body.buyIn) || 0));
+      const guarantee = Math.max(0, Math.round(Number(body.guarantee) || 0));
+      if (!name) { send(res, 400, { error: 'Нужно название' }); return true; }
+      if (!Number.isFinite(startAt) || startAt < Date.now() + 60_000) { send(res, 400, { error: 'Старт — не раньше чем через минуту' }); return true; }
+      const mtt = mtts.create({ name, startAt, buyIn, guarantee });
+      console.log(`Админ ${by}: создан турнир «${name}» на ${new Date(startAt).toISOString()}`);
+      send(res, 200, { ok: true, id: mtt.id });
+      return true;
+    }
+    const mtt = mtts.get(String(body.id));
+    if (!mtt) { send(res, 404, { error: 'Турнир не найден' }); return true; }
+    if (body.action === 'cancel') {
+      if (mtt.status !== 'registering' && mtt.status !== 'running') { send(res, 400, { error: 'Турнир уже закончился' }); return true; }
+      mtt.cancel('отменён администратором');
+      console.log(`Админ ${by}: отменён турнир «${mtt.name}»`);
+    } else if (body.action === 'start') {
+      if (mtt.status !== 'registering') { send(res, 400, { error: 'Турнир уже идёт' }); return true; }
+      if (mtt.entries.size < 2) { send(res, 400, { error: 'Нужно хотя бы два участника' }); return true; }
+      mtt.startAt = Date.now();
+      mtts.tick();
+    } else if (body.action === 'bots') {
+      if (mtt.status !== 'registering') { send(res, 400, { error: 'Регистрация закрыта' }); return true; }
+      const count = Math.min(50, Math.max(1, Number(body.count) || 5));
+      for (let i = 0; i < count; i++) {
+        const n = mtt.entries.size + 1;
+        const userId = `bot-${crypto.randomUUID()}`;
+        mtt.entries.set(userId, { userId, name: `${BOT_NAMES[n % BOT_NAMES.length]}-${n}`, isBot: true });
+      }
+    } else {
+      send(res, 400, { error: 'Неизвестное действие' });
+      return true;
+    }
+    saveSnapshot();
+    pushAll();
+    send(res, 200, { ok: true });
+    return true;
+  },
+});
+
 // ——— поток событий ———
 
 function openStream(req, res, ctx) {
@@ -1015,6 +1257,7 @@ function openStream(req, res, ctx) {
   const client = { res, ctx, lastTable: -1, lastLobby: 0, lastUserVersion: -1, lastRoom: undefined, lastLogId: 0 };
   clients.add(client);
 
+  store.markActive(ctx.user);
   const p = presence.get(ctx.user.id) || { conns: 0, lastSeen: Date.now() };
   p.conns += 1;
   p.lastSeen = Date.now();
@@ -1061,6 +1304,13 @@ function pushTo(client, force = false) {
   if (force || version !== client.lastUserVersion) {
     client.lastUserVersion = version;
     emitRaw(client, store.publicUserFrame(user.id));
+  }
+
+  // Турнир по расписанию сам сажает и пересаживает игрока: экран идёт за ним.
+  const seatedAt = playerTable.get(user.id);
+  if (seatedAt && seatedAt.mttId && session.followTable !== seatedAt.id) {
+    session.followTable = seatedAt.id;
+    session.roomId = seatedAt.id;
   }
 
   if (session.roomId) {
@@ -1132,11 +1382,14 @@ function maintain(now) {
   }
 
   dropIdleTables(now);
-  snapshot.save(tables);
+  mtts.tick(now);
+  saveSnapshot();
+  store.seasonSweep(now);           // в полночь первого числа — итоги сезона
 
   if (now - purgedAt > 300_000) {
     purgedAt = now;
     store.purgeSessions(now);
+    loginGuard.purge(now);
     for (const [userId, rec] of presence) {
       if (rec.conns <= 0 && now - rec.lastSeen > 3_600_000) presence.delete(userId);
     }
@@ -1181,7 +1434,7 @@ async function shutdown(signal) {
     clients.clear();
     // Последний снимок столов: после запуска фишки вернутся игрокам в банк.
     snapshot.paused = false;
-    snapshot.save(tables);
+    saveSnapshot();
     if (bot) bot.stop();
     await store.close();
   } catch (err) {
