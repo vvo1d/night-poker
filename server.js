@@ -37,7 +37,12 @@ const APP_URL = process.env.APP_URL || 'https://thpoker.ru';
 // Нужен, если хостинг не выпускает сервер к api.telegram.org.
 const TG_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
 // Номер счётчика Яндекс Метрики: если задан, счётчик встаёт на все страницы сайта.
-const METRIKA_ID = /^\d+$/.test(process.env.YANDEX_METRIKA_ID || '') ? process.env.YANDEX_METRIKA_ID : '';
+// По умолчанию — счётчик сайта; YANDEX_METRIKA_ID=off выключает его (например, на своей машине).
+const METRIKA_ID = (() => {
+  const v = process.env.YANDEX_METRIKA_ID;
+  if (v === 'off') return '';
+  return /^\d+$/.test(v || '') ? v : '113767079';
+})();
 
 // Столы заведения: стоят всегда, даже пустые, — чтобы было куда сесть сразу.
 const ROOM_CONFIGS = [
@@ -389,26 +394,36 @@ try {
   // Слежение недоступно — тогда кэш живёт до перезапуска.
 }
 
-// Счётчик Метрики вставляется в страницы при отдаче, а не лежит в файлах:
-// на локальной машине и на тестовом сервере он не нужен.
+// Счётчик Метрики вставляется в страницы при отдаче, а не лежит в каждом файле:
+// так он один на весь сайт, включая страницы, которые собирает сервер.
 function withMetrika(html) {
   if (!METRIKA_ID || html.includes('mc.yandex.ru')) return html;
-  const snippet = `<script>(function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-m[i].l=1*new Date();for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r)return;}
-k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
-(window,document,"script","https://mc.yandex.ru/metrika/tag.js","ym");
-ym(${METRIKA_ID},"init",{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});</script>
-<noscript><div><img src="https://mc.yandex.ru/watch/${METRIKA_ID}" style="position:absolute;left:-9999px" alt=""></div></noscript>
+  const snippet = `<!-- Yandex.Metrika counter -->
+<script type="text/javascript">
+    (function(m,e,t,r,i,k,a){
+        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+        m[i].l=1*new Date();
+        for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+    })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=${METRIKA_ID}', 'ym');
+
+    ym(${METRIKA_ID}, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+</script>
+<noscript><div><img src="https://mc.yandex.ru/watch/${METRIKA_ID}" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+<!-- /Yandex.Metrika counter -->
 `;
   return html.replace('</head>', `${snippet}</head>`);
 }
+
+// Админку не считаем: Вебвизору незачем записывать работу администратора.
+const NO_METRIKA = new Set([path.join(PUBLIC_DIR, 'admin.html')]);
 
 function staticFile(file) {
   let entry = staticCache.get(file);
   if (entry !== undefined) return entry;
   try {
     let body = fs.readFileSync(file);
-    if (path.extname(file) === '.html' && METRIKA_ID) body = Buffer.from(withMetrika(body.toString('utf8')));
+    if (path.extname(file) === '.html' && !NO_METRIKA.has(file)) body = Buffer.from(withMetrika(body.toString('utf8')));
     entry = {
       body,
       type: MIME[path.extname(file)] || 'application/octet-stream',
