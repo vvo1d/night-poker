@@ -230,7 +230,17 @@ TELEGRAM_BOT_NAME=thpoker_bot
 TELEGRAM_API_URL=https://ваш-прокси.example.com
 ```
 
-Прокси — любой адрес, который пересылает запросы на `https://api.telegram.org` как есть: nginx на зарубежном сервере (`location / { proxy_pass https://api.telegram.org; proxy_ssl_server_name on; proxy_set_header Host api.telegram.org; }`) или Cloudflare Worker. Через прокси идёт токен бота, поэтому прокси должен быть ваш.
+**Без прокси — режим вебхука.** Telegram сам приносит сообщения на `https://thpoker.ru/api/telegram/webhook`, а ответ уходит прямо в ответе на его запрос — выход сервера к Telegram не нужен. Бот отвечает на `/start` и ссылки-приглашения кнопкой «Играть»; уведомления о друзьях и турнирах в этом режиме не приходят — для них нужен выход к API.
+
+1. Придумайте секрет: `openssl rand -hex 24`, допишите в `/etc/night-poker.env` строку `TELEGRAM_WEBHOOK_SECRET=…` и перезапустите службу.
+2. На своём компьютере (откуда Telegram открывается) откройте в браузере, подставив токен и секрет:
+   `https://api.telegram.org/bot<ТОКЕН>/setWebhook?url=https://thpoker.ru/api/telegram/webhook&secret_token=<СЕКРЕТ>&allowed_updates=%5B%22message%22%5D`
+   Ответ должен быть `{"ok":true,…}`.
+3. Кнопку меню поставьте у @BotFather: `/mybots` → бот → Bot Settings → Menu Button → `https://thpoker.ru/play`.
+
+Вернуться к опросу: открыть `https://api.telegram.org/bot<ТОКЕН>/deleteWebhook` и убрать `TELEGRAM_WEBHOOK_SECRET`.
+
+**Свой прокси.** Прокси — любой адрес, который пересылает запросы на `https://api.telegram.org` как есть: nginx на зарубежном сервере (`location / { proxy_pass https://api.telegram.org; proxy_ssl_server_name on; proxy_set_header Host api.telegram.org; }`) или Cloudflare Worker. Через прокси идёт токен бота, поэтому прокси должен быть ваш.
 
 ## Устройство
 

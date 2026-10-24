@@ -83,7 +83,9 @@ class Bot {
     return data.result;
   }
 
-  async start() {
+  // poll: true — сами спрашиваем Telegram о новых сообщениях (нужен выход к API).
+  // poll: false — режим вебхука: сообщения приносит сам Telegram (см. reply).
+  async start({ poll = true } = {}) {
     if (this.running) return this.username;
     const me = await this.call('getMe');
     this.username = me.username;
@@ -94,8 +96,8 @@ class Bot {
     await this.call('setMyCommands', {
       commands: [{ command: 'start', description: 'Открыть THPoker' }],
     }).catch(() => {});
-    this.running = true;
-    this.poll();
+    this.running = true;          // связь с API есть — можно слать уведомления
+    if (poll) this.poll();
     return this.username;
   }
 
@@ -108,7 +110,11 @@ class Bot {
         const updates = await this.call('getUpdates', { offset: this.offset, timeout: 25, allowed_updates: ['message'] });
         for (const u of updates) {
           this.offset = u.update_id + 1;
-          if (u.message) await this.handle(u.message).catch((err) => console.error('Telegram:', err.message));
+          const answer = this.reply(u);
+          if (answer) {
+            const { method, ...body } = answer;
+            await this.call(method, body).catch((err) => console.error('Telegram:', err.message));
+          }
         }
       } catch (err) {
         if (this.running) console.error('Telegram: опрос не удался:', err.message);
@@ -117,29 +123,39 @@ class Bot {
     }
   }
 
-  async handle(msg) {
-    const text = msg.text || '';
-    if (!text.startsWith('/start')) return;
+  // Ответ на сообщение — готовый вызов API. При опросе мы его отправляем сами,
+  // при вебхуке он уходит телом ответа на запрос Telegram: выход к API не нужен.
+  reply(update) {
+    const msg = update && update.message;
+    const text = (msg && msg.text) || '';
+    if (!text.startsWith('/start')) return null;
     // /start join_КОД — пришли по ссылке-приглашению t.me/бот?start=join_КОД.
     const payload = text.split(' ')[1] || '';
     const code = payload.startsWith('join_') ? payload.slice(5) : null;
     const url = `${this.appUrl}/play${code ? `?join=${encodeURIComponent(code)}` : ''}`;
     console.log(`Telegram: /start от ${msg.from.username ? `@${msg.from.username}` : msg.from.id}${code ? ` по приглашению ${code}` : ''}`);
     this.onStart(msg.from);
-    await this.send(msg.chat.id, code
-      ? 'Вас зовут за стол в THPoker. Нажмите «Играть» — стол откроется прямо здесь, в Telegram.'
-      : 'THPoker — бесплатный покер на виртуальные фишки: техасский холдем, сит-н-гоу и столы с друзьями.\n\n'
-        + 'Нажмите «Играть» — игра откроется прямо в Telegram. Бот напишет, когда вас позовут в друзья или начнётся ваш турнир.',
-    { text: 'Играть', url });
+    return {
+      method: 'sendMessage',
+      ...this.message(msg.chat.id, code
+        ? 'Вас зовут за стол в THPoker. Нажмите «Играть» — стол откроется прямо здесь, в Telegram.'
+        : 'THPoker — бесплатный покер на виртуальные фишки: техасский холдем, сит-н-гоу и столы с друзьями.\n\n'
+          + 'Нажмите «Играть» — игра откроется прямо в Telegram.',
+      { text: 'Играть', url }),
+    };
   }
 
   // Сообщение с кнопкой, открывающей игру внутри Telegram.
-  send(chatId, text, button = null) {
+  message(chatId, text, button = null) {
     const body = { chat_id: chatId, text, disable_web_page_preview: true };
     if (button) {
       body.reply_markup = { inline_keyboard: [[{ text: button.text, web_app: { url: button.url } }]] };
     }
-    return this.call('sendMessage', body);
+    return body;
+  }
+
+  send(chatId, text, button = null) {
+    return this.call('sendMessage', this.message(chatId, text, button));
   }
 
   // Уведомление игроку: если он не писал боту, Telegram откажет — это не ошибка.

@@ -2374,9 +2374,12 @@ async function telegramApp() {
 }
 
 // Виджет «Войти через Telegram» на обычном сайте. onauth — имя глобальной функции.
-function telegramWidget(box, onauth) {
+// onReady вызывается, только когда скрипт Telegram загрузился: там, где Telegram
+// заблокирован, кнопка не появится вовсе, а не повиснет пустым местом.
+function telegramWidget(box, onauth, onReady = () => {}) {
   box.textContent = '';
   const s = document.createElement('script');
+  s.onload = onReady;
   s.async = true;
   s.src = 'https://telegram.org/js/telegram-widget.js?22';
   s.dataset.telegramLogin = state.config.telegramBot;
@@ -2416,7 +2419,8 @@ function renderTelegramAuth() {
     btn.addEventListener('click', () => telegramLogin({ initData: state.tgApp.initData }));
     box.append(btn);
   } else if (state.config.telegramBot) {
-    telegramWidget(box, 'onTelegramAuth');
+    telegramWidget(box, 'onTelegramAuth', () => { $('#tg-auth').hidden = false; });
+    return;
   } else {
     return;
   }
@@ -2439,7 +2443,9 @@ function telegramSection() {
     btn.addEventListener('click', () => telegramLink({ initData: state.tgApp.initData }));
     box.append(btn);
   } else {
-    telegramWidget(box, 'onTelegramLink');
+    // Пока скрипт Telegram не загрузился (или заблокирован), раздела не видно.
+    sec.hidden = true;
+    telegramWidget(box, 'onTelegramLink', () => { sec.hidden = false; });
   }
   sec.append(box);
   return sec;

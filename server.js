@@ -26,6 +26,9 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 // Telegram включается токеном бота; адрес сайта нужен для кнопок «Играть» в боте.
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const APP_URL = process.env.APP_URL || 'https://thpoker.ru';
+// Режим вебхука: Telegram сам приносит сообщения на /api/telegram/webhook.
+// Нужен, если хостинг не выпускает сервер к api.telegram.org.
+const TG_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || '';
 
 // Столы заведения: стоят всегда, даже пустые, — чтобы было куда сесть сразу.
 const ROOM_CONFIGS = [
@@ -865,6 +868,18 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { user: store.publicUser(user.id), created }, { 'Set-Cookie': sessionCookie(token) });
     }
 
+    // Вебхук: Telegram присылает сообщение, ответ уходит прямо в теле ответа —
+    // так бот отвечает, даже когда сервер не может сам достучаться до Telegram.
+    if (route === '/api/telegram/webhook' && req.method === 'POST') {
+      const secret = req.headers['x-telegram-bot-api-secret-token'] || '';
+      if (!bot || !TG_WEBHOOK_SECRET || !crypto.timingSafeEqual(
+        crypto.createHash('sha256').update(secret).digest(),
+        crypto.createHash('sha256').update(TG_WEBHOOK_SECRET).digest(),
+      )) return send(res, 403, { error: 'Нет доступа' });
+      const answer = bot.reply(await readBody(req));
+      return send(res, 200, answer || {});
+    }
+
     if (route === '/api/telegram/link' && req.method === 'POST') {
       const ctx = requireAuth(req, res);
       if (!ctx) return;
@@ -1187,11 +1202,17 @@ server.listen(PORT, HOST, 1024, () => {
   }
   if (bot.username) console.log(`Вход через Telegram включён для @${bot.username}`);
   // Сеть или Telegram могут быть недоступны в момент запуска — пробуем ещё, пока не выйдет.
-  const startBot = () => bot.start()
-    .then((name) => console.log(`Telegram-бот @${name} запущен, кнопки ведут на ${APP_URL}`))
+  if (TG_WEBHOOK_SECRET) {
+    console.log('Telegram-бот: режим вебхука, сообщения принимаются на /api/telegram/webhook');
+  }
+  // При вебхуке сервер сам не опрашивает Telegram, но если выход к API есть —
+  // бот сможет и присылать уведомления.
+  const startBot = () => bot.start({ poll: !TG_WEBHOOK_SECRET })
+    .then((name) => console.log(`Telegram-бот @${name} на связи, кнопки ведут на ${APP_URL}`))
     .catch((err) => {
-      console.error(`Telegram-бот не запустился: ${err.message}. Новая попытка через 30 с`);
-      if (!stopping) setTimeout(startBot, 30_000);
+      console.error(`Telegram API недоступен: ${err.message}. ${TG_WEBHOOK_SECRET
+        ? 'Бот отвечает через вебхук, уведомлений не будет' : 'Новая попытка через 30 с'}`);
+      if (!stopping) setTimeout(startBot, TG_WEBHOOK_SECRET ? 600_000 : 30_000);
     });
   startBot();
 });
