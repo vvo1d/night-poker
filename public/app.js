@@ -297,7 +297,8 @@ function connectStream() {
   stream.addEventListener('table', (e) => {
     const data = JSON.parse(e.data);
     // Общий кадр приходит без чужих и своих карт — свои подставляем из личной части.
-    if (data.you && data.seats[data.you.seat]) data.seats[data.you.seat].cards = data.you.cards;
+    // Своё место помечаем здесь же: общий кадр одинаков для всех и «вы» в нём нет.
+    if (data.you && data.seats[data.you.seat]) Object.assign(data.seats[data.you.seat], { cards: data.you.cards, you: true });
     // Отошедший в турнире не ходит вовсе: карты за него сбрасывает стол.
     // Ходы гасим и здесь, а не только на сервере, — так кнопки не оживают ни на миг.
     if (data.you && data.you.sittingOut && data.tour && data.tour.status === 'running') data.you.legal = null;
@@ -1484,11 +1485,13 @@ function renderTable(t) {
   const hero = t.you ? t.you.seat : 0;
   const positions = seatPositions(t.maxSeats, hero);
   const seatsBox = $('#seats');
+  muckCards(t, prev, seatsBox);
   seatsBox.textContent = '';
   seatsBox.classList.toggle('is-showdown', won.size > 0);
 
   t.seats.forEach((seat, i) => {
     const node = el('div', 'seat');
+    node.dataset.seat = i;
     node.style.setProperty('--x', `${positions[i].x}%`);
     node.style.setProperty('--y', `${positions[i].y}%`);
 
@@ -1513,16 +1516,20 @@ function renderTable(t) {
       dx: ((50 - positions[i].x) / 100) * feltW,
       dy: ((50 - positions[i].y) / 100) * feltH,
     };
+    // Карты соперника после фолда улетают в центр (см. muckCards), ряд остаётся
+    // пустым, чтобы место не сдвигалось. Свои сброшенные карты видны приглушёнными.
     const cards = el('div', 'seat__cards');
-    seat.cards.forEach((card, ci) => {
-      cards.append(cardEl(card, {
-        small: true,
-        dim: seat.folded,
-        key: `s${i}-${ci}-${t.handId}`,
-        mark: seat.folded ? '' : markOf(card),
-        deal,
-      }));
-    });
+    if (!seat.folded || seat.you) {
+      seat.cards.forEach((card, ci) => {
+        cards.append(cardEl(card, {
+          small: true,
+          dim: seat.folded,
+          key: `s${i}-${ci}-${t.handId}`,
+          mark: seat.folded ? '' : markOf(card),
+          deal,
+        }));
+      });
+    }
     node.append(cards);
 
     const plate = el('div', 'seat__plate');
@@ -1779,6 +1786,8 @@ function seatObstacles(seatNodes, feltBox) {
   const out = [];
   for (const node of seatNodes) {
     for (const part of node.querySelectorAll('.seat__cards, .seat__name, .seat__face, .seat__badge, .seat__stack, .seat__note')) {
+      // Пустой ряд карт (игрок сбросил) ставкам не мешает.
+      if (part.classList.contains('seat__cards') && !part.childElementCount) continue;
       const r = part.getBoundingClientRect();
       if (!r.width || !r.height) continue;
       out.push({
@@ -2060,6 +2069,40 @@ function centerPct(node) {
     x: ((box.left + box.width / 2 - felt.left) / felt.width) * 100,
     y: ((box.top + box.height / 2 - felt.top) / felt.height) * 100,
   };
+}
+
+// Соперник сбросил: его карты, пока они ещё в DOM, копируем в слой полёта
+// и уводим к центру стола — со стола они исчезают, но видно, куда.
+function muckCards(t, prev, seatsBox) {
+  if (!prev || prev.id !== t.id || prev.handId !== t.handId) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const felt = $('#felt').getBoundingClientRect();
+  const to = centerPct($('#board').childElementCount ? $('#board') : $('#pot'));
+  const layer = $('#fly');
+  t.seats.forEach((seat, i) => {
+    const was = prev.seats[i];
+    if (seat.empty || seat.you || !seat.folded || !was || was.folded) return;
+    const node = seatsBox.querySelector(`.seat[data-seat="${i}"]`);
+    if (!node) return;
+    node.querySelectorAll('.seat__cards .card').forEach((card, ci) => {
+      const r = card.getBoundingClientRect();
+      if (!r.width) return;
+      const ghost = card.cloneNode(true);
+      ghost.classList.add('card-fly');
+      ghost.style.width = `${r.width}px`;
+      ghost.style.height = `${r.height}px`;
+      ghost.style.left = `${((r.left + r.width / 2 - felt.left) / felt.width) * 100}%`;
+      ghost.style.top = `${((r.top + r.height / 2 - felt.top) / felt.height) * 100}%`;
+      layer.append(ghost);
+      setTimeout(() => {
+        ghost.style.left = `${to.x + (ci ? 1.5 : -1.5)}%`;
+        ghost.style.top = `${to.y}%`;
+        ghost.style.transform = `translate(-50%, -50%) rotate(${ci ? 14 : -10}deg) scale(0.7)`;
+        ghost.style.opacity = '0';
+      }, 20 + ci * 50);
+      setTimeout(() => ghost.remove(), 700);
+    });
+  });
 }
 
 function flyChips(from, to, { count = 3, delay = 0 } = {}) {
