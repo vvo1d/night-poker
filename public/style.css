@@ -827,8 +827,10 @@ button.seat__face:focus-visible { outline: 2px solid var(--brass); outline-offse
 }
 .seat__badge {
   position: absolute; left: -8px; bottom: -6px; z-index: 2; width: 20px; height: 20px; border-radius: 50%;
-  background: var(--bone); color: #16202a; font-size: 11px; font-weight: 700;
-  display: grid; place-items: center; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  background: var(--bone); color: #16202a; font: 700 11px/1 "IBM Plex Sans", sans-serif;
+  /* Тень текста от бокса игрока буква не наследует — иначе «D» выглядит размытой. */
+  text-shadow: none; display: grid; place-items: center;
+  border: 1px solid rgba(0, 0, 0, 0.25); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 .seat__win {
   position: absolute; bottom: -24px; font-size: 13px; font-weight: 600; color: var(--brass);

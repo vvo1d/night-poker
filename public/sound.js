@@ -217,27 +217,20 @@ const Sound = (() => {
     });
   }
 
-  // Мягкий тон: чистый синус с плавным нарастанием и тихой октавой
-  // через фильтр — без звонких призвуков и резкой атаки, как у mallet.
-  function soft(freq, delay = 0, gain = 0.05, dur = 0.7) {
+  // Простой тон из первой версии — сигнал «ваш ход». Идёт мимо эха и
+  // компрессора, прямо на выход с прежней громкостью 0.5: звучит как раньше.
+  function tone({ freq, dur = 0.18, gain = 0.2, delay = 0, attack = 0.008 }) {
     const t0 = at(delay);
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 1400;
-    lp.Q.value = 0.5;
-    const env = envelope(t0, { attack: 0.03, dur, gain });
-    lp.connect(env);
-    out(env, 0.5);
-    [[1, 1], [2, 0.15]].forEach(([mul, g]) => {
-      const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = freq * mul;
-      const level = ctx.createGain();
-      level.gain.value = g;
-      osc.connect(level).connect(lp);
-      osc.start(t0);
-      osc.stop(t0 + dur + 0.05);
-    });
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, t0);
+    const amp = ctx.createGain();
+    amp.gain.setValueAtTime(0.0001, t0);
+    amp.gain.exponentialRampToValueAtTime(gain * 0.5, t0 + attack);
+    amp.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(amp).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.05);
   }
 
   const EFFECTS = {
@@ -249,7 +242,7 @@ const Sound = (() => {
     raise: () => { stack(5); slide(0.05, 0.16, 0.08); },
     allin: () => { slide(0, 0.45, 0.1); stack(8, 0.1, 0.12); knock(0.05, 0.2); },
     pot: () => slide(0, 0.32, 0.12),
-    turn: () => { soft(392, 0, 0.05); soft(523.25, 0.16, 0.04); },
+    turn: () => { tone({ freq: 660, dur: 0.16, gain: 0.16 }); tone({ freq: 990, dur: 0.22, gain: 0.12, delay: 0.11 }); },
     win: () => { slide(0, 0.5, 0.14); stack(9, 0.25, 0.26); mallet(523.25, 0.05, 0.07); mallet(659.25, 0.15, 0.07); mallet(783.99, 0.25, 0.07); },
     lose: () => swish({ dur: 0.25, from: 1100, to: 600, q: 0.6, gain: 0.08, attack: 0.04 }),
     click: () => swish({ dur: 0.012, from: 3500, to: 2500, q: 1.2, gain: 0.08, attack: 0.001, send: 0 }),
