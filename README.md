@@ -217,6 +217,21 @@ Node выполняет игровую логику в одном потоке, 
 
 Бот получает сообщения длинным опросом — вебхук и открытые порты не нужны, серверу достаточно выхода в интернет к `api.telegram.org`.
 
+### Если хостинг закрывает Telegram
+
+Признак — в журнале «Telegram-бот не запустился: getMe: нет связи с api.telegram.org». Настройки в `/etc/night-poker.env`:
+
+```
+TELEGRAM_BOT_TOKEN=123456:ABC…
+# Имя бота без @: вход через Telegram и Mini App работают и без связи с Telegram —
+# подпись проверяется на месте, а скрипты Telegram грузит браузер игрока.
+TELEGRAM_BOT_NAME=thpoker_bot
+# Свой прокси к Telegram API — нужен, чтобы бот отвечал и присылал уведомления.
+TELEGRAM_API_URL=https://ваш-прокси.example.com
+```
+
+Прокси — любой адрес, который пересылает запросы на `https://api.telegram.org` как есть: nginx на зарубежном сервере (`location / { proxy_pass https://api.telegram.org; proxy_ssl_server_name on; proxy_set_header Host api.telegram.org; }`) или Cloudflare Worker. Через прокси идёт токен бота, поэтому прокси должен быть ваш.
+
 ## Устройство
 
 ```

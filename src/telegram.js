@@ -8,7 +8,8 @@
 const crypto = require('node:crypto');
 
 const AUTH_TTL = 24 * 3600;      // подпись Telegram старше суток не принимаем
-const API = 'https://api.telegram.org';
+// Адрес Telegram API можно подменить прокси, если хостинг закрывает доступ к Telegram.
+const API = (process.env.TELEGRAM_API_URL || 'https://api.telegram.org').replace(/\/$/, '');
 
 const hmac = (key, data) => crypto.createHmac('sha256', key).update(data).digest();
 const safeEqual = (a, b) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -53,28 +54,37 @@ function verifyWebApp(initData, token) {
 
 class Bot {
   // appUrl — адрес игры (кнопка «Играть» открывает его внутри Telegram).
-  constructor(token, { appUrl = 'https://thpoker.ru', onStart = () => {} } = {}) {
+  constructor(token, { appUrl = 'https://thpoker.ru', username = null, onStart = () => {} } = {}) {
     this.token = token;
     this.appUrl = appUrl.replace(/\/$/, '');
     this.onStart = onStart;
-    this.username = null;
+    // Имя бота можно задать заранее: тогда вход через Telegram работает, даже пока API недоступен.
+    this.username = username;
     this.offset = 0;
     this.running = false;
   }
 
   async call(method, body = {}) {
-    const res = await fetch(`${API}/bot${this.token}/${method}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(40_000),
-    });
+    let res;
+    try {
+      res = await fetch(`${API}/bot${this.token}/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(40_000),
+      });
+    } catch (err) {
+      // «fetch failed» ничего не объясняет — достаём настоящую причину.
+      const cause = err.cause ? (err.cause.code || err.cause.message) : err.message;
+      throw new Error(`${method}: нет связи с ${new URL(API).host} (${cause})`);
+    }
     const data = await res.json();
     if (!data.ok) throw new Error(`${method}: ${data.description || res.status}`);
     return data.result;
   }
 
   async start() {
+    if (this.running) return this.username;
     const me = await this.call('getMe');
     this.username = me.username;
     // Кнопка меню у бота открывает игру как Mini App.
@@ -114,6 +124,7 @@ class Bot {
     const payload = text.split(' ')[1] || '';
     const code = payload.startsWith('join_') ? payload.slice(5) : null;
     const url = `${this.appUrl}/play${code ? `?join=${encodeURIComponent(code)}` : ''}`;
+    console.log(`Telegram: /start от ${msg.from.username ? `@${msg.from.username}` : msg.from.id}${code ? ` по приглашению ${code}` : ''}`);
     this.onStart(msg.from);
     await this.send(msg.chat.id, code
       ? 'Вас зовут за стол в THPoker. Нажмите «Играть» — стол откроется прямо здесь, в Telegram.'

@@ -175,12 +175,14 @@ for (const cfg of ROOM_CONFIGS) createTable(cfg);
 
 // ——— Telegram ———
 
-const bot = TG_TOKEN ? new telegram.Bot(TG_TOKEN, { appUrl: APP_URL }) : null;
+const bot = TG_TOKEN
+  ? new telegram.Bot(TG_TOKEN, { appUrl: APP_URL, username: process.env.TELEGRAM_BOT_NAME || null })
+  : null;
 
 // Сообщение игроку в Telegram, если он привязан и бот работает.
 function notify(userId, text) {
   const u = store.user(userId);
-  if (!bot || !bot.username || !u || !u.tg) return;
+  if (!bot || !bot.running || !u || !u.tg) return;
   bot.notify(u.tg.id, text);
 }
 
@@ -1179,9 +1181,17 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 server.listen(PORT, HOST, 1024, () => {
   console.log(`THPoker работает: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
   console.log(`Столов открыто: ${tables.size}`);
-  if (bot) {
-    bot.start()
-      .then((name) => console.log(`Telegram-бот @${name} запущен`))
-      .catch((err) => console.error('Telegram-бот не запустился:', err.message));
+  if (!bot) {
+    console.log('Telegram выключен: не задан TELEGRAM_BOT_TOKEN (см. /etc/night-poker.env)');
+    return;
   }
+  if (bot.username) console.log(`Вход через Telegram включён для @${bot.username}`);
+  // Сеть или Telegram могут быть недоступны в момент запуска — пробуем ещё, пока не выйдет.
+  const startBot = () => bot.start()
+    .then((name) => console.log(`Telegram-бот @${name} запущен, кнопки ведут на ${APP_URL}`))
+    .catch((err) => {
+      console.error(`Telegram-бот не запустился: ${err.message}. Новая попытка через 30 с`);
+      if (!stopping) setTimeout(startBot, 30_000);
+    });
+  startBot();
 });
