@@ -531,6 +531,10 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 /* ——— стол ——— */
 
 #screen-table { height: 100%; overflow: hidden; }
+/* За столом текст не выделяется: при быстрых нажатиях и долгом касании на телефоне
+   подсвечивались карты и имена и всплывало меню копирования. Поля ввода — как обычно. */
+#screen-table { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#screen-table input, #screen-table textarea, #screen-table select { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 .table-wrap { flex: 1; display: flex; min-height: 0; }
 
 .felt {
@@ -789,7 +793,7 @@ button.seat__face:focus-visible { outline: 2px solid var(--brass); outline-offse
   background: rgba(9, 16, 19, 0.88); border-radius: 999px; padding: 1px 10px;
 }
 .seat__kick {
-  position: absolute; left: -7px; bottom: 14px; width: 20px; height: 20px; border-radius: 50%;
+  position: absolute; right: -9px; top: -9px; z-index: 2; width: 20px; height: 20px; border-radius: 50%;
   padding: 0; cursor: pointer; color: var(--muted);
   background: rgba(9, 16, 19, 0.9); border: 1px solid var(--line);
   opacity: 0; transition: opacity 140ms ease, color 140ms ease, border-color 140ms ease;
@@ -874,13 +878,14 @@ button.seat__face:focus-visible { outline: 2px solid var(--brass); outline-offse
   position: static; width: 100%; height: 42px; margin: 0; border-radius: 0; border: 0;
   border-top: 1px solid var(--line); background: rgba(9, 16, 19, 0.6);
   padding: 0 16px; box-shadow: none; animation: none; backdrop-filter: none;
-  grid-template-columns: minmax(0, 1fr) minmax(80px, 200px) 46px; grid-template-areas: "name bar pct";
+  /* Название (в полосе оно всегда короткое) берёт сколько нужно, шкала — остаток. */
+  grid-template-columns: auto minmax(48px, 1fr) auto; grid-template-areas: "name bar pct";
   align-items: center; column-gap: 14px;
 }
 .meter--bar .meter__label, .meter--bar .meter__note { display: none; }
 .meter--bar .meter__name { font-size: 15px; min-height: 0; display: block; white-space: nowrap; text-overflow: ellipsis; }
-.meter--bar .meter__bar { margin: 0; }
-.meter--bar .meter__pct { font-size: 18px; min-width: 0; }
+.meter--bar .meter__bar { margin: 0; width: 100%; max-width: 260px; justify-self: end; }
+.meter--bar .meter__pct { font-size: 18px; min-width: 44px; }
 .meter--bar.is-strong, .meter--bar.is-weak { border-color: var(--line); }
 
 /* лента и чат */
@@ -891,6 +896,30 @@ button.seat__face:focus-visible { outline: 2px solid var(--brass); outline-offse
   font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
 }
 .icon-btn--sm { width: 24px; height: 24px; font-size: 15px; }
+
+/* вкладки боковой панели: чат и кто за столом */
+.side__tabs { display: flex; gap: 4px; }
+.side__tab {
+  font: inherit; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+  color: var(--muted); background: none; border: 0; border-bottom: 2px solid transparent; padding: 4px 6px;
+}
+.side__tab:hover { color: var(--text); }
+.side__tab.is-active { color: var(--bone); border-bottom-color: var(--brass); }
+.side__tab:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.people { flex: 1; overflow-y: auto; padding: 8px 14px 14px; scrollbar-width: thin; scrollbar-color: #2c414a transparent; }
+.people__head { margin: 12px 0 6px; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.people__empty { margin: 0; font-size: 13px; color: var(--muted); }
+.people__list { list-style: none; margin: 0; padding: 0; }
+.person { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.person__who {
+  display: flex; align-items: center; min-width: 0; padding: 0; cursor: pointer;
+  font: inherit; font-size: 14px; color: var(--text); background: none; border: 0; text-align: left;
+}
+span.person__who { cursor: default; color: var(--muted); }
+button.person__who:hover .person__name { text-decoration: underline; text-underline-offset: 2px; }
+.person__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.person__status { flex: 0 0 auto; font-size: 12px; color: var(--muted); }
+.person.is-you .person__name { color: var(--brass); }
 
 /* Символ × в шрифте стоит ниже середины кнопки, поэтому рисуем крест сами. */
 .icon-btn--close::before, .icon-btn--close::after,
@@ -1140,9 +1169,13 @@ body:has(.actions.is-raising) .react { display: none; }
   color: var(--bone); background: rgba(201, 162, 74, 0.1); border: 1px solid var(--brass-dim);
 }
 .my-tables { margin-bottom: 22px; }
-.my-table { grid-template-columns: 1fr auto; }
+.my-table .btn { padding: 4px 9px; font-size: 12px; }
+/* В узкой колонке кнопки идут отдельной строкой — иначе название стола не помещается. */
+.my-table { grid-template-columns: 1fr; row-gap: 2px; }
+.my-table .friend__who { grid-column: 1; grid-row: 1; }
 .my-table .friend__status { grid-column: 1; grid-row: 2; padding-left: 0; }
-.my-table .btn { grid-column: 2; grid-row: 1 / 3; }
+.my-table__actions { grid-column: 1; grid-row: 3; display: flex; gap: 6px; margin-top: 6px; }
+.my-table__close { color: #eab6ad; }
 .dialog--profile {
   position: relative; width: min(820px, 94vw); max-height: 88vh; padding: 26px;
   scrollbar-width: thin; scrollbar-color: #2c414a transparent;
@@ -1176,6 +1209,26 @@ body:has(.actions.is-raising) .react { display: none; }
   animation: toastIn 260ms cubic-bezier(0.2, 1.2, 0.4, 1) both;
 }
 .toast--good { background: #2a2312; border-color: var(--brass-dim); color: var(--bone); }
+/* За столом — под шапкой, а не над своими картами и аватаром. */
+body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastDown; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+@keyframes toastDown {
+  from { opacity: 0; transform: translate(-50%, -12px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+/* Подсказка в строке статуса над кнопками (например, «ставка изменилась»). */
+.actions .actions__status.is-notice { color: #f0a898; animation: noticeIn 260ms ease both; }
+@keyframes noticeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.toast--info { background: var(--ink-2); border-color: var(--line); color: var(--text); }
+
+/* счётчик непрочитанных сообщений на кнопке «Чат» */
+#toggle-log { position: relative; }
+.chat-badge {
+  position: absolute; top: -7px; right: -7px; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 999px; display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; line-height: 1; color: #1a1305; background: var(--brass);
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.chat-badge.is-bump { animation: bump 420ms ease; }
 
 /* ——— общие анимации ——— */
 
@@ -1343,6 +1396,7 @@ body:has(.actions.is-raising) .react { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .actions .actions__status.is-notice { animation: none; }
   .card--deal, .card--flip .card__inner, .bet.is-new, .seat__win, .raise, .seat__bubble.is-new, .react__panel,
   .room.is-new, .auth, .auth__mark span, .dialog[open], .toast, .felt__msg.is-win { animation: none; }
   .card--win, .meter.is-up .meter__name, .pot.is-bump strong, .bank strong.is-bump,

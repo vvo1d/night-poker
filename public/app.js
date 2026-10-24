@@ -85,13 +85,15 @@ async function cmd(payload, { quiet = false } = {}) {
 
 let toastTimer = null;
 // Ошибки — красным, хорошие новости (ачивка) — золотом.
-function toast(text, { good = false } = {}) {
+// Ошибки — красным, хорошие новости (ачивка) — золотом, просто сведения (сообщение в чате) — нейтрально.
+function toast(text, { good = false, info = false } = {}) {
   const node = $('#toast');
   node.textContent = text;
   node.hidden = false;
   node.classList.toggle('toast--good', good);
+  node.classList.toggle('toast--info', info);
   retrigger(node, 'toast');
-  Sound.play(good ? 'win' : 'error', { throttle: 400 });
+  Sound.play(good ? 'win' : info ? 'click' : 'error', { throttle: 400 });
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { node.hidden = true; }, good ? 4500 : 3200);
 }
@@ -126,10 +128,12 @@ function goal(name) {
 
 function show(view) {
   state.view = view;
+  // За столом уведомления всплывают сверху: внизу они закрывали бы свои карты.
+  document.body.dataset.view = view;
   $('#screen-auth').hidden = view !== 'auth';
   $('#screen-lobby').hidden = view !== 'lobby';
   $('#screen-table').hidden = view !== 'table';
-  if (view !== 'table') { state.snap = null; state.cardValues.clear(); state.logSeen = new Set(); }
+  if (view !== 'table') { state.snap = null; state.cardValues.clear(); state.logSeen = new Set(); clearUnread(); }
   if (view === 'lobby') showPage(state.page || 'tables');
 }
 
@@ -385,7 +389,8 @@ function renderLobby(data) {
     const middle = el('div', 'room__stats');
     middle.append(seatDots(room.seats));
     const status = roomStatus(room);
-    middle.append(el('div', `room__live${status.hot ? ' room__live--hot' : ''}`, status.text));
+    middle.append(el('div', `room__live${status.hot ? ' room__live--hot' : ''}`,
+      `${status.text}${room.watchers ? ` · смотрят ${room.watchers}` : ''}`));
     li.append(middle);
 
     const free = room.seats.filter((s) => s === 0).length;
@@ -612,9 +617,17 @@ function renderMyTables(list) {
       ? `sit-n-go · ${t.players}/${t.maxSeats}`
       : `${fmt(t.sb)}/${fmt(t.bb)} · ${t.players}/${t.maxSeats}`;
     li.append(el('span', 'friend__status', `${t.private ? 'приватный · ' : ''}${what}`));
+    const actions = el('div', 'my-table__actions');
     const invite = el('button', 'btn btn--ghost btn--sm', 'Пригласить');
     invite.addEventListener('click', () => openInvite(t));
-    li.append(invite);
+    actions.append(invite);
+    // Пустой стол хозяин закрывает сам — и освобождает место под новый.
+    if (t.closable) {
+      const close = el('button', 'btn btn--ghost btn--sm my-table__close', 'Закрыть');
+      close.addEventListener('click', () => closeTable(t));
+      actions.append(close);
+    }
+    li.append(actions);
     box.append(li);
   }
 }
@@ -1566,7 +1579,9 @@ function renderTable(t) {
       kick.title = 'Убрать бота';
       kick.setAttribute('aria-label', `Убрать бота ${seat.name}`);
       kick.addEventListener('click', () => cmd({ cmd: 'kickBot', seat: i }));
-      node.append(kick);
+      // Крестик — в углу аватара бота: сам бокс игрока теперь невидимый.
+      const face = node.querySelector('.seat__avatar');
+      (face || node).append(kick);
     }
 
     seatsBox.append(node);
@@ -1599,6 +1614,7 @@ function renderTable(t) {
 
   checkPre(t);
   renderMenu(t);
+  renderPeople(t);
   $('#react').hidden = !t.you;
   if (!t.you) closeReact();
   // Только что открыли приватный стол — сразу даём ссылку для друзей.
@@ -1664,9 +1680,13 @@ function centerBox(feltBox) {
   return box;
 }
 
-function betSpot(seatBox, core, feltBox, half) {
-  const x = (seatBox.left + seatBox.right) / 2;
+// face — прямоугольник аватара. Бокс места шире, чем видно глазу (аватар
+// посередине, по бокам пусто), поэтому сбоку ставку кладём от края аватара
+// и на его высоте — иначе фишки уезжали в сторону и было непонятно, чьи они.
+function betSpot(seatBox, core, feltBox, half, face = seatBox) {
+  const x = (face.left + face.right) / 2;
   const y = (seatBox.top + seatBox.bottom) / 2;
+  const fy = (face.top + face.bottom) / 2;
   const dx = feltBox.width / 2 - x;
   const dy = feltBox.height / 2 - y;
 
@@ -1679,17 +1699,17 @@ function betSpot(seatBox, core, feltBox, half) {
     if (dy > 0 ? near <= far : near >= far) return { x, y: near };
   } else {
     const [near, far] = dx > 0
-      ? [seatBox.right + BET_GAP + half.w, core.left - BET_GAP - half.w]
-      : [seatBox.left - BET_GAP - half.w, core.right + BET_GAP + half.w];
-    if (dx > 0 ? near <= far : near >= far) return { x: near, y };
+      ? [face.right + BET_GAP + half.w, core.left - BET_GAP - half.w]
+      : [face.left - BET_GAP - half.w, core.right + BET_GAP + half.w];
+    if (dx > 0 ? near <= far : near >= far) return { x: near, y: fy };
   }
 
   // Между местом и центром не осталось полосы — на тесном экране такое бывает.
-  // Тогда кладём сбоку от места, с той стороны, где до борта дальше.
-  const toLeft = seatBox.left > feltBox.width - seatBox.right;
+  // Тогда кладём сбоку от аватара, с той стороны, где до борта дальше.
+  const toLeft = face.left > feltBox.width - face.right;
   return {
-    x: toLeft ? seatBox.left - BET_GAP - half.w : seatBox.right + BET_GAP + half.w,
-    y,
+    x: toLeft ? face.left - BET_GAP - half.w : face.right + BET_GAP + half.w,
+    y: fy,
   };
 }
 
@@ -1730,7 +1750,13 @@ function renderBets(t, hero) {
       left: r.left - feltBox.left, right: r.right - feltBox.left,
       top: r.top - feltBox.top, bottom: r.bottom - feltBox.top,
     };
-    const spot = betSpot(seatBox, core, feltBox, half);
+    const faceNode = seatNodes[i].querySelector('.seat__face');
+    const f = faceNode ? faceNode.getBoundingClientRect() : r;
+    const face = {
+      left: f.left - feltBox.left, right: f.right - feltBox.left,
+      top: f.top - feltBox.top, bottom: f.bottom - feltBox.top,
+    };
+    const spot = betSpot(seatBox, core, feltBox, half, face);
     const x = (spot.x / feltBox.width) * 100;
     const y = (spot.y / feltBox.height) * 100;
     bet.style.setProperty('--x', `${x}%`);
@@ -1794,6 +1820,23 @@ narrow.addEventListener('change', placeMeter);
 short.addEventListener('change', placeMeter);
 placeMeter();
 
+const CATEGORY_SHORT = ['Старшая карта', 'Пара', 'Две пары', 'Сет', 'Стрит', 'Флеш', 'Фулл-хаус', 'Каре', 'Стрит-флеш'];
+const RANK_ORDER = '23456789TJQKA';
+
+// Короткое имя руки: до флопа — запись покеристов (KQs — одномастные, JTo —
+// разномастные, AA — пара; десятка — T, иначе «T2o» читалось бы как «102o»),
+// после флопа — только название комбинации.
+function shortHandName(hand, cards) {
+  if (hand.exact) {
+    if (hand.name === 'Флеш-рояль') return hand.name;
+    return CATEGORY_SHORT[hand.category] || hand.name;
+  }
+  if (!cards || cards.length < 2) return hand.name;
+  const [a, b] = [...cards].sort((x, y) => RANK_ORDER.indexOf(y[0]) - RANK_ORDER.indexOf(x[0]));
+  if (a[0] === b[0]) return `${a[0]}${b[0]}`;
+  return `${a[0]}${b[0]}${a[1] === b[1] ? 's' : 'o'}`;
+}
+
 function renderMeter(t) {
   placeMeter();
   const box = $('#meter');
@@ -1811,7 +1854,9 @@ function renderMeter(t) {
   box.hidden = false;
   const pct = Math.round(clamp(hand.strength, 0, 1) * 100);
   $('#meter-pct').textContent = `${pct}%`;
-  $('#meter-name').textContent = hand.name;
+  // Полосой (телефон, большой стол, низкий экран) места мало — пишем коротко:
+  // до флопа «KQs» / «J10o», после — только комбинацию. Полное название — в подсказке.
+  $('#meter-name').textContent = box.classList.contains('meter--bar') ? shortHandName(hand, t.you.cards) : hand.name;
   $('#meter-fill').style.width = `${pct}%`;
   $('#meter-pin').style.left = `calc(${pct}% - 1px)`;
   $('#meter-label').textContent = t.phase === 'showdown' ? 'Итог раздачи'
@@ -1900,12 +1945,17 @@ function renderLog(lines, reset) {
 
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
   let added = 0;
+  let incoming = false;
   for (const line of lines) {
     if (state.logSeen.has(line.id)) continue;
     state.logSeen.add(line.id);
     box.append(logLine(line));
     added += 1;
+    // Новое сообщение от другого игрока — история при входе за стол не в счёт.
+    const mine = state.user && line.text.startsWith(`${state.user.name}: `);
+    if (!reset && line.kind === 'chat' && !mine) incoming = true;
   }
+  if (incoming) notifyChat();
   while (box.children.length > 200) box.removeChild(box.firstChild);
   if (!added) return;
   if (atBottom || reset) box.scrollTop = box.scrollHeight;
@@ -2092,12 +2142,12 @@ function checkPre(t) {
   const toCall = you.legal ? you.legal.toCall : callAmount(t);
   if (pre.action === 'check' && toCall > 0) {
     state.pre = null;
-    toast('Ставка изменилась — решайте заново');
+    statusNotice('Ставка изменилась — решайте заново');
     return;
   }
   if (pre.action === 'call' && toCall !== pre.amount) {
     state.pre = null;
-    toast('Ставка изменилась — решайте заново');
+    statusNotice('Ставка изменилась — решайте заново');
     return;
   }
 
@@ -2156,7 +2206,36 @@ function sendRaise(t, amount) {
   state.raiseValue = 0;
 }
 
+// Подсказка в строке статуса над кнопками: видна, но ничего на столе не закрывает.
+const NOTICE_MS = 3000;
+function statusNotice(text) {
+  state.notice = { text, until: performance.now() + NOTICE_MS };
+  state.actionKey = '';                // перерисуем панель с подсказкой
+  if (state.table) renderActions(state.table);
+  Sound.play('error', { throttle: 400 });
+  clearTimeout(state.noticeTimer);
+  state.noticeTimer = setTimeout(() => {
+    state.notice = null;
+    state.actionKey = '';
+    if (state.table) renderActions(state.table);
+  }, NOTICE_MS);
+}
+
+function applyNotice() {
+  const status = document.querySelector('#actions .actions__status');
+  if (!status) return;
+  const n = state.notice;
+  const on = !!(n && performance.now() < n.until);
+  status.classList.toggle('is-notice', on);
+  if (on) status.textContent = n.text;
+}
+
 function renderActions(t) {
+  buildActions(t);
+  applyNotice();
+}
+
+function buildActions(t) {
   const box = $('#actions');
   const you = t.you;
   const legal = you && you.legal;
@@ -2495,6 +2574,16 @@ async function joinInvite() {
   await cmd({ cmd: 'join', code });
 }
 menuAction('#menu-stand', () => cmd({ cmd: 'standUp' }));
+menuAction('#menu-close', () => { if (state.table) closeTable(state.table); });
+
+async function closeTable(t) {
+  const sng = t.kind === 'sng';
+  if (!confirm(`Закрыть стол «${t.name}»? ${sng ? 'Ваш взнос вернётся в банк.' : 'Ваши фишки со стола вернутся в банк.'}`)) return;
+  const res = await cmd({ cmd: 'closeTable', id: t.id });
+  if (!res.ok) return;
+  toast(`Стол «${t.name}» закрыт`, { info: true });
+  loadFriends();
+}
 
 function renderMenu(t) {
   const you = t.you;
@@ -2518,6 +2607,11 @@ function renderMenu(t) {
   const stand = $('#menu-stand');
   stand.hidden = !seated || botClosed;
   stand.textContent = tour ? 'Отменить регистрацию' : 'Встать из-за стола';
+
+  // Свой стол можно закрыть, пока за ним нет других людей (боты не в счёт).
+  const me = state.user && state.user.name;
+  const others = t.seats.some((s) => !s.empty && !s.isBot && s.name !== me);
+  $('#menu-close').hidden = !(t.owner && t.owner === me && !others && !(tour && tour.status === 'running'));
 }
 
 // Удержание кнопки повторяет шаг и постепенно ускоряется.
@@ -2687,17 +2781,107 @@ $('#buyin-form').addEventListener('submit', (e) => {
 
 // ——— чат и лента ———
 
+// Чат закрыт — о новом сообщении говорит только счётчик на кнопке «Чат»:
+// всплывающее превью закрывало стол.
+function notifyChat() {
+  if (!$('#side').hidden && state.sideTab !== 'people') return;
+  state.unread = (state.unread || 0) + 1;
+  const badge = $('#chat-badge');
+  badge.textContent = state.unread > 9 ? '9+' : String(state.unread);
+  badge.hidden = false;
+  retrigger(badge, 'is-bump');
+  Sound.play('click', { throttle: 400 });
+}
+
+function clearUnread() {
+  state.unread = 0;
+  $('#chat-badge').hidden = true;
+}
+
 function toggleLog(open) {
   const side = $('#side');
   side.hidden = open === undefined ? !side.hidden : !open;
   $('#toggle-log').setAttribute('aria-expanded', String(!side.hidden));
   if (!side.hidden) {
+    clearUnread();
     const box = $('#log');
     box.scrollTop = box.scrollHeight;
     $('#log-more').hidden = true;
   }
 }
 $('#toggle-log').addEventListener('click', () => toggleLog());
+
+// ——— кто за столом: играют, смотрят, вылетели ———
+
+function setSideTab(tab) {
+  state.sideTab = tab;
+  document.querySelectorAll('.side__tab').forEach((b) => {
+    b.classList.toggle('is-active', b.dataset.side === tab);
+    b.setAttribute('aria-selected', String(b.dataset.side === tab));
+  });
+  const people = tab === 'people';
+  $('#log').hidden = people;
+  $('#people').hidden = !people;
+  $('#chat-form').hidden = people;
+  if (people) $('#log-more').hidden = true;
+  else { const box = $('#log'); box.scrollTop = box.scrollHeight; clearUnread(); }
+  if (state.table) renderPeople(state.table);
+}
+document.querySelectorAll('.side__tab').forEach((b) => b.addEventListener('click', () => {
+  Sound.play('click');
+  setSideTab(b.dataset.side);
+}));
+
+function seatStatus(t, s) {
+  if (s.sittingOut) return s.stack === 0 ? 'без фишек' : 'пропускает';
+  if (t.phase === 'idle' || !s.inHand) return 'ждёт раздачу';
+  if (s.folded) return 'сбросил';
+  if (s.allIn) return 'олл-ин';
+  if (t.actingSeat === s.seat) return 'ходит';
+  return 'в игре';
+}
+
+function personRow(name, avatar, status, { bot = false, you = false } = {}) {
+  const li = el('li', `person${you ? ' is-you' : ''}`);
+  const who = el(bot ? 'span' : 'button', 'person__who');
+  if (!bot) {
+    who.type = 'button';
+    who.title = 'Открыть профиль';
+    who.addEventListener('click', () => openProfile(name));
+  }
+  who.append(avatarEl(name, avatar, 'avatar--xs'), el('span', 'person__name', `${name}${bot ? ' • бот' : ''}`));
+  if (you) who.append(el('span', 'rating__you', 'вы'));
+  li.append(who, el('span', 'person__status', status));
+  return li;
+}
+
+// Список собирается из кадра стола, поэтому сам обновляется вместе со столом.
+function renderPeople(t) {
+  const seated = t.seats.filter((s) => !s.empty);
+  const audience = t.audience || [];
+  $('#people-count').textContent = String(seated.length + audience.length);
+  if ($('#people').hidden) return;
+
+  const box = $('#people');
+  box.textContent = '';
+  const section = (title, rows, empty) => {
+    box.append(el('h4', 'people__head', `${title} · ${rows.length}`));
+    if (!rows.length) { box.append(el('p', 'people__empty', empty)); return; }
+    const list = el('ul', 'people__list');
+    rows.forEach((r) => list.append(r));
+    box.append(list);
+  };
+  const me = state.user && state.user.name;
+  section('Играют', seated.map((s) => personRow(s.name, s.avatar, seatStatus(t, s), { bot: s.isBot, you: s.name === me && !s.isBot })),
+    'За столом пока никого.');
+  section('Смотрят', audience.map((w) => personRow(w.name, w.avatar, 'смотрит', { you: w.name === me })),
+    'Никто не смотрит.');
+  const out = t.tour ? (t.tour.places || []).filter((p) => t.tour.status !== 'finished' || p.place > 1) : [];
+  if (t.tour) {
+    section('Вылетели', out.map((p) => personRow(p.name, null, `${p.place} место${p.prize ? ` · ${fmt(p.prize)}` : ''}`, { bot: p.isBot, you: p.name === me })),
+      'Пока никто.');
+  }
+}
 $('#close-log').addEventListener('click', () => toggleLog(false));
 
 // Кнопка «новые сообщения» появляется, только если игрок отмотал ленту вверх.
@@ -2796,7 +2980,7 @@ function loadScript(src) {
 
 // Mini App: подстраиваемся под Telegram и отдаём объект с подписью initData.
 async function telegramApp() {
-  if (!inTelegram()) return null;
+  if (!inTelegram() || !(state.config && state.config.telegramLogin)) return null;
   try {
     await loadScript('https://telegram.org/js/telegram-web-app.js');
   } catch {
@@ -2873,7 +3057,7 @@ function renderTelegramAuth() {
 // Блок в кабинете: привязан ли Telegram, и если нет — привязать.
 function telegramSection() {
   const user = state.user;
-  if (!user || (!state.config.telegramBot && !user.telegram)) return null;
+  if (!user || !state.config.telegramLogin) return null;   // вход через Telegram выключен
   const sec = profileSection('Telegram');
   if (user.telegram) {
     sec.append(el('p', 'tg-linked', `Привязан ${user.telegram} — входите через Telegram, бот пишет о заявках в друзья и старте ваших турниров.`));
@@ -2897,13 +3081,10 @@ function telegramSection() {
 // ——— старт ———
 
 (async function init() {
-  state.config = {};
-  const [tgApp, config] = await Promise.all([
-    telegramApp(),
-    fetch('/api/config').then((r) => r.json()).catch(() => ({})),
-  ]);
+  // Сначала настройки сервера: от них зависит, включён ли вход через Telegram.
+  state.config = await fetch('/api/config').then((r) => r.json()).catch(() => ({})) || {};
+  const tgApp = await telegramApp();
   state.tgApp = tgApp;
-  state.config = config || {};
 
   const res = await fetch('/api/me');
   const data = await res.json().catch(() => ({}));

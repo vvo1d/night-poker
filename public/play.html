@@ -182,10 +182,11 @@
           <button class="menu__item" id="menu-invite" role="menuitem">Пригласить друзей</button>
           <button class="menu__item" id="menu-bot" role="menuitem">Позвать бота</button>
           <button class="menu__item menu__item--danger" id="menu-stand" role="menuitem">Встать из-за стола</button>
+          <button class="menu__item menu__item--danger" id="menu-close" role="menuitem" hidden>Закрыть стол</button>
         </div>
       </div>
 
-      <button class="btn btn--ghost btn--sm" id="toggle-log" aria-expanded="false" title="Чат стола"><span class="btn__ico" aria-hidden="true">☰</span><span class="btn__text">Чат</span></button>
+      <button class="btn btn--ghost btn--sm" id="toggle-log" aria-expanded="false" title="Чат стола"><span class="btn__ico" aria-hidden="true">☰</span><span class="btn__text">Чат</span><span class="chat-badge" id="chat-badge" hidden>0</span></button>
     </div>
   </header>
 
@@ -225,11 +226,16 @@
 
     <aside class="side" id="side" hidden>
       <div class="side__head">
-        <span>Чат стола</span>
+        <div class="side__tabs" role="tablist">
+          <button class="side__tab is-active" data-side="chat" role="tab">Чат</button>
+          <button class="side__tab" data-side="people" role="tab">За столом <span id="people-count"></span></button>
+        </div>
         <button class="icon-btn icon-btn--sm icon-btn--close" id="close-log" title="Скрыть чат" aria-label="Скрыть чат"></button>
       </div>
       <div class="log" id="log"></div>
       <button class="log__more" id="log-more" hidden>Новые сообщения ↓</button>
+      <!-- Кто за столом: играют, смотрят, вылетели -->
+      <div class="people" id="people" hidden></div>
       <form class="chat" id="chat-form">
         <input id="chat-input" maxlength="140" placeholder="Сказать что-нибудь за столом" autocomplete="off">
         <button class="btn btn--sm" type="submit">Отправить</button>

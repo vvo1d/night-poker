@@ -13,7 +13,7 @@ const { Table, setEvalBudget, REACTIONS, PHRASES } = require('./src/table');
 const { BOT_NAMES } = require('./src/bot');
 const { Tournament, SNG_STACK, SNG_TIMEOUT, SNG_BUY_INS } = require('./src/tournament');
 const { ACHIEVEMENTS, achievementView, tierTotal } = require('./src/achievements');
-const { Snapshot, mttRefunds } = require('./src/snapshot');
+const { Snapshot, mttRefunds, tableRecord, refunds } = require('./src/snapshot');
 const telegram = require('./src/telegram');
 const { LoginGuard, waitText } = require('./src/limits');
 const analytics = require('./src/analytics');
@@ -32,6 +32,8 @@ const SECURE_COOKIE = process.env.COOKIE_SECURE === '1';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 // Telegram включается токеном бота; адрес сайта нужен для кнопок «Играть» в боте.
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+// Вход через Telegram скрыт, пока Telegram недоступен в РФ: включается TELEGRAM_LOGIN=on.
+const TG_LOGIN = process.env.TELEGRAM_LOGIN === 'on';
 const APP_URL = process.env.APP_URL || 'https://thpoker.ru';
 // Режим вебхука: Telegram сам приносит сообщения на /api/telegram/webhook.
 // Нужен, если хостинг не выпускает сервер к api.telegram.org.
@@ -66,7 +68,8 @@ const store = new Store();
 const CASH_IDLE_MS = 5 * 60_000;     // пустой кэш-стол ждёт столько, прежде чем закрыться
 const SNG_IDLE_MS = 10 * 60_000;     // турнир, на который никто не записался
 const SNG_DONE_MS = 2 * 60_000;      // законченный турнир ещё висит с итогами
-const TABLES_PER_USER = 3;           // сколько открытых столов может держать один игрок
+const TABLES_PER_USER = 3;           // сколько своих столов без игроков можно держать открытыми
+const TABLES_PER_USER_MAX = 10;      // и сколько своих столов всего — даже если за всеми играют
 const TABLES_MAX = 5000;
 const LOBBY_LIMIT = 150;             // столько столов уходит в лобби — самые живые
 const EVAL_PER_TICK = 8;             // тяжёлых разборов руки за тик (по ~4 мс каждый)
@@ -154,10 +157,18 @@ function createTable(cfg, {
 }
 
 // Свой стол: кэш с выбранными блайндами или sit-n-go на 6 или 9 мест.
+// Стол «пустует», если за ним нет людей, кроме самого хозяина. Только такие столы
+// упираются в лимит: стол, где играют другие, — живой, и ради него новый не запрещаем.
+function idleFor(table, user) {
+  return !table.players().some((p) => !p.isBot && p.userId !== user.id);
+}
+
 function createUserTable(user, body) {
-  let owned = 0;
-  for (const t of tables.values()) if (t.ownerId === user.id) owned += 1;
-  if (owned >= TABLES_PER_USER) return { error: `Открыто уже ${TABLES_PER_USER} ваших стола — дождитесь, пока какой-нибудь закроется` };
+  const owned = [...tables.values()].filter((t) => t.ownerId === user.id);
+  if (owned.length >= TABLES_PER_USER_MAX) return { error: `У вас уже ${TABLES_PER_USER_MAX} столов — закройте какой-нибудь` };
+  if (owned.filter((t) => idleFor(t, user)).length >= TABLES_PER_USER) {
+    return { error: `У вас уже ${TABLES_PER_USER} стола без игроков — закройте ненужный в «Моих столах» или позовите друзей` };
+  }
   if (tables.size >= TABLES_MAX) return { error: 'Свободных столов нет, попробуйте позже' };
 
   const name = String(body.name || '').trim().replace(/\s+/g, ' ').slice(0, 24);
@@ -242,7 +253,7 @@ function notify(userId, text) {
 
 // Подпись от виджета на сайте или от Mini App — оба пути дают одного и того же игрока.
 function telegramIdentity(body) {
-  if (!TG_TOKEN) return null;
+  if (!TG_TOKEN || !TG_LOGIN) return null;
   if (body.initData) return telegram.verifyWebApp(body.initData, TG_TOKEN);
   return telegram.verifyLogin(body.data, TG_TOKEN);
 }
@@ -621,6 +632,7 @@ function tableInfo(table) {
     // Место за местом: 0 — свободно, 1 — человек, 2 — бот.
     seats: table.seats.map((p) => (!p ? 0 : p.isBot ? 2 : 1)),
     playing: table.phase !== 'idle',
+    watchers: table.watchers || 0,
     sng: tour ? {
       status: tour.status,
       buyIn: tour.buyIn,
@@ -753,9 +765,35 @@ function tablesOf(user) {
   const out = [];
   for (const t of tables.values()) {
     if (t.ownerId !== user.id) continue;
-    out.push({ id: t.id, invite: t.invite, private: t.private, ...inviteInfo(t) });
+    out.push({ id: t.id, invite: t.invite, private: t.private, closable: !closeBlock(t, user), ...inviteInfo(t) });
   }
   return out;
+}
+
+// Почему хозяин не может закрыть стол (или null, если может): за ним играют
+// другие люди, идёт турнир или на sit-n-go уже кто-то записался.
+function closeBlock(table, user) {
+  if (table.ownerId !== user.id) return 'Закрыть стол может только тот, кто его открыл';
+  if (table.mttId || table.house) return 'Этот стол закрыть нельзя';
+  if (table.tour && table.tour.status === 'running') return 'Идёт турнир — стол закроется сам, когда он закончится';
+  if (!idleFor(table, user)) return 'За столом играют другие — закрыть его можно, когда они уйдут';
+  return null;
+}
+
+// Закрыть свой стол: фишки хозяина — в банк (по тем же правилам, что при перезапуске),
+// боты — со стола, зрители — в лобби (стола больше нет).
+function closeOwnTable(table, user) {
+  const why = closeBlock(table, user);
+  if (why) return { error: why };
+  for (const r of refunds(tableRecord(table))) store.addChips(r.userId, r.amount);
+  for (const p of table.players()) {
+    table.seats[p.seat] = null;
+    table.byUserId.delete(p.userId);
+    table.onUnseat(p, table);
+  }
+  dropTable(table);
+  saveSnapshot();
+  return { ok: true };
 }
 
 // ——— кабинет, друзья, рейтинг ———
@@ -865,6 +903,13 @@ async function handleCommand(ctx, body) {
       if (table.error) return table;
       session.roomId = table.id;
       return { ok: true, roomId: table.id };
+    }
+    case 'closeTable': {
+      const table = tables.get(String(body.id || session.roomId));
+      if (!table) return { error: 'Стол уже закрыт' };
+      const res = closeOwnTable(table, user);
+      if (res.ok && session.roomId === table.id) session.roomId = null;
+      return res;
     }
     case 'leaveRoom': {
       const table = room();
@@ -1070,7 +1115,8 @@ const server = http.createServer(async (req, res) => {
 
     if (route === '/api/config' && req.method === 'GET') {
       return send(res, 200, {
-        telegramBot: bot && bot.username ? bot.username : null,
+        telegramBot: TG_LOGIN && bot && bot.username ? bot.username : null,
+        telegramLogin: TG_LOGIN,
         reactions: REACTIONS,
         phrases: PHRASES,
         metrika: METRIKA_ID || null,
@@ -1474,7 +1520,34 @@ let purgedAt = Date.now();
 
 // Обслуживание столов: боты, отвалившиеся игроки, закрытие пустых столов.
 // Это перебор всех столов, поэтому он идёт раз в две секунды, а не каждый тик.
+// Зрители: кто открыл стол, но не сидит за ним. Собираем по открытым соединениям
+// и отдаём столу, только если список поменялся, — иначе кадры пересобирались бы зря.
+const AUDIENCE_MAX = 50;
+function updateAudience() {
+  const watching = new Map();   // tableId -> Map(userId -> зритель)
+  for (const client of clients) {
+    const { session, user } = client.ctx;
+    const table = session.roomId && tables.get(session.roomId);
+    if (!table || table.byUser(user.id)) continue;
+    let list = watching.get(table.id);
+    if (!list) { list = new Map(); watching.set(table.id, list); }
+    list.set(user.id, { name: user.name, avatar: store.avatarUrl(user) });
+  }
+  for (const table of tables.values()) {
+    const list = [...(watching.get(table.id) || new Map()).values()]
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+      .slice(0, AUDIENCE_MAX);
+    const key = list.map((w) => `${w.name}:${w.avatar || ''}`).join('|');
+    if (key === (table.audienceKey || '')) continue;
+    table.audienceKey = key;
+    table.audience = list;
+    table.watchers = watching.has(table.id) ? watching.get(table.id).size : 0;
+    table.touch();
+  }
+}
+
 function maintain(now) {
+  updateAudience();
   for (const table of tables.values()) {
     if (table.phase === 'idle' && !table.tour) {
       for (const p of table.players()) {

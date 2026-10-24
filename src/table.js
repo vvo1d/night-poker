@@ -911,6 +911,8 @@ class Table {
         optional: this.reveal.optional,
         timeLeft: Math.max(0, this.reveal.deadline - now),
       } : null,
+      // Кто смотрит за столом, не садясь (собирает сервер, см. updateAudience).
+      audience: this.audience || [],
       seats: this.seats.map((p, i) => {
         if (!p) return { seat: i, empty: true };
         return {
