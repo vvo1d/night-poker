@@ -20,6 +20,9 @@
 
 * { box-sizing: border-box; }
 
+/* Двойной тап не увеличивает страницу; прокрутка и щипок работают как обычно. */
+html, body, * { touch-action: manipulation; }
+
 html { scroll-behavior: smooth; scroll-padding-top: 76px; }
 
 body {

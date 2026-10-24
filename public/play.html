@@ -2,7 +2,9 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Масштаб за столом не нужен: maximum-scale=1 убирает приближение при фокусе на поле ввода на iPhone,
+     user-scalable=no — зум на Android. Двойной тап и щипок на iPhone гасит app.js. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Играть — THPoker</title>
 <meta name="description" content="THPoker — бесплатный онлайн покер на виртуальные фишки: техасский холдем, сит-н-гоу и свои столы с друзьями.">
 <!-- Страница самой игры: в поиске должна быть главная, а не экран входа -->
