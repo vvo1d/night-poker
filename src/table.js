@@ -57,7 +57,7 @@ class Player {
 class Table {
   constructor(config, hooks = {}) {
     Object.assign(this, config); // id, name, maxSeats, sb, bb, minBuyIn, maxBuyIn, timeout, tour
-    this.tour = this.tour || null; // турнир, если стол — сит-н-гоу
+    this.tour = this.tour || null; // турнир, если стол — sit-n-go
     this.seats = new Array(this.maxSeats).fill(null);
     this.phase = 'idle';
     this.board = [];
@@ -534,11 +534,15 @@ class Table {
     let prev = 0;
     for (const level of levels) {
       let amount = 0;
+      // Кто сколько вложил в этот банк — чтобы показать чистый выигрыш, без своих же фишек.
+      const from = new Map();
       for (const p of contributors) {
-        amount += Math.max(0, Math.min(p.contributed, level) - Math.min(p.contributed, prev));
+        const part = Math.max(0, Math.min(p.contributed, level) - Math.min(p.contributed, prev));
+        amount += part;
+        if (part) from.set(p, part);
       }
       const eligible = contributors.filter((p) => !p.folded && p.inHand && p.contributed >= level);
-      if (amount > 0) pots.push({ amount, eligible });
+      if (amount > 0) pots.push({ amount, eligible, from });
       prev = level;
     }
     // Склеиваем соседние банки с одинаковым составом претендентов.
@@ -548,6 +552,7 @@ class Table {
       if (last && last.eligible.length === pot.eligible.length
         && last.eligible.every((p) => pot.eligible.includes(p))) {
         last.amount += pot.amount;
+        for (const [p, part] of pot.from) last.from.set(p, (last.from.get(p) || 0) + part);
       } else merged.push(pot);
     }
     return merged;
@@ -608,6 +613,8 @@ class Table {
         contested: claimants.length > 1,
         share: share_,
         players: ordered,
+        // Чистый выигрыш каждого: доля банка минус то, что он сам в этот банк положил.
+        net: share_.map(({ p, amount }) => amount - (pot.from.get(p) || 0)),
       });
     });
     return winners;
@@ -719,17 +726,36 @@ class Table {
       }
     }
 
-    this.lastWinners = this.pendingWinners.map((w) => ({
-      potIndex: w.potIndex,
-      amount: w.amount,
-      names: w.players.map((p) => p.name),
-      hand: w.contested && w.players[0].showCards ? w.players[0].handName : null,
-      best: w.contested && w.players[0].showCards ? w.players[0].bestCards : null,
-    }));
-    // В ленте остаётся одна строка на раздачу — с комбинацией и картами, которые её собрали.
+    // Показываем чистый выигрыш: свои же фишки, вернувшиеся из банка, — не выигрыш.
+    // Банк, где игрок забрал только свою неуравненную ставку, не показываем вовсе.
+    const list = [];
+    for (const w of this.pendingWinners) {
+      const gain = w.net.reduce((a, b) => a + Math.max(0, b), 0);
+      const split = w.players.length > 1;
+      if (!gain && !split) continue;
+      const entry = {
+        potIndex: w.potIndex,
+        amount: gain,
+        each: split ? Math.max(0, w.net[0]) : gain,
+        split,
+        names: w.players.map((p) => p.name),
+        hand: w.contested && w.players[0].showCards ? w.players[0].handName : null,
+        best: w.contested && w.players[0].showCards ? w.players[0].bestCards : null,
+      };
+      // Основной и побочный банк у одного игрока с одной рукой — одна строка.
+      const last = list[list.length - 1];
+      if (last && !split && !last.split && last.names[0] === entry.names[0] && last.hand === entry.hand) {
+        last.amount += entry.amount;
+        last.each += entry.each;
+      } else list.push(entry);
+    }
+    this.lastWinners = list;
+    // В ленте остаётся одна строка на банк — с комбинацией и картами, которые её собрали.
     for (const w of this.lastWinners) {
       const combo = w.hand ? ` — ${w.hand}${w.best ? ` · ${w.best.join(' ')}` : ''}` : '';
-      this.note(`${w.names.join(', ')} выигрывает ${w.amount}${combo}`, 'result');
+      const what = !w.split ? `${w.names[0]} выигрывает ${w.amount}`
+        : w.each > 0 ? `${w.names.join(', ')} делят банк: по ${w.each}` : `${w.names.join(', ')} делят банк`;
+      this.note(`${what}${combo}`, 'result');
     }
 
     this.pendingWinners = [];
@@ -901,6 +927,8 @@ class Table {
           lastAction: p.lastAction,
           handName: p.handName,
           won: p.won,
+          // Чистый выигрыш за раздачу — его и показываем над местом («+N»).
+          net: this.phase === 'showdown' ? Math.max(0, p.won - p.contributed) : 0,
           mucked: p.mucked,
           revealing: !!(this.reveal && this.reveal.seat === i),
           winner: this.phase === 'showdown' && p.won > 0,

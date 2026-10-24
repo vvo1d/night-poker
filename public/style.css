@@ -409,9 +409,6 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   width: 22px; height: 22px; font-size: 11px; font-family: "IBM Plex Sans", sans-serif; font-weight: 600;
   margin-right: 8px; vertical-align: -6px; display: inline-grid; box-shadow: none;
 }
-.avatar--seat {
-  width: 18px; height: 18px; font-size: 10px; margin-right: 5px; vertical-align: -4px; display: inline-grid; box-shadow: none;
-}
 .avatar--edit { cursor: pointer; }
 .avatar--edit::after {
   content: 'Сменить'; position: absolute; inset: auto 0 0 0; padding: 3px 0 5px; text-align: center;
@@ -714,31 +711,53 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 }
 .seat__cards { display: flex; gap: 3px; height: 55px; perspective: 700px; }
 .seat__plate {
-  width: 100%; background: rgba(9, 16, 19, 0.9); border: 1px solid var(--line);
-  border-radius: 8px; padding: 5px 8px; text-align: center; backdrop-filter: blur(2px);
-  transition: border-color 200ms ease, box-shadow 200ms ease, background 200ms ease;
+  /* Без коробки: аватар и надписи прямо на сукне. Тень у текста — чтобы читался на зелёном. */
+  width: 100%; padding: 0; text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 8px rgba(0, 0, 0, 0.55);
 }
-.seat--acting .seat__plate { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass), 0 0 22px rgba(201, 162, 74, 0.28); }
 .seat--acting .seat__name { color: var(--bone); }
 .seat--folded { opacity: 0.42; }
-.seat--revealing .seat__plate { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass), 0 0 22px rgba(201, 162, 74, 0.25); }
 .seat--mucked .seat__cards { opacity: 0.4; filter: grayscale(0.7); }
 .seat--mucked .seat__note { color: var(--muted); }
 .seat--you .seat__name { color: var(--brass); }
-.seat--winner .seat__plate {
-  border-color: var(--brass); background: rgba(46, 36, 12, 0.92);
-  box-shadow: 0 0 0 1px var(--brass), 0 0 30px rgba(201, 162, 74, 0.4);
+.seat__face {
+  display: grid; place-items: center; width: 64px; height: 64px; margin: 4px auto 3px; padding: 0;
+  border-radius: 13px; overflow: hidden; cursor: pointer;
+  font: 500 27px/1 Fraunces, Georgia, serif; color: #1a1305; text-shadow: none;
+  background: radial-gradient(circle at 35% 30%, #f0d68f, var(--brass) 60%, #8d7134);
+  border: 0; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+  transition: transform 120ms ease, box-shadow 200ms ease;
+}
+.seat__face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+button.seat__face:hover { transform: scale(1.05); }
+button.seat__face:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.seat__face--bot { cursor: default; color: var(--muted); background: var(--ink-3); box-shadow: 0 0 0 1px var(--line), 0 3px 10px rgba(0, 0, 0, 0.45); }
+.seat--folded .seat__face { filter: grayscale(0.6); }
+/* Чей ход, кто вскрывается и кто выиграл — теперь видно по рамке вокруг аватара. */
+.seat--revealing .seat__face {
+  box-shadow: 0 0 0 2px var(--brass), 0 0 18px rgba(201, 162, 74, 0.55), 0 3px 10px rgba(0, 0, 0, 0.5);
+}
+.seat--winner .seat__face {
+  box-shadow: 0 0 0 3px var(--brass), 0 0 28px rgba(201, 162, 74, 0.7), 0 3px 10px rgba(0, 0, 0, 0.5);
 }
 .seat__name { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seat__stack { display: block; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .seat__note {
-  display: block; font-size: 11px; color: var(--muted); min-height: 1.5em;
+  display: block; font-size: 11px; color: #b9cfc7; min-height: 1.5em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .seat__note--hand { color: var(--brass); }
-.seat__timer { width: 100%; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
-.seat__timer i { display: block; height: 100%; background: var(--brass); transition: width 200ms linear, background 300ms ease; }
-.seat__timer i.is-low { background: var(--weak); }
+/* Таймер хода — рамка вокруг аватара: линия убывает по краю квадрата,
+   в последней четверти времени краснеет. */
+.seat__avatar { position: relative; width: max-content; margin: 5px auto 4px; }
+.seat__avatar .seat__face { margin: 0; }
+.seat__ring { position: absolute; inset: -6px; width: calc(100% + 12px); height: calc(100% + 12px); pointer-events: none; overflow: visible; }
+.seat__ring path {
+  fill: none; stroke: var(--brass); stroke-width: 4; stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(201, 162, 74, 0.7));
+  transition: stroke-dasharray 200ms linear, stroke 300ms ease;
+}
+.seat__ring.is-low path { stroke: var(--weak); filter: drop-shadow(0 0 4px rgba(180, 84, 63, 0.8)); }
 /* Поставленные фишки лежат на сукне на постоянном месте — низкой плашкой,
    чтобы помещаться в полосу между бортом и картами на любом экране. */
 #bets { position: absolute; inset: 0; pointer-events: none; }
@@ -796,24 +815,35 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   transition: left 620ms cubic-bezier(0.4, 0, 0.2, 1), top 620ms cubic-bezier(0.4, 0, 0.2, 1), opacity 620ms ease;
 }
 
-/* силомер руки */
+/* силомер руки
+   На сукне — карточка постоянного размера: слева метка и название руки
+   в одну строку, справа крупный процент, ниже шкала и пояснение.
+   Ничего не переносится, поэтому карточка не меняет ни ширину, ни высоту. */
 .meter {
-  position: absolute; left: 14px; bottom: 14px; width: 258px; z-index: 5;
-  background: rgba(9, 16, 19, 0.92); border: 1px solid var(--line); border-radius: 12px;
-  padding: 8px 11px 10px; backdrop-filter: blur(3px);
+  position: absolute; left: 14px; bottom: 14px; width: 248px; z-index: 5;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px;
+  grid-template-areas: "label pct" "name pct" "bar bar";
+  background: rgba(9, 16, 19, 0.92); border: 1px solid var(--line); border-radius: 14px;
+  padding: 10px 12px 11px; backdrop-filter: blur(3px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   animation: rise 300ms ease-out both;
 }
-.meter__top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.meter__label { font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
-.meter__pct { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--brass); line-height: 1.1; }
+.meter__top { display: contents; }
+.meter__label { grid-area: label; font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); line-height: 1.4; }
+.meter__pct {
+  grid-area: pct; align-self: center; min-width: 52px; text-align: right;
+  font-family: Fraunces, Georgia, serif; font-size: 26px; font-weight: 500; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--brass); transition: color 300ms ease;
+}
 .meter__name {
-  font-family: Fraunces, Georgia, serif; font-size: 16px; color: var(--bone);
-  margin: 2px 0 7px; line-height: 1.2;
+  /* До двух строк, и место под обе есть всегда: высота карточки не прыгает. */
+  grid-area: name; font-family: Fraunces, Georgia, serif; font-size: 16px; color: var(--bone); line-height: 1.25;
+  min-height: 2.5em; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
 .meter__bar {
-  position: relative; height: 7px; border-radius: 999px; overflow: hidden;
-  background: linear-gradient(90deg, rgba(180, 84, 63, 0.25), rgba(201, 162, 74, 0.25), rgba(79, 157, 106, 0.25));
+  grid-area: bar; position: relative; height: 6px; margin-top: 9px; border-radius: 999px; overflow: hidden;
+  background: linear-gradient(90deg, rgba(180, 84, 63, 0.22), rgba(201, 162, 74, 0.22), rgba(79, 157, 106, 0.22));
 }
 .meter__bar i {
   position: absolute; left: 0; top: 0; bottom: 0; width: 0;
@@ -822,34 +852,36 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   transition: width 420ms cubic-bezier(0.3, 0.8, 0.3, 1);
 }
 .meter__bar b {
-  position: absolute; top: -2px; width: 2px; height: 11px; border-radius: 1px;
+  position: absolute; top: -2px; width: 2px; height: 10px; border-radius: 1px;
   background: var(--bone); box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
   transition: left 420ms cubic-bezier(0.3, 0.8, 0.3, 1);
 }
 .meter__note {
-  font-size: 11px; color: var(--muted); margin-top: 6px;
+  /* На сукне пояснение не помещается без наезда на соседние места — оно в подсказке силомера. */
+  display: none;
+  grid-area: note; font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.3;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* На большом столе и на узком экране силомеру негде встать на сукне —
-   он превращается в полосу над кнопками. */
-.meter--bar {
-  position: static; width: auto; max-width: 860px; margin: 0 auto; border-radius: 0; border: 0;
-  border-top: 1px solid var(--line); background: rgba(9, 16, 19, 0.6);
-  padding: 7px 14px 9px; box-shadow: none; animation: none;
-  display: grid; grid-template-columns: 1fr auto; align-items: baseline; column-gap: 12px;
-}
-.meter--bar .meter__label { display: none; }
-.meter--bar .meter__top { display: contents; }
-.meter--bar .meter__pct { grid-column: 2; grid-row: 1; }
-.meter--bar .meter__name { grid-column: 1; grid-row: 1; margin: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.meter--bar .meter__bar { grid-column: 1 / -1; grid-row: 2; margin-top: 6px; }
-.meter--bar .meter__note { grid-column: 1 / -1; grid-row: 3; }
-
 .meter.is-strong { border-color: rgba(79, 157, 106, 0.55); }
+.meter.is-strong .meter__pct { color: #7cc394; }
 .meter.is-weak { border-color: rgba(180, 84, 63, 0.45); }
-.meter--bar.is-strong, .meter--bar.is-weak { border-color: var(--line); }
-.meter--bar .meter__note { font-size: 10px; }
+.meter.is-weak .meter__pct { color: #d98a78; }
 .meter.is-up .meter__name { animation: bump 460ms ease; }
+
+/* На большом столе и на узком экране силомеру негде встать на сукне —
+   он становится ровной полосой во всю ширину над кнопками: название, шкала, процент. */
+.meter--bar {
+  position: static; width: 100%; height: 42px; margin: 0; border-radius: 0; border: 0;
+  border-top: 1px solid var(--line); background: rgba(9, 16, 19, 0.6);
+  padding: 0 16px; box-shadow: none; animation: none; backdrop-filter: none;
+  grid-template-columns: minmax(0, 1fr) minmax(80px, 200px) 46px; grid-template-areas: "name bar pct";
+  align-items: center; column-gap: 14px;
+}
+.meter--bar .meter__label, .meter--bar .meter__note { display: none; }
+.meter--bar .meter__name { font-size: 15px; min-height: 0; display: block; white-space: nowrap; text-overflow: ellipsis; }
+.meter--bar .meter__bar { margin: 0; }
+.meter--bar .meter__pct { font-size: 18px; min-width: 0; }
+.meter--bar.is-strong, .meter--bar.is-weak { border-color: var(--line); }
 
 /* лента и чат */
 .side { width: 320px; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--ink-2); }
@@ -912,25 +944,23 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .chat input:focus { outline: none; border-color: var(--brass-dim); }
 
 /* панель действий */
-.actionbar {
-  position: relative; border-top: 1px solid var(--line); background: var(--ink-2);
-  display: grid; grid-template-columns: auto minmax(0, 1fr);
-}
-.actionbar > .turnbar, .actionbar > .meter { grid-column: 1 / -1; }
-.actionbar > .actions { grid-column: 2; }
+.actionbar { position: relative; border-top: 1px solid var(--line); background: var(--ink-2); }
 
-/* реакции: кнопка слева в панели, выбор всплывает вверх */
-.react { grid-column: 1; align-self: center; position: relative; padding-left: 14px; }
+/* Реакции: кнопка в правом нижнем углу сукна — над кнопками действий, ничего
+   не сдвигает и не заходит на чат. Пока открыт выбор ставки (он всплывает
+   в том же углу), кнопку прячем. */
+.react { position: absolute; right: 14px; bottom: 14px; z-index: 16; }
+body:has(.actions.is-raising) .react { display: none; }
 .react__toggle {
   width: 44px; height: 44px; border-radius: 50%; font-size: 22px; line-height: 1; cursor: pointer;
-  background: var(--ink-3); border: 1px solid var(--line);
+  background: rgba(13, 21, 25, 0.92); border: 1px solid var(--line); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
   transition: border-color 120ms ease, transform 80ms ease;
 }
 .react__toggle:hover, .react__toggle[aria-expanded="true"] { border-color: var(--brass-dim); }
 .react__toggle:active { transform: scale(0.95); }
 .react__toggle:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 .react__panel {
-  position: absolute; left: 10px; bottom: calc(100% + 14px); z-index: 25; width: 300px;
+  position: absolute; right: 0; bottom: calc(100% + 10px); z-index: 25; width: 300px;
   padding: 10px; border-radius: 14px; background: rgba(13, 21, 25, 0.98); border: 1px solid var(--brass-dim);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55); animation: rise 140ms ease-out both;
 }
@@ -1206,6 +1236,9 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   .card--sm .card__s { font-size: 11px; }
   .seat__cards { height: 46px; }
   .seat__name { font-size: 11px; }
+  .seat__face { width: 44px; height: 44px; font-size: 19px; border-radius: 10px; }
+  .seat__avatar { margin: 4px auto 3px; }
+  .seat__ring { inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px); }
   .seat__stack { font-size: 12px; }
   .board { min-height: 63px; min-width: 240px; gap: 5px; }
   .stack { --chip: 15px; }
@@ -1241,9 +1274,9 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   .acts__main { gap: 6px; }
   .btn--act { flex: 1; min-width: 0; padding: 10px 4px; font-size: 14px; }
   .btn--act .btn__key { display: none; }
-  .react { padding-left: 8px; align-self: end; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .react { right: 6px; bottom: 6px; }
   .react__toggle { width: 40px; height: 40px; font-size: 20px; }
-  .react__panel { width: min(300px, calc(100vw - 20px)); left: 4px; }
+  .react__panel { width: min(300px, calc(100vw - 20px)); right: 0; }
   .menu__panel { min-width: 190px; }
   /* На телефоне панель ставки встаёт в поток над кнопками: всплывая, она закрыла бы свои карты. */
   .acts__size { position: static; }
@@ -1303,10 +1336,10 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   .seat--you .card--sm { --r: 6px; width: 40px; height: 58px; }
   .seat--you .card--sm .card__r { font-size: 17px; }
   .board { min-height: 63px; min-width: 252px; }
-  .seat__plate { padding: 4px 7px; }
+  .seat__face { width: 52px; height: 52px; font-size: 22px; border-radius: 11px; }
   .actions { min-height: 64px; padding: 8px 18px calc(8px + env(safe-area-inset-bottom)); }
   .btn--act { min-height: 42px; }
-  .meter--bar { padding: 5px 14px 7px; }
+  .meter--bar { height: 38px; padding: 0 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1315,7 +1348,7 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   .card--win, .meter.is-up .meter__name, .pot.is-bump strong, .bank strong.is-bump,
   .room__live--hot::before { animation: none; }
   .actions.is-your-turn { animation: none; background: rgba(201, 162, 74, 0.06); }
-  .seat__timer i, .turnbar i { transition: none; }
+  .seat__ring path, .turnbar i { transition: none; }
   .chip-fly { display: none; }
   .card, .card__inner { transition: none; }
 }

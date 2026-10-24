@@ -441,16 +441,18 @@ class Store {
     const u = this.users.get(userId);
     if (!u) return;
     const s = u.stats;
-    if (r.won > 0) {
+    // Выиграл — если забрал больше, чем вложил: возврат своей же ставки не победа.
+    const gain = r.won - r.contributed;
+    if (r.won > 0 && gain > 0) {
       s.handsWon += 1;
       s.biggestPot = Math.max(s.biggestPot, r.won);
       if (r.allIn) s.allInsWon += 1;
-    } else if (r.contributed > 0) {
+    } else if (r.contributed > 0 && gain < 0) {
       s.handsLost += 1;
     }
     if (r.showdown) {
       s.showdowns += 1;
-      if (r.won > 0) s.showdownsWon += 1;
+      if (gain > 0) s.showdownsWon += 1;
     }
     if (r.result && (!s.bestHand || r.result.value > s.bestHand.value)) {
       s.bestHand = { value: r.result.value, name: r.result.name, cards: r.result.cards };
@@ -459,7 +461,7 @@ class Store {
 
     // Задания дня.
     daily.progress(u, 'hand');
-    if (r.won > 0) {
+    if (gain > 0) {
       daily.progress(u, 'win');
       if (r.showdown) daily.progress(u, 'showdownWin');
       if (r.allIn) daily.progress(u, 'allInWin');
@@ -470,7 +472,7 @@ class Store {
 
     // Очки сезона: за раздачу и за банк, выигранный у человека.
     this.seasonPoints(u, 'hand');
-    if (r.won > 0 && r.withHuman) this.seasonPoints(u, 'winVsHuman');
+    if (gain > 0 && r.withHuman) this.seasonPoints(u, 'winVsHuman');
 
     this.checkAchievements(u);
     this.touch(u);

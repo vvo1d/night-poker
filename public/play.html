@@ -6,7 +6,7 @@
      user-scalable=no — зум на Android. Двойной тап и щипок на iPhone гасит app.js. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Играть — THPoker</title>
-<meta name="description" content="THPoker — бесплатный онлайн покер на виртуальные фишки: техасский холдем, сит-н-гоу и свои столы с друзьями.">
+<meta name="description" content="THPoker — бесплатный онлайн покер на виртуальные фишки: техасский холдем, sit-n-go и свои столы с друзьями.">
 <!-- Страница самой игры: в поиске должна быть главная, а не экран входа -->
 <meta name="robots" content="noindex, follow">
 <link rel="canonical" href="https://thpoker.ru/">
@@ -29,7 +29,7 @@
       <span>♠</span><span>♥</span><span>♦</span><span>♣</span>
     </div>
     <h1 class="auth__title">THPoker</h1>
-    <p class="auth__lede">Техасский холдем без лимита. Свои столы с любыми блайндами и турниры сит-н-гоу, фишки только виртуальные.</p>
+    <p class="auth__lede">Техасский холдем без лимита. Свои столы с любыми блайндами и турниры sit-n-go, фишки только виртуальные.</p>
 
     <div class="tabs" role="tablist">
       <button class="tab is-active" data-mode="login" role="tab">Вход</button>
@@ -85,7 +85,7 @@
     <div class="lobby__head">
       <div>
         <h2>Столы</h2>
-        <p>Садитесь за готовый стол или откройте свой — с нужными блайндами. В сит-н-гоу играют на вылет за призовой фонд.</p>
+        <p>Садитесь за готовый стол или откройте свой — с нужными блайндами. В sit-n-go играют на вылет за призовой фонд.</p>
       </div>
       <button class="btn btn--primary" id="create-open">Создать стол</button>
     </div>
@@ -102,7 +102,7 @@
       <div class="filters" role="tablist" id="lobby-filter">
         <button class="filter is-active" data-filter="all" role="tab">Все</button>
         <button class="filter" data-filter="cash" role="tab">Кэш</button>
-        <button class="filter" data-filter="sng" role="tab">Сит-н-гоу</button>
+        <button class="filter" data-filter="sng" role="tab">Sit-n-go</button>
         <span class="filters__totals" id="lobby-totals"></span>
       </div>
       <ul class="rooms" id="rooms"></ul>
@@ -211,6 +211,16 @@
         <div class="meter__bar"><i id="meter-fill"></i><b id="meter-pin"></b></div>
         <div class="meter__note" id="meter-note"></div>
       </div>
+
+      <!-- Реакции: кнопка и выбор эмодзи или фразы -->
+      <div class="react" id="react" hidden>
+        <button class="react__toggle" id="react-toggle" type="button" title="Реакция (E)" aria-label="Реакция" aria-expanded="false">😊</button>
+        <div class="react__panel" id="react-panel" hidden>
+          <div class="react__emoji" id="react-emoji"></div>
+          <div class="react__phrases" id="react-phrases"></div>
+        </div>
+      </div>
+
     </div>
 
     <aside class="side" id="side" hidden>
@@ -229,14 +239,6 @@
 
   <footer class="actionbar">
     <div class="turnbar" id="turnbar"><i></i></div>
-    <!-- Реакции: кнопка и выбор эмодзи или фразы -->
-    <div class="react" id="react" hidden>
-      <button class="react__toggle" id="react-toggle" type="button" title="Реакция (E)" aria-label="Реакция" aria-expanded="false">😊</button>
-      <div class="react__panel" id="react-panel" hidden>
-        <div class="react__emoji" id="react-emoji"></div>
-        <div class="react__phrases" id="react-phrases"></div>
-      </div>
-    </div>
     <div class="actions" id="actions"></div>
   </footer>
 </section>
@@ -261,7 +263,7 @@
     <h3>Новый стол</h3>
     <div class="seg" role="radiogroup" aria-label="Тип стола">
       <label><input type="radio" name="kind" value="cash" checked><span>Кэш-игра</span></label>
-      <label><input type="radio" name="kind" value="sng"><span>Сит-н-гоу</span></label>
+      <label><input type="radio" name="kind" value="sng"><span>Sit-n-go</span></label>
     </div>
     <label class="field">
       <span>Название</span>

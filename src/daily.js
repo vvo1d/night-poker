@@ -18,8 +18,8 @@ const QUESTS = [
   { id: 'allin', event: 'allInWin', goal: 1, reward: 800, title: 'Выиграйте банк в олл-ине' },
   { id: 'combo', event: 'straightPlus', goal: 1, reward: 800, title: 'Соберите на вскрытии стрит или сильнее' },
   { id: 'friend', event: 'friendHand', goal: 10, reward: 1000, title: 'Сыграйте 10 раздач за одним столом с другом' },
-  { id: 'sng', event: 'sngPlay', goal: 1, reward: 1000, title: 'Сыграйте сит-н-гоу' },
-  { id: 'sngcash', event: 'sngCash', goal: 1, reward: 1500, title: 'Займите призовое место в сит-н-гоу' },
+  { id: 'sng', event: 'sngPlay', goal: 1, reward: 1000, title: 'Сыграйте sit-n-go' },
+  { id: 'sngcash', event: 'sngCash', goal: 1, reward: 1500, title: 'Займите призовое место в sit-n-go' },
 ];
 const BY_ID = new Map(QUESTS.map((q) => [q.id, q]));
 const EASY = ['hands', 'wins'];        // одно лёгкое задание есть всегда

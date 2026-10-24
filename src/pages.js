@@ -91,7 +91,7 @@ function profilePage(user, origin, avatar = null) {
     ${stat(fmt(user.handsPlayed), 'раздач сыграно')}
     ${stat(`${winRate}%`, 'раздач выиграно')}
     ${stat(fmt(s.biggestPot), 'крупнейший банк')}
-    ${stat(fmt(s.sngWins), 'побед в сит-н-гоу')}
+    ${stat(fmt(s.sngWins), 'побед в sit-n-go')}
     ${s.bestHand ? `<div class="pp-stat pp-stat--wide"><b>${escapeHtml(s.bestHand.name)}</b><span>лучшая комбинация</span><span class="hand">${miniCards(s.bestHand.cards)}</span></div>` : ''}
   </section>
   ${history}

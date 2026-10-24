@@ -96,7 +96,7 @@ function createTable(cfg, {
   owner = null, sng = 0, buyIn, invite = null, privateTable = false, createdAt = 0, mttTour = null, mttId = null,
 } = {}) {
   const n = ++tableSeq;
-  // Стол турнира по расписанию получает «переходник» от турнира, сит-н-гоу — свой Tournament.
+  // Стол турнира по расписанию получает «переходник» от турнира, sit-n-go — свой Tournament.
   const tour = mttTour || (sng ? new Tournament(sng, {
     pay: (player, amount) => { if (!player.isBot) store.addChips(player.userId, amount); },
     onStart: (players) => {
@@ -153,7 +153,7 @@ function createTable(cfg, {
   return table;
 }
 
-// Свой стол: кэш с выбранными блайндами или сит-н-гоу на 6 или 9 мест.
+// Свой стол: кэш с выбранными блайндами или sit-n-go на 6 или 9 мест.
 function createUserTable(user, body) {
   let owned = 0;
   for (const t of tables.values()) if (t.ownerId === user.id) owned += 1;
@@ -164,11 +164,11 @@ function createUserTable(user, body) {
   const privateTable = !!body.private;
   if (body.kind === 'sng') {
     const seats = Number(body.seats);
-    if (!SNG_SEATS.includes(seats)) return { error: 'Сит-н-гоу бывает на 6 или 9 мест' };
+    if (!SNG_SEATS.includes(seats)) return { error: 'Sit-n-go бывает на 6 или 9 мест' };
     const buyIn = Number(body.buyIn);
     if (!SNG_BUY_INS.includes(buyIn)) return { error: 'Выберите взнос' };
     const table = createTable({
-      name: name || `Сит-н-гоу на ${seats}`,
+      name: name || `Sit-n-go на ${seats}`,
       maxSeats: seats, sb: 0, bb: 0, minBuyIn: SNG_STACK, maxBuyIn: SNG_STACK, timeout: SNG_TIMEOUT,
     }, { owner: user, sng: seats, buyIn, privateTable });
     [table.sb, table.bb] = table.tour.blinds();
@@ -718,7 +718,7 @@ function invitePage(req, res, code) {
   if (table) {
     const info = inviteInfo(table);
     const what = info.kind === 'sng'
-      ? `сит-н-гоу на ${info.maxSeats}, взнос ${info.sng.buyIn}`
+      ? `sit-n-go на ${info.maxSeats}, взнос ${info.sng.buyIn}`
       : `блайнды ${info.sb}/${info.bb}, ${info.maxSeats} мест`;
     title = `${info.owner || 'Друг'} зовёт за стол «${info.name}» — THPoker`;
     text = `${what}. Бесплатный покер на виртуальные фишки прямо в браузере.`;

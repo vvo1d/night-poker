@@ -168,7 +168,7 @@ class Mtt {
     this.hooks.dropTable(table);
   }
 
-  // ——— переходник для стола: то же лицо, что у сит-н-гоу ———
+  // ——— переходник для стола: то же лицо, что у sit-n-go ———
 
   tableTour() {
     const mtt = this;

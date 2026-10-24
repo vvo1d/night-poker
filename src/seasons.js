@@ -22,7 +22,7 @@ const POINTS = {
   quest: 5,            // забранное задание дня
 };
 const HAND_CAP = 100;  // очков за раздачи в день: игра сутками без перерыва не делает чемпионом
-const SNG_PLACES = [40, 25, 15];   // сит-н-гоу: 1-е, 2-е, 3-е место
+const SNG_PLACES = [40, 25, 15];   // sit-n-go: 1-е, 2-е, 3-е место
 
 const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август',
   'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
@@ -81,7 +81,7 @@ function add(user, kind, amount = POINTS[kind] || 0, now = Date.now()) {
   return finished;
 }
 
-// Очки за место в сит-н-гоу: полные — если соперники люди, меньше — если боты.
+// Очки за место в sit-n-go: полные — если соперники люди, меньше — если боты.
 function sngPoints(place, humans, seats) {
   const base = SNG_PLACES[place - 1] || 0;
   if (!base || humans < 2) return 0;

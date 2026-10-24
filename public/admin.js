@@ -384,7 +384,7 @@ loaders.tables = async () => {
     name.append(document.createTextNode(t.name));
     if (t.private) name.append(el('span', 'badge', 'приватный'));
     if (t.house) name.append(el('span', 'badge', 'заведения'));
-    const kind = { cash: 'кэш', sng: 'сит-н-гоу', mtt: 'турнир' }[t.kind];
+    const kind = { cash: 'кэш', sng: 'sit-n-go', mtt: 'турнир' }[t.kind];
     const players = t.players.length
       ? t.players.map((p) => `${p.name}${p.bot ? ' (бот)' : ''} ${fmt(p.stack)}${p.away ? ' · отошёл' : ''}`).join(', ')
       : '—';

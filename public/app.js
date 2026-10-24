@@ -345,7 +345,7 @@ function seatDots(seats) {
 function roomMeta(room) {
   if (room.kind === 'sng') {
     const sng = room.sng;
-    return `Сит-н-гоу на ${room.maxSeats} · взнос ${fmt(sng.buyIn)} · призы ${sng.prizes.map(fmt).join(' / ')}`;
+    return `Sit-n-go на ${room.maxSeats} · взнос ${fmt(sng.buyIn)} · призы ${sng.prizes.map(fmt).join(' / ')}`;
   }
   const who = room.house ? 'стол заведения' : `открыл ${room.owner}`;
   return `Блайнды ${fmt(room.sb)}/${fmt(room.bb)} · закупка ${fmt(room.minBuyIn)}–${fmt(room.maxBuyIn)} · ${room.timeout} с на ход · ${who}`;
@@ -609,7 +609,7 @@ function renderMyTables(list) {
     name.addEventListener('click', () => goToTable(t.id));
     li.append(name);
     const what = t.kind === 'sng'
-      ? `сит-н-гоу · ${t.players}/${t.maxSeats}`
+      ? `sit-n-go · ${t.players}/${t.maxSeats}`
       : `${fmt(t.sb)}/${fmt(t.bb)} · ${t.players}/${t.maxSeats}`;
     li.append(el('span', 'friend__status', `${t.private ? 'приватный · ' : ''}${what}`));
     const invite = el('button', 'btn btn--ghost btn--sm', 'Пригласить');
@@ -731,6 +731,22 @@ function ratingRow(r, col) {
 
 // ——— аватары ———
 
+// Рамка-таймер по краю квадрата. Путь начинается сверху посередине и идёт
+// по часовой стрелке; pathLength=100 — длину задаём прямо в процентах.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function timerRing() {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'seat__ring');
+  svg.setAttribute('viewBox', '0 0 100 100');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', 'M50,3 H79 A18,18 0 0 1 97,21 V79 A18,18 0 0 1 79,97 H21 A18,18 0 0 1 3,79 V21 A18,18 0 0 1 21,3 Z');
+  path.setAttribute('pathLength', '100');
+  path.style.strokeDasharray = '100 100';
+  svg.append(path);
+  return svg;
+}
+
 // Круг с фото или с первой буквой имени, если фото нет.
 function avatarEl(name, url, cls = '') {
   const box = el('span', `avatar${cls ? ` ${cls}` : ''}`);
@@ -844,7 +860,7 @@ function seasonCard(season, { own = true } = {}) {
     : `Высшая лига! Награда в конце сезона: ${fmt(season.league.reward)} фишек.`));
   if (own) {
     card.append(el('p', 'season__how',
-      'Очки: +1 за раздачу, +2 за банк, выигранный у человека (до 100 в день), +5 за задание дня, до +40 за призовое место в сит-н-гоу.'));
+      'Очки: +1 за раздачу, +2 за банк, выигранный у человека (до 100 в день), +5 за задание дня, до +40 за призовое место в sit-n-go.'));
   }
   return card;
 }
@@ -1080,7 +1096,7 @@ function renderProfile(box, data) {
   games.append(grid);
   root.append(games);
 
-  const sng = profileSection('Сит-н-гоу');
+  const sng = profileSection('Sit-n-go');
   const sngGrid = el('div', 'stats');
   sngGrid.append(
     statCard(fmt(s.sngPlayed), 'турниров сыграно'),
@@ -1171,7 +1187,7 @@ function renderProfile(box, data) {
 
 // ——— новый стол ———
 
-// Призы сит-н-гоу — те же доли, что считает сервер.
+// Призы sit-n-go — те же доли, что считает сервер.
 const SNG_SHARES = { 6: [0.65, 0.35], 9: [0.5, 0.3, 0.2] };
 const SNG_STACK = 1000; // турнирный стек одинаков при любом взносе
 function sngPrizes(seats, buyIn) {
@@ -1387,8 +1403,8 @@ function renderTable(t) {
   $('#table-stakes').textContent = !tour ? `блайнды ${fmt(t.sb)}/${fmt(t.bb)} · ${stage}`
     : tour.kind === 'mtt' ? (tour.status === 'finished' ? 'турнир завершён'
       : `уровень ${tour.level} · ${fmt(t.sb)}/${fmt(t.bb)} · осталось ${fmt(tour.alive)} из ${fmt(tour.entrants)} · ${stage}`)
-      : tour.status === 'registering' ? `сит-н-гоу · регистрация · взнос ${fmt(tour.buyIn)}`
-      : tour.status === 'finished' ? 'сит-н-гоу · турнир завершён'
+      : tour.status === 'registering' ? `sit-n-go · регистрация · взнос ${fmt(tour.buyIn)}`
+      : tour.status === 'finished' ? 'sit-n-go · турнир завершён'
         : `уровень ${tour.level} · блайнды ${fmt(t.sb)}/${fmt(t.bb)} · ${stage}`;
   // Часы уровня тикают сами между кадрами — см. tickTimer.
   state.levelDeadline = tour && tour.status === 'running' && tour.next
@@ -1436,7 +1452,8 @@ function renderTable(t) {
     msg.classList.add('is-win');
     t.winners.forEach((w, i) => {
       if (i) msg.append(el('span', null, ' · '));
-      msg.append(el('span', null, `${w.names.join(', ')} забирает ${fmt(w.amount)}`));
+      msg.append(el('span', null, !w.split ? `${w.names[0]} выигрывает ${fmt(w.amount)}`
+        : w.each > 0 ? `${w.names.join(', ')} делят банк: по ${fmt(w.each)}` : `${w.names.join(', ')} делят банк`));
       if (w.hand) { msg.append(el('span', null, ' — ')); msg.append(el('b', null, w.hand)); }
     });
   } else if (t.phase === 'idle' && tour && tour.status !== 'running') {
@@ -1495,14 +1512,31 @@ function renderTable(t) {
     node.append(cards);
 
     const plate = el('div', 'seat__plate');
-    const name = el('span', `seat__name${seat.isBot ? '' : ' is-link'}`);
-    if (seat.avatar) name.append(avatarEl(seat.name, seat.avatar, 'avatar--seat'));
-    name.append(document.createTextNode(seat.name + (seat.isBot ? ' •' : '')));
+    const name = el('span', `seat__name${seat.isBot ? '' : ' is-link'}`, seat.name + (seat.isBot ? ' •' : ''));
+    // Квадрат с фото (или первой буквой) между именем и фишками; у людей — открывает профиль.
+    const face = el(seat.isBot ? 'span' : 'button', `seat__face${seat.isBot ? ' seat__face--bot' : ''}`);
+    if (seat.avatar) {
+      const img = document.createElement('img');
+      img.src = seat.avatar;
+      img.alt = '';
+      img.decoding = 'async';
+      face.append(img);
+    } else {
+      face.textContent = seat.name.slice(0, 1).toUpperCase();
+    }
     if (!seat.isBot) {
+      face.type = 'button';
+      face.title = `Профиль ${seat.name}`;
+      face.setAttribute('aria-label', `Открыть профиль ${seat.name}`);
+      face.addEventListener('click', () => openProfile(seat.name));
       name.title = 'Открыть профиль';
       name.addEventListener('click', () => openProfile(seat.name));
     }
-    plate.append(name);
+    // Аватар в обёртке: у того, кто ходит, вокруг него бежит рамка-таймер.
+    const avatar = el('div', 'seat__avatar');
+    avatar.append(face);
+    if (t.actingSeat === i) avatar.append(timerRing());
+    plate.append(name, avatar);
     plate.append(el('span', 'seat__stack', fmt(seat.stack)));
     if (seat.mucked) node.classList.add('seat--mucked');
     if (seat.revealing) node.classList.add('seat--revealing');
@@ -1518,16 +1552,11 @@ function renderTable(t) {
     plate.append(noteEl);
     node.append(plate);
 
-    const timer = el('div', 'seat__timer');
-    const fill = el('i');
-    fill.style.width = t.actingSeat === i ? '100%' : '0%';
-    timer.append(fill);
-    node.append(timer);
     if (t.actingSeat === i) node.dataset.timer = '1';
 
 
     if (t.buttonSeat === i && t.phase !== 'idle') node.append(el('div', 'seat__badge', 'D'));
-    if (seat.won > 0 && t.phase === 'showdown') node.append(el('div', 'seat__win', `+${fmt(seat.won)}`));
+    if (seat.net > 0 && t.phase === 'showdown') node.append(el('div', 'seat__win', `+${fmt(seat.net)}`));
 
     const bubble = reactionBubble(seat);
     if (bubble) node.append(bubble);
@@ -1550,6 +1579,13 @@ function renderTable(t) {
   state.cardValues = state.nextValues;
   state.deadline = t.timeLeft ? performance.now() + t.timeLeft : 0;
   state.timeout = t.timeout || 25000;
+  // Длина хода — от первого кадра этого хода: бот думает пару секунд, а не все 25,
+  // и рамка у него должна убывать целиком, а не начинаться почти пустой.
+  const moveKey = `${t.handId}:${t.phase}:${t.actingSeat}`;
+  if (state.moveKey !== moveKey) {
+    state.moveKey = moveKey;
+    state.turnSpan = t.timeLeft || state.timeout;
+  }
   state.revealDeadline = t.you && t.you.canReveal && t.reveal
     ? performance.now() + t.reveal.timeLeft : 0;
 
@@ -1741,18 +1777,21 @@ function labelAction(action) {
 // На узком экране и за большим столом силомеру негде встать на сукне:
 // в углу он наезжает на плашки игроков, поэтому уходит полосой к кнопкам.
 const narrow = window.matchMedia('(max-width: 620px)');
+// На невысоком экране места за столом с аватарами доходят до угла сукна.
+const short = window.matchMedia('(max-height: 780px)');
 function placeMeter() {
   const meter = $('#meter');
   const crowded = !!(state.table && state.table.maxSeats > 6);
-  const asBar = narrow.matches || crowded;
+  const asBar = narrow.matches || short.matches || crowded;
   meter.classList.toggle('meter--bar', asBar);
   const target = asBar ? $('.actionbar') : $('#felt');
   if (meter.parentElement !== target) {
-    if (asBar) target.insertBefore(meter, $('#react'));
+    if (asBar) target.insertBefore(meter, $('#actions'));
     else target.append(meter);
   }
 }
 narrow.addEventListener('change', placeMeter);
+short.addEventListener('change', placeMeter);
 placeMeter();
 
 function renderMeter(t) {
@@ -1996,14 +2035,15 @@ const REVEAL_WINDOW = 5000;
 function tickTimer() {
   const reveal = state.revealDeadline > 0;
   const until = reveal ? state.revealDeadline : state.deadline;
-  const span = reveal ? REVEAL_WINDOW : state.timeout;
+  const span = reveal ? REVEAL_WINDOW : (state.turnSpan || state.timeout);
   const left = until ? Math.max(0, until - performance.now()) : 0;
   const share = until ? clamp(left / span, 0, 1) : 0;
 
-  const seatFill = document.querySelector('.seat[data-timer] .seat__timer i');
-  if (seatFill) {
-    seatFill.style.width = `${share * 100}%`;
-    seatFill.classList.toggle('is-low', share < 0.25);
+  // Рамка вокруг аватара: длина линии — оставшееся время хода.
+  const ring = document.querySelector('.seat[data-timer] .seat__ring');
+  if (ring) {
+    ring.firstChild.style.strokeDasharray = `${(share * 100).toFixed(2)} 100`;
+    ring.classList.toggle('is-low', share < 0.25);
   }
 
   const t = state.table;
@@ -2394,7 +2434,7 @@ function openInvite(t) {
   if (!t.invite) return;
   const url = inviteUrl(t.invite);
   const text = t.kind === 'sng'
-    ? `Залетай на сит-н-гоу «${t.name}» в THPoker — покер без денег`
+    ? `Залетай на sit-n-go «${t.name}» в THPoker — покер без денег`
     : `Садись ко мне за стол «${t.name}» в THPoker — покер без денег`;
   $('#invite-link').value = url;
   $('#invite-tg').href = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
@@ -2443,7 +2483,7 @@ async function showInviteNote() {
     return;
   }
   const t = await res.json();
-  const what = t.kind === 'sng' ? `сит-н-гоу на ${t.maxSeats}` : `блайнды ${fmt(t.sb)}/${fmt(t.bb)}`;
+  const what = t.kind === 'sng' ? `sit-n-go на ${t.maxSeats}` : `блайнды ${fmt(t.sb)}/${fmt(t.bb)}`;
   note.textContent = `${t.owner || 'Вас'} зовёт за стол «${t.name}» (${what}). Войдите или зарегистрируйтесь — и сразу окажетесь за ним.`;
   note.hidden = false;
 }
