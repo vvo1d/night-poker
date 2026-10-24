@@ -20,7 +20,7 @@ function miniCards(cards) {
 // Профиль с малым числом раздач поисковику не показываем: пустые страницы вредят сайту.
 const INDEX_FROM_HANDS = 50;
 
-function profilePage(user, origin) {
+function profilePage(user, origin, avatar = null) {
   const s = user.stats;
   const season = seasons.view(user);
   const achievements = ACHIEVEMENTS.map((a) => achievementView(a, user)).filter((a) => a.tier > 0);
@@ -78,7 +78,9 @@ function profilePage(user, origin) {
 </header>
 <main class="wrap pp">
   <section class="pp-head">
-    <div class="pp-avatar" aria-hidden="true">${escapeHtml(user.name.slice(0, 1).toUpperCase())}</div>
+    <div class="pp-avatar" aria-hidden="true">${avatar
+      ? `<img src="${escapeHtml(avatar)}" alt="" width="80" height="80">`
+      : escapeHtml(user.name.slice(0, 1).toUpperCase())}</div>
     <div>
       <h1>${escapeHtml(user.name)}</h1>
       <p class="pp-sub"><i class="pp-league pp-league--${season.league.id}"></i>Лига «${season.league.name}» · ${fmt(season.points)} очк. в сезоне «${escapeHtml(season.name)}» · в игре с ${since}</p>
@@ -114,6 +116,7 @@ function profilePage(user, origin) {
   <a class="logo logo--sm" href="/"><span class="logo__mark" aria-hidden="true">♠</span>THPoker</a>
   <p>Бесплатный онлайн покер на виртуальные фишки. Фишки нельзя купить, продать или вывести.</p>
 </div></footer>
+<script src="/landing.js" defer></script>
 </body>
 </html>`;
 }

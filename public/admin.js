@@ -273,6 +273,12 @@ function renderUser(u) {
   card.hidden = false;
   card.textContent = '';
   const head = el('div', 'user-card__head');
+  if (u.avatar) {
+    const img = el('img', 'user-card__avatar');
+    img.src = u.avatar;
+    img.alt = '';
+    head.append(img);
+  }
   head.append(el('h3', null, u.name));
   if (u.banned) head.append(el('span', 'badge badge--bad', 'заблокирован'));
   if (u.online) head.append(el('span', 'badge badge--ok', 'онлайн'));
@@ -329,6 +335,13 @@ function renderUser(u) {
     const kick = el('button', 'btn btn--sm', 'Убрать из-за стола');
     kick.addEventListener('click', () => act({ action: 'kick' }, 'Игрок убран из-за стола'));
     row.append(kick);
+  }
+  if (u.avatar) {
+    const drop = el('button', 'btn btn--sm', 'Удалить аватар');
+    drop.addEventListener('click', () => {
+      if (confirm(`Удалить аватар игрока ${u.name}?`)) act({ action: 'avatar' }, 'Аватар удалён');
+    });
+    row.append(drop);
   }
   if (u.banned) {
     const unban = el('button', 'btn btn--sm', 'Разблокировать');

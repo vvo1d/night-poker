@@ -94,6 +94,8 @@ a { color: var(--brass); }
 .nav__links { display: flex; gap: 22px; margin-left: auto; }
 .nav__links a { color: var(--muted); text-decoration: none; font-size: 15px; }
 .nav__links a:hover { color: var(--text); }
+.nav__burger { display: none; }
+@keyframes menuIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 
 /* первый экран */
 .hero { padding: 72px 0 84px; }
@@ -271,6 +273,9 @@ a { color: var(--brass); }
 .article li { margin-bottom: 8px; }
 .article strong { color: var(--bone); font-weight: 600; }
 .article a { color: var(--brass); }
+/* Кнопки внутри статьи — со своими цветами: общее правило для ссылок их перекрашивало. */
+.article a.btn { color: var(--text); text-decoration: none; }
+.article a.btn--primary { color: #1a1305; }
 .article table { width: 100%; border-collapse: collapse; margin: 6px 0 22px; font-size: 15px; }
 .article th { text-align: left; font-weight: 600; color: var(--bone); padding: 9px 10px; border-bottom: 1px solid var(--brass-dim); }
 .article td { padding: 9px 10px; border-bottom: 1px solid var(--line); color: #c9d6d4; vertical-align: top; }
@@ -314,7 +319,9 @@ a { color: var(--brass); }
   flex: 0 0 auto; width: 80px; height: 80px; border-radius: 50%; display: grid; place-items: center;
   font-family: Fraunces, Georgia, serif; font-size: 36px; color: #1a1305;
   background: radial-gradient(circle at 35% 30%, #f0d68f, var(--brass) 60%, #8d7134);
+  overflow: hidden;
 }
+.pp-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pp-sub { color: var(--muted); margin-top: 6px; }
 .pp-league {
   --lg: #b07a4b; --lg-hi: #e0ad7d;
@@ -356,8 +363,28 @@ a { color: var(--brass); }
 
 @media (max-width: 640px) {
   .wrap { padding: 0 16px; }
-  .nav__links { display: none; }
-  .nav__in { justify-content: space-between; }
+  /* Ссылки шапки — в выпадающем меню под бургером. */
+  .nav__in { justify-content: space-between; gap: 12px; }
+  .nav__in > .btn { margin-left: auto; }
+  .nav__links {
+    display: none; position: absolute; left: 0; right: 0; top: 100%;
+    flex-direction: column; gap: 0; margin: 0; padding: 8px 16px 14px;
+    background: var(--ink); border-bottom: 1px solid var(--line);
+    box-shadow: 0 16px 30px rgba(0, 0, 0, 0.45);
+  }
+  .nav.is-open .nav__links { display: flex; animation: menuIn 160ms ease-out both; }
+  .nav__links a { padding: 12px 4px; font-size: 17px; color: var(--text); border-bottom: 1px solid var(--line); }
+  .nav__links a:last-child { border-bottom: 0; }
+  .nav__burger {
+    display: flex; flex-direction: column; justify-content: center; gap: 5px;
+    width: 42px; height: 42px; padding: 0 10px; flex: 0 0 auto; cursor: pointer;
+    background: transparent; border: 1px solid var(--line); border-radius: 10px;
+  }
+  .nav__burger span { display: block; height: 2px; border-radius: 1px; background: var(--bone); transition: transform 160ms ease, opacity 160ms ease; }
+  .nav.is-open .nav__burger span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+  .nav.is-open .nav__burger span:nth-child(2) { opacity: 0; }
+  .nav.is-open .nav__burger span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+  .nav__burger:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
   .hero { padding: 36px 0 56px; }
   .lede { font-size: 16px; }
   .hero__cta .btn { flex: 1; }
@@ -379,4 +406,6 @@ a { color: var(--brass); }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .btn, .faq summary::after { transition: none; }
+  .nav.is-open .nav__links { animation: none; }
+  .nav__burger span { transition: none; }
 }

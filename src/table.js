@@ -11,6 +11,9 @@ const FEED_KINDS = new Set(['chat', 'result']);
 const REVEAL_STEP = 600;   // пауза перед обязательным вскрытием
 const REVEAL_ASK = 5000;   // сколько человек думает, показывать ли проигравшую руку
 const REVEAL_BOT = 500;    // бот решает быстро
+// Олл-ин: карты открываются сразу, а борд выходит по улице — с паузой, чтобы было видно.
+const RUNOUT_FIRST = 1500;  // от вскрытия карт до первой улицы
+const RUNOUT_STEP = 1700;   // между улицами и после ривера
 
 // Реакции за столом: эмодзи и готовые фразы облачком над местом игрока.
 const REACTIONS = ['👍', '😂', '😮', '😡', '🔥', '👏', '🤔', '😎'];
@@ -244,6 +247,7 @@ class Table {
     if (ready.length < 2) { this.phase = 'idle'; this.touch(); return; }
 
     if (this.tour) this.tour.beforeHand(this);
+    this.runoutAt = 0;
     this.handId = ++handCounter;
     this.handCache.clear();
     this.evalCache = {};
@@ -498,12 +502,26 @@ class Table {
   }
 
   // Все всё поставили — доводим борд до ривера и вскрываемся.
+  // Все в олл-ине: открываем карты, а флоп, тёрн и ривер выкладываем по одной
+  // улице с паузами (см. tick) — иначе борд пролетает за мгновение.
   runOut() {
     this.actingSeat = -1;
     this.deadline = 0;
-    let idx = PHASES.indexOf(this.phase);
-    while (idx < PHASES.length - 1) { this.dealStreet(PHASES[++idx]); }
+    this.collectBets();
     for (const p of this.inHand()) p.showCards = true;
+    // Уже ривер — открывать нечего, сразу на вскрытие (после паузы на карты).
+    this.runoutAt = Date.now() + RUNOUT_FIRST;
+    this.touch();
+  }
+
+  runoutStep(now) {
+    const idx = PHASES.indexOf(this.phase);
+    if (idx < PHASES.length - 1) {
+      this.dealStreet(PHASES[idx + 1]);
+      this.runoutAt = now + RUNOUT_STEP;
+      return;
+    }
+    this.runoutAt = 0;
     this.showdown();
   }
 
@@ -537,6 +555,7 @@ class Table {
 
   showdown() {
     if (this.phase === 'showdown') return;
+    this.runoutAt = 0;
     this.collectBets();
     this.phase = 'showdown';
     this.actingSeat = -1;
@@ -778,6 +797,10 @@ class Table {
   // ——— часы стола ———
 
   tick(now = Date.now()) {
+    if (this.runoutAt && now >= this.runoutAt) {
+      this.runoutStep(now);
+      return;
+    }
     if (this.nextStepAt && now >= this.nextStepAt) {
       this.nextStepAt = 0;
       if (this.phase === 'showdown') this.finishHand();
@@ -868,6 +891,7 @@ class Table {
           seat: i,
           name: p.name,
           isBot: p.isBot,
+          avatar: p.avatar || null,
           stack: p.stack,
           bet: p.bet,
           inHand: p.inHand,

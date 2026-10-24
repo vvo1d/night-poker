@@ -27,6 +27,34 @@ document.addEventListener('touchend', (e) => {
   if (target && !target.disabled) target.click();
 }, { passive: false });
 
+// Мобильное меню: на узком экране ссылки шапки прячутся за кнопкой-«бургером».
+// Кнопку добавляет скрипт — так она появляется на всех страницах сайта сразу.
+(function burger() {
+  const nav = document.querySelector('.nav');
+  const links = nav && nav.querySelector('.nav__links');
+  if (!links) return;
+  if (!links.id) links.id = 'nav-links';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'nav__burger';
+  btn.setAttribute('aria-label', 'Меню');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.setAttribute('aria-controls', links.id);
+  btn.innerHTML = '<span></span><span></span><span></span>';
+  nav.querySelector('.nav__in').append(btn);
+
+  const close = () => { nav.classList.remove('is-open'); btn.setAttribute('aria-expanded', 'false'); };
+  btn.addEventListener('click', () => {
+    const open = !nav.classList.contains('is-open');
+    nav.classList.toggle('is-open', open);
+    btn.setAttribute('aria-expanded', String(open));
+  });
+  // Переход по ссылке (в том числе к разделу на этой же странице) закрывает меню.
+  links.addEventListener('click', (e) => { if (e.target.closest('a')) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  document.addEventListener('click', (e) => { if (!nav.contains(e.target)) close(); });
+}());
+
 // Живой счётчик: сколько людей сейчас за столами. Страница полностью
 // работает и без него — это лишь знак, что играют прямо сейчас.
 // Откуда пришёл игрок: метка utm_source, сайт-источник или приглашение.
@@ -48,7 +76,7 @@ captureSource();
 
 (async function live() {
   const node = document.getElementById('live');
-  if (!node) return;
+  if (!node) return;   // счётчик есть только на главной
   try {
     const res = await fetch('/api/rooms', { cache: 'no-store' });
     if (!res.ok) return;

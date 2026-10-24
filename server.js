@@ -132,7 +132,11 @@ function createTable(cfg, {
         store.recordHand(r.player.userId, { ...r, cash: !tour, withFriend, withHuman: humans.length > 1 });
       }
     },
-    onSeat: (player, t) => { if (!player.isBot) playerTable.set(player.userId, t); },
+    onSeat: (player, t) => {
+      if (player.isBot) return;
+      playerTable.set(player.userId, t);
+      player.avatar = store.avatarUrl(store.user(player.userId));   // аватар — на месте за столом
+    },
     // Пересаженного в турнире уже записали за новый стол — старый не должен его стереть.
     onUnseat: (player, t) => { if (!player.isBot && playerTable.get(player.userId) === t) playerTable.delete(player.userId); },
   });
@@ -348,6 +352,65 @@ function readBody(req) {
       try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error('Некорректный JSON')); }
     });
     req.on('error', reject);
+  });
+}
+
+// Тело запроса как есть — для картинок: JSON-разбор и лимит в 10 КБ им не подходят.
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    // Лишнее не храним, но дочитываем: оборванное соединение браузер покажет
+    // как сбой сети, а не как понятную ошибку. Сверху объём ограничивает nginx.
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size <= limit) chunks.push(chunk);
+    });
+    req.on('end', () => (size > limit ? reject(new Error('Файл слишком большой')) : resolve(Buffer.concat(chunks))));
+    req.on('error', reject);
+  });
+}
+
+// ——— аватары ———
+// Картинку готовит браузер: обрезает до квадрата 256×256 и сжимает. Сервер
+// проверяет формат по первым байтам файла — расширению и заголовку не верим.
+
+const AVATAR_DIR = path.join(store.dataDir, 'avatars');
+const AVATAR_MAX = 300_000;
+const AVATAR_MIME = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+
+function imageKind(buf) {
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
+  if (buf.length > 8 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'png';
+  if (buf.length > 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'webp';
+  return null;
+}
+
+function dropAvatarFile(userId, ext) {
+  try { fs.rmSync(path.join(AVATAR_DIR, `${userId}.${ext}`), { force: true }); } catch { /* файла нет */ }
+}
+
+// Новый аватар сразу виден и на месте за столом.
+function refreshSeatAvatar(userId) {
+  const table = tableOfUser(userId);
+  const p = table && table.byUser(userId);
+  if (!p) return;
+  p.avatar = store.avatarUrl(store.user(userId));
+  table.touch();
+}
+
+function serveAvatar(req, res, file) {
+  if (!/^[0-9a-f-]{36}\.(jpg|png|webp)$/.test(file)) return send(res, 404, 'Нет такого файла');
+  fs.readFile(path.join(AVATAR_DIR, file), (err, body) => {
+    if (err) return send(res, 404, 'Нет такого файла');
+    res.writeHead(200, {
+      'Content-Type': AVATAR_MIME[path.extname(file).slice(1)],
+      'Content-Length': body.length,
+      // В адресе есть версия, поэтому файл можно кэшировать надолго.
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.end(body);
   });
 }
 
@@ -711,7 +774,7 @@ function whereIs(userId) {
 function friendView(id) {
   const u = store.user(id);
   if (!u) return null;
-  return { name: u.name, chips: u.chips, online: isOnline(id), table: whereIs(id) };
+  return { name: u.name, avatar: store.avatarUrl(u), chips: u.chips, online: isOnline(id), table: whereIs(id) };
 }
 
 // Друзья онлайн — наверх, дальше по имени.
@@ -740,6 +803,7 @@ function profileOf(target, viewer) {
     online: isOnline(target.id),
     table: whereIs(target.id),
     relation: own ? null : store.relation(viewer, target),
+    avatar: store.avatarUrl(target),
     season: seasons.view(target),
     stats: {
       handsPlayed: target.handsPlayed,
@@ -960,12 +1024,16 @@ const server = http.createServer(async (req, res) => {
   if ((req.method === 'GET' || req.method === 'HEAD') && route.startsWith('/t/')) {
     return invitePage(req, res, decodeURIComponent(route.slice(3)).replace(/\/$/, ''));
   }
+  if ((req.method === 'GET' || req.method === 'HEAD') && route.startsWith('/avatars/')) {
+    return serveAvatar(req, res, route.slice('/avatars/'.length));
+  }
+
   // Публичный профиль игрока — со своим превью для соцсетей.
   if ((req.method === 'GET' || req.method === 'HEAD') && route.startsWith('/u/')) {
     const user = store.byNameLower(decodeURIComponent(route.slice(3)).replace(/\/$/, ''));
     if (!user || store.isBanned(user)) return send(res, 404, 'Игрок не найден');
     const origin = `${SECURE_COOKIE ? 'https' : 'http'}://${req.headers.host}`;
-    const html = withMetrika(pages.profilePage(user, origin));
+    const html = withMetrika(pages.profilePage(user, origin, store.avatarUrl(user)));
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(html), 'Cache-Control': 'no-cache' });
     return res.end(html);
   }
@@ -1114,6 +1182,35 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, store.rating(url.searchParams.get('by') || 'chips', ctx.user.id));
     }
 
+    if (route === '/api/avatar' && req.method === 'POST') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      if (!allowCommand(ctx.session)) return send(res, 429, { error: 'Слишком часто. Подождите секунду' });
+      const body = await readRaw(req, AVATAR_MAX);
+      const ext = imageKind(body);
+      if (!ext) return send(res, 400, { error: 'Нужна картинка JPEG, PNG или WebP' });
+      fs.mkdirSync(AVATAR_DIR, { recursive: true });
+      const target = path.join(AVATAR_DIR, `${ctx.user.id}.${ext}`);
+      fs.writeFileSync(`${target}.tmp`, body);
+      fs.renameSync(`${target}.tmp`, target);
+      const old = ctx.user.meta.avatar;
+      if (old && old.ext !== ext) dropAvatarFile(ctx.user.id, old.ext);
+      store.setAvatar(ctx.user.id, ext);
+      refreshSeatAvatar(ctx.user.id);
+      pushAll();
+      return send(res, 200, { ok: true, user: store.publicUser(ctx.user.id) });
+    }
+
+    if (route === '/api/avatar/remove' && req.method === 'POST') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      const old = store.removeAvatar(ctx.user.id);
+      if (old) dropAvatarFile(ctx.user.id, old.ext);
+      refreshSeatAvatar(ctx.user.id);
+      pushAll();
+      return send(res, 200, { ok: true, user: store.publicUser(ctx.user.id) });
+    }
+
     if (route === '/api/mtt' && req.method === 'GET') {
       const ctx = requireAuth(req, res);
       if (!ctx) return;
@@ -1163,6 +1260,13 @@ function sessionCookie(token) {
 // ——— админка ———
 
 const admin = createAdmin({
+  // Убрать неприемлемый аватар — файл тоже удаляется.
+  removeAvatar: (userId) => {
+    const old = store.removeAvatar(userId);
+    if (old) dropAvatarFile(userId, old.ext);
+    refreshSeatAvatar(userId);
+    return !!old;
+  },
   store,
   tables,
   handsByDay,

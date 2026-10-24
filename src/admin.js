@@ -41,6 +41,7 @@ function createAdmin(deps) {
     const where = deps.tableOfUser(u.id);
     return {
       name: u.name,
+      avatar: store.avatarUrl(u),
       chips: u.chips,
       hands: u.handsPlayed,
       createdAt: u.createdAt,
@@ -166,6 +167,12 @@ function createAdmin(deps) {
           const pass = String(body.password || '');
           if (pass.length < 6) { result = { error: 'Пароль — минимум 6 символов' }; break; }
           result = await store.setPassword(u.id, pass, by);
+          break;
+        }
+        case 'avatar': {
+          if (!deps.removeAvatar(u.id)) { result = { error: 'Аватара нет' }; break; }
+          store.adminNote(u, by, 'аватар удалён');
+          result = { ok: true };
           break;
         }
         case 'kick': {

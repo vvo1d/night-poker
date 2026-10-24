@@ -676,6 +676,7 @@ class Store {
       return {
         place: i + 1,
         name: u.name,
+        avatar: this.avatarUrl(u),
         chips: u.chips,
         hands: u.handsPlayed,
         handsWon: s.handsWon,
@@ -710,11 +711,35 @@ class Store {
     return { ok: true, chips: u.chips };
   }
 
+  // Адрес аватара: версия в адресе сбрасывает кэш браузера после замены.
+  avatarUrl(u) {
+    const a = u && u.meta && u.meta.avatar;
+    return a ? `/avatars/${u.id}.${a.ext}?v=${a.v}` : null;
+  }
+
+  setAvatar(userId, ext) {
+    const u = this.users.get(userId);
+    if (!u) return null;
+    u.meta.avatar = { ext, v: Date.now().toString(36) };
+    this.touch(u);
+    return this.avatarUrl(u);
+  }
+
+  removeAvatar(userId) {
+    const u = this.users.get(userId);
+    if (!u || !u.meta.avatar) return null;
+    const old = u.meta.avatar;
+    delete u.meta.avatar;
+    this.touch(u);
+    return old;
+  }
+
   publicUser(id) {
     const u = this.users.get(id);
     if (!u) return null;
     return {
       id: u.id, name: u.name, chips: u.chips, handsPlayed: u.handsPlayed,
+      avatar: this.avatarUrl(u),
       achievement: this.news.get(id) || null,   // последняя взятая ступень — клиент покажет всплывашку
       friendRequests: u.friendsIn.length,        // входящие заявки — значок на «Кабинете»
       daily: daily.view(u),                      // бонус за вход и задания дня

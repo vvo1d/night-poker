@@ -12,7 +12,7 @@ const CATEGORY_NAMES = [
   'Старшая карта',
   'Пара',
   'Две пары',
-  'Тройка',
+  'Сет',
   'Стрит',
   'Флеш',
   'Фулл-хаус',
@@ -211,7 +211,7 @@ function describe(category, cards) {
     case 8: return ranks[0] === 14 && ranks[4] === 10 ? 'Флеш-рояль' : 'Стрит-флеш';
     case 7: return `Каре ${label(groups[0][0])}`;
     case 6: return `Фулл-хаус, ${label(groups[0][0])} на ${label(groups[1][0])}`;
-    case 3: return `Тройка ${label(groups[0][0])}`;
+    case 3: return `Сет ${label(groups[0][0])}`;
     case 1: return `Пара ${label(groups[0][0])}`;
     default: return base;
   }

@@ -661,7 +661,7 @@ function renderFriends(list, friends, { mini = false, onRemove = null, removeTit
     const li = el('li', `friend${f.online ? ' is-online' : ''}`);
     const who = el('button', 'friend__who');
     who.type = 'button';
-    who.append(el('span', 'friend__dot'), el('span', 'friend__name', f.name));
+    who.append(el('span', 'friend__dot'), avatarEl(f.name, f.avatar, 'avatar--xs'), el('span', 'friend__name', f.name));
     who.title = 'Открыть профиль';
     who.addEventListener('click', () => openProfile(f.name));
     li.append(who);
@@ -718,6 +718,7 @@ function ratingRow(r, col) {
   row.append(el('span', 'rating__place', String(r.place)));
   const who = el('span', 'rating__name');
   if (col === RATING_COLS.season) who.append(leagueBadge(r.league));
+  who.append(avatarEl(r.name, r.avatar, 'avatar--xs'));
   who.append(document.createTextNode(r.name));
   if (r.you) who.append(el('span', 'rating__you', 'вы'));
   row.append(who);
@@ -726,6 +727,80 @@ function ratingRow(r, col) {
   row.append(el('span', 'rating__value', col.value(r)));
   row.addEventListener('click', () => openProfile(r.name));
   return row;
+}
+
+// ——— аватары ———
+
+// Круг с фото или с первой буквой имени, если фото нет.
+function avatarEl(name, url, cls = '') {
+  const box = el('span', `avatar${cls ? ` ${cls}` : ''}`);
+  box.setAttribute('aria-hidden', 'true');
+  if (url) {
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '';
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    box.append(img);
+  } else {
+    box.textContent = String(name || '?').slice(0, 1).toUpperCase();
+  }
+  return box;
+}
+
+const AVATAR_SIZE = 256;
+
+// Квадрат 256×256 из середины фото, JPEG — на сервер уходит пара десятков килобайт.
+async function squareAvatar(file) {
+  const bitmap = await createImageBitmap(file).catch(async () => {
+    // Старые браузеры: через обычную картинку.
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      return img;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  });
+  const w = bitmap.width;
+  const h = bitmap.height;
+  const side = Math.min(w, h);
+  const canvas = document.createElement('canvas');
+  canvas.width = AVATAR_SIZE;
+  canvas.height = AVATAR_SIZE;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#121c21';
+  ctx.fillRect(0, 0, AVATAR_SIZE, AVATAR_SIZE);
+  ctx.drawImage(bitmap, (w - side) / 2, (h - side) / 2, side, side, 0, 0, AVATAR_SIZE, AVATAR_SIZE);
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.86));
+}
+
+function pickAvatar(done) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) { toast('Слишком большой файл — выберите фото до 25 МБ'); return; }
+    let blob;
+    try {
+      blob = await squareAvatar(file);
+    } catch {
+      toast('Не получилось открыть картинку — попробуйте другое фото');
+      return;
+    }
+    const res = await fetch('/api/avatar', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { toast(data.error || 'Не удалось загрузить фото'); return; }
+    setUser(data.user);
+    toast('Фото профиля обновлено', { good: true });
+    Sound.play('chips');
+    if (done) done();
+  });
+  input.click();
 }
 
 // ——— сезон и лиги ———
@@ -909,7 +984,18 @@ function renderProfile(box, data) {
 
   // Шапка: имя, с каких пор в игре, где сейчас.
   const head = el('header', 'profile__head');
-  head.append(el('div', 'avatar', data.name.slice(0, 1).toUpperCase()));
+  const face = avatarEl(data.name, data.avatar);
+  // Свой аватар меняется по нажатию: выбрать фото — обрежем и сожмём прямо в браузере.
+  if (data.own) {
+    face.classList.add('avatar--edit');
+    face.title = 'Сменить фото';
+    face.tabIndex = 0;
+    face.setAttribute('role', 'button');
+    const pick = () => pickAvatar(() => refreshProfile(data, box));
+    face.addEventListener('click', pick);
+    face.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+  }
+  head.append(face);
   const title = el('div', 'profile__title');
   title.append(el('h2', null, data.name));
   const where = data.table ? ` · за столом «${data.table.name}»` : '';
@@ -921,6 +1007,20 @@ function renderProfile(box, data) {
   const actions = el('div', 'profile__actions');
   if (!data.own) actions.append(...friendButtons(data, box));
   // Публичная страница профиля — ей можно поделиться где угодно.
+  if (data.own) {
+    const photo = el('button', 'btn btn--ghost btn--sm', data.avatar ? 'Сменить фото' : 'Загрузить фото');
+    photo.addEventListener('click', () => pickAvatar(() => refreshProfile(data, box)));
+    actions.append(photo);
+    if (data.avatar) {
+      const drop = el('button', 'btn btn--ghost btn--sm', 'Убрать фото');
+      drop.addEventListener('click', async () => {
+        if (!confirm('Убрать фото профиля?')) return;
+        const { ok, data: res } = await post('/api/avatar/remove');
+        if (ok) { setUser(res.user); refreshProfile(data, box); }
+      });
+      actions.append(drop);
+    }
+  }
   const share = el('button', 'btn btn--ghost btn--sm', data.own ? 'Поделиться профилем' : 'Ссылка на профиль');
   share.addEventListener('click', async () => {
     const url = `${location.origin}/u/${encodeURIComponent(data.name)}`;
@@ -960,7 +1060,7 @@ function renderProfile(box, data) {
   const grid = el('div', 'stats');
   const rate = s.handsPlayed ? Math.round((s.handsWon / s.handsPlayed) * 100) : 0;
   grid.append(
-    statCard(fmt(data.chips), 'фишек в банке', `максимум ${fmt(s.peakChips)}`),
+    statCard(fmt(data.chips), 'фишек', `максимум ${fmt(s.peakChips)}`),
     statCard(fmt(s.handsPlayed), 'раздач сыграно'),
     statCard(fmt(s.handsWon), 'раздач выиграно', `${rate}% от сыгранных`),
     statCard(fmt(s.handsLost), 'раздач проиграно', 'вложил фишки и не забрал банк'),
@@ -1395,7 +1495,9 @@ function renderTable(t) {
     node.append(cards);
 
     const plate = el('div', 'seat__plate');
-    const name = el('span', `seat__name${seat.isBot ? '' : ' is-link'}`, seat.name + (seat.isBot ? ' •' : ''));
+    const name = el('span', `seat__name${seat.isBot ? '' : ' is-link'}`);
+    if (seat.avatar) name.append(avatarEl(seat.name, seat.avatar, 'avatar--seat'));
+    name.append(document.createTextNode(seat.name + (seat.isBot ? ' •' : '')));
     if (!seat.isBot) {
       name.title = 'Открыть профиль';
       name.addEventListener('click', () => openProfile(seat.name));
