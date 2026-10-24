@@ -66,6 +66,7 @@ const Sound = (() => {
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const data = noiseBuf.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    loadSamples();
     return ctx;
   }
 
@@ -167,6 +168,55 @@ const Sound = (() => {
     }
   }
 
+  // ——— записи ———
+  // Ставки звучат настоящими записями фишек (Kenney «Casino Audio», CC0):
+  // россыпь живых фишек синтезом убедительно не собрать. Записи грузятся
+  // один раз при первом звуке; пока не загрузились — играет синтез.
+  const SAMPLES = {
+    stack: [1, 2, 3, 4, 5, 6].map((n) => `stack-${n}`),
+    handle: [1, 2, 3, 4].map((n) => `handle-${n}`),
+    allin: ['allin'],
+    deal: [1, 2, 3, 4, 5].map((n) => `deal-${n}`),
+    flip: [1, 2, 3, 4].map((n) => `flip-${n}`),
+    fold: [1, 2, 3].map((n) => `fold-${n}`),
+    knock: [1, 2, 3, 4, 5].map((n) => `knock-${n}`),
+    fan: ['fan'],
+    click: [1, 2, 3, 4].map((n) => `click-${n}`),
+  };
+  const buffers = {};
+  let loading = false;
+
+  function loadSamples() {
+    if (loading) return;
+    loading = true;
+    for (const [group, names] of Object.entries(SAMPLES)) {
+      buffers[group] = [];
+      for (const name of names) {
+        fetch(`/sounds/${name}.wav`)
+          .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject()))
+          // Старый Safari знает только decodeAudioData с колбэками.
+          .then((data) => new Promise((ok, fail) => ctx.decodeAudioData(data, ok, fail)))
+          .then((buf) => buffers[group].push(buf))
+          .catch(() => {});
+      }
+    }
+  }
+
+  // Случайная запись из группы, чуть разной высоты и громкости — без «пулемёта».
+  function sample(group, delay = 0, gain = 0.2) {
+    const list = buffers[group];
+    if (!list || !list.length) return false;
+    const src = ctx.createBufferSource();
+    src.buffer = list[Math.floor(Math.random() * list.length)];
+    src.playbackRate.value = rand(0.95, 1.05);
+    const g = ctx.createGain();
+    g.gain.value = gain * rand(0.85, 1.05);
+    src.connect(g);
+    out(g, 0.3);
+    src.start(at(delay));
+    return true;
+  }
+
   // Фишки, сдвинутые по сукну: шорох плюс редкие стуки.
   function slide(delay = 0, dur = 0.3, gain = 0.12) {
     swish({ delay, dur, from: 900, to: 1700, q: 0.6, gain, attack: dur * 0.3, send: 0.5 });
@@ -202,21 +252,6 @@ const Sound = (() => {
     swish({ delay, dur: 0.025, from: 900, to: 300, q: 0.7, gain: gain * 0.35, attack: 0.001, type: 'lowpass', send: 0.3 });
   }
 
-  // Мягкая деревянная нота, как у маримбы: основной тон и быстро гаснущий обертон.
-  function mallet(freq, delay = 0, gain = 0.14) {
-    const t0 = at(delay);
-    [[1, 1, 0.9], [3.93, 0.3, 0.12], [9.2, 0.12, 0.05]].forEach(([mul, g, dur]) => {
-      const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = freq * mul;
-      const env = envelope(t0, { attack: 0.003, dur, gain: gain * g });
-      osc.connect(env);
-      out(env, 0.9);
-      osc.start(t0);
-      osc.stop(t0 + dur + 0.05);
-    });
-  }
-
   // Простой тон из первой версии — сигнал «ваш ход». Идёт мимо эха и
   // компрессора, прямо на выход с прежней громкостью 0.5: звучит как раньше.
   function tone({ freq, dur = 0.18, gain = 0.2, delay = 0, attack = 0.008 }) {
@@ -233,20 +268,35 @@ const Sound = (() => {
     osc.stop(t0 + dur + 0.05);
   }
 
+  // Каждый эффект — запись; синтез после «||» звучит, пока записи не загрузились.
+  // Только сигнал своего хода остаётся синтезом: это не предмет, а оповещение.
   const EFFECTS = {
-    deal: () => card(0, 0.9),
-    flip: () => { card(0, 0.7); swish({ delay: 0.05, dur: 0.012, from: 4000, to: 2500, q: 0.8, gain: 0.1, attack: 0.001, type: 'highpass', send: 0.2 }); },
-    check: () => { knock(0, 0.38); knock(0.13, 0.28); },
-    fold: () => { swish({ dur: 0.2, from: 1200, to: 2600, q: 0.7, gain: 0.13, attack: 0.05 }); swish({ delay: 0.18, dur: 0.05, from: 320, to: 180, q: 0.7, gain: 0.14, attack: 0.004, type: 'lowpass', send: 0.3 }); },
-    chips: () => stack(3),
-    raise: () => { stack(5); slide(0.05, 0.16, 0.08); },
-    allin: () => { slide(0, 0.45, 0.1); stack(8, 0.1, 0.12); knock(0.05, 0.2); },
-    pot: () => slide(0, 0.32, 0.12),
+    deal: () => sample('deal', 0, 0.11) || card(0, 0.9),
+    flip: () => sample('flip', 0, 0.15) || card(0, 0.7),
+    check: () => {
+      if (sample('knock', 0, 0.22)) sample('knock', 0.13, 0.16);
+      else { knock(0, 0.38); knock(0.13, 0.28); }
+    },
+    fold: () => sample('fold', 0, 0.12) || swish({ dur: 0.2, from: 1200, to: 2600, q: 0.7, gain: 0.13, attack: 0.05 }),
+    chips: () => sample('stack') || stack(3),
+    raise: () => sample('handle', 0, 0.16) || stack(5),
+    allin: () => {
+      if (sample('allin', 0, 0.22)) sample('stack', 0.55, 0.16);
+      else { slide(0, 0.45, 0.1); stack(8, 0.1, 0.12); }
+    },
+    pot: () => sample('handle', 0, 0.1) || slide(0, 0.32, 0.12),
     turn: () => { tone({ freq: 660, dur: 0.16, gain: 0.16 }); tone({ freq: 990, dur: 0.22, gain: 0.12, delay: 0.11 }); },
-    win: () => { slide(0, 0.5, 0.14); stack(9, 0.25, 0.26); mallet(523.25, 0.05, 0.07); mallet(659.25, 0.15, 0.07); mallet(783.99, 0.25, 0.07); },
-    lose: () => swish({ dur: 0.25, from: 1100, to: 600, q: 0.6, gain: 0.08, attack: 0.04 }),
-    click: () => swish({ dur: 0.012, from: 3500, to: 2500, q: 1.2, gain: 0.08, attack: 0.001, send: 0 }),
-    error: () => { knock(0, 0.22); knock(0.1, 0.18); },
+    // Выигрыш: банк сгребают к себе и складывают в стопки.
+    win: () => {
+      if (sample('allin', 0, 0.2)) { sample('stack', 0.45, 0.16); sample('stack', 0.7, 0.13); }
+      else { slide(0, 0.5, 0.14); stack(9, 0.25, 0.26); }
+    },
+    lose: () => sample('fan', 0, 0.12) || swish({ dur: 0.25, from: 1100, to: 600, q: 0.6, gain: 0.08, attack: 0.04 }),
+    click: () => sample('click', 0, 0.07) || swish({ dur: 0.012, from: 3500, to: 2500, q: 1.2, gain: 0.08, attack: 0.001, send: 0 }),
+    error: () => {
+      if (sample('knock', 0, 0.22)) sample('knock', 0.1, 0.17);
+      else { knock(0, 0.22); knock(0.1, 0.18); }
+    },
   };
 
   function play(name, { throttle = 0 } = {}) {

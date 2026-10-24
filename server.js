@@ -443,6 +443,7 @@ const MIME = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.woff2': 'font/woff2',
+  '.wav': 'audio/wav',
   '.xml': 'application/xml; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
@@ -454,7 +455,7 @@ const PAGES = { '/': 'index.html', '/play': 'play.html', '/play/': 'play.html', 
 // Старые и служебные адреса страниц ведут на основные, чтобы у поиска не было дублей.
 const PAGE_ALIASES = { '/index.html': '/', '/play.html': '/play' };
 // Картинки меняются редко — браузер может не переспрашивать о них сутки.
-const LONG_CACHE = new Set(['.png', '.jpg', '.svg', '.ico', '.woff2']);
+const LONG_CACHE = new Set(['.png', '.jpg', '.svg', '.ico', '.woff2', '.wav']);
 
 // Статика читается с диска один раз и дальше отдаётся из памяти.
 // Файлы клиента маленькие, а запросов при большом онлайне много.

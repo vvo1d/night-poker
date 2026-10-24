@@ -1,0 +1,6 @@
+Звуки стола — записи из наборов Kenney (www.kenney.nl):
+  «Casino Audio» (1.1) — фишки, карты (stack, handle, allin, deal, flip, fold, fan);
+  «Impact Sounds» — стук по дереву (knock);
+  «Interface Sounds» — щелчок кнопки (click).
+Лицензия Creative Commons Zero (CC0): http://creativecommons.org/publicdomain/zero/1.0/
+Файлы перекодированы в WAV (моно, 32 кГц), тишина по краям обрезана.

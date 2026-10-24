@@ -1766,11 +1766,21 @@ function renderBets(t, hero) {
       left: f.left - feltBox.left, right: f.right - feltBox.left,
       top: f.top - feltBox.top, bottom: f.bottom - feltBox.top,
     };
+    const cardsNode = seatNodes[i].querySelector('.seat__cards');
+    const c = cardsNode && cardsNode.childElementCount
+      ? [...cardsNode.children].reduce((box, card) => {
+        const cr = card.getBoundingClientRect();
+        return {
+          left: Math.min(box.left, cr.left - feltBox.left), right: Math.max(box.right, cr.right - feltBox.left),
+          top: Math.min(box.top, cr.top - feltBox.top), bottom: Math.max(box.bottom, cr.bottom - feltBox.top),
+        };
+      }, { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity })
+      : null;
     const spot = betSpot(seatBox, core, feltBox, half, face);
-    spots.push({ i, bet, x: spot.x, y: spot.y, w: bet.offsetWidth / 2, h: bet.offsetHeight / 2, face, seat: seatBox });
+    spots.push({ i, bet, x: spot.x, y: spot.y, w: bet.offsetWidth / 2, h: bet.offsetHeight / 2, face, cards: c, seat: seatBox });
   }
 
-  placeBets(spots, seatObstacles(seatNodes, feltBox), feltBox);
+  placeBets(spots, seatObstacles(seatNodes, feltBox), feltBox, $('#felt'));
   for (const { i, bet, x: px, y: py } of spots) {
     const x = (px / feltBox.width) * 100;
     const y = (py / feltBox.height) * 100;
@@ -1784,17 +1794,36 @@ function renderBets(t, hero) {
 // Что на сукне нельзя закрывать ставкой: карты, аватары и надписи всех мест.
 function seatObstacles(seatNodes, feltBox) {
   const out = [];
-  for (const node of seatNodes) {
+  [...seatNodes].forEach((node, seat) => {
     for (const part of node.querySelectorAll('.seat__cards, .seat__name, .seat__face, .seat__badge, .seat__stack, .seat__note')) {
       // Пустой ряд карт (игрок сбросил) ставкам не мешает.
       if (part.classList.contains('seat__cards') && !part.childElementCount) continue;
       const r = part.getBoundingClientRect();
       if (!r.width || !r.height) continue;
       out.push({
+        seat,
         left: r.left - feltBox.left, right: r.right - feltBox.left,
         top: r.top - feltBox.top, bottom: r.bottom - feltBox.top,
       });
     }
+  });
+  // Общие карты и банк в центре — на них ставки тоже не кладём.
+  // Свежая карта ещё летит с анимацией, поэтому её место берём по раскладке
+  // (offsetLeft), а не по текущему кадру анимации.
+  for (const card of $('#board').children) {
+    if (!card.offsetParent) continue;
+    const p = card.offsetParent.getBoundingClientRect();
+    const left = p.left + card.offsetParent.clientLeft + card.offsetLeft - feltBox.left;
+    const top = p.top + card.offsetParent.clientTop + card.offsetTop - feltBox.top;
+    out.push({ left, right: left + card.offsetWidth, top, bottom: top + card.offsetHeight });
+  }
+  for (const part of document.querySelectorAll('#pots .pots__item, #pot:not([hidden]) > *')) {
+    const r = part.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    out.push({
+      left: r.left - feltBox.left, right: r.right - feltBox.left,
+      top: r.top - feltBox.top, bottom: r.bottom - feltBox.top,
+    });
   }
   return out;
 }
@@ -1809,12 +1838,30 @@ const hits = (a, b) => a.left < b.right + BET_SPACING && b.left < a.right + BET_
 // ни игроков, ни чужие ставки и не выходит за сукно. Если за тесным столом
 // места нет вовсе, ставка ложится значком на угол аватара — так она видна
 // и сразу понятно, чья она (слой ставок лежит поверх мест).
-function placeBets(spots, obstacles, feltBox) {
+// Лежит ли точка на сукне. Стол — скруглённый прямоугольник (border-radius
+// 46% / 46%), поэтому углы прямоугольника стола — уже за бортом.
+function onFelt(x, y, feltBox, border) {
+  const W = feltBox.width;
+  const H = feltBox.height;
+  const rx = 0.46 * W - border;
+  const ry = 0.46 * H - border;
+  const ax = Math.abs(x - W / 2);
+  const ay = Math.abs(y - H / 2);
+  if (ax > W / 2 - border || ay > H / 2 - border) return false;
+  const dx = Math.max(0, ax - (W / 2 - 0.46 * W));
+  const dy = Math.max(0, ay - (H / 2 - 0.46 * H));
+  return (dx / rx) ** 2 + (dy / ry) ** 2 <= 1;
+}
+
+function placeBets(spots, obstacles, feltBox, felt) {
   const cx = feltBox.width / 2;
   const cy = feltBox.height / 2;
   const taken = [];
+  const border = (parseFloat(getComputedStyle(felt).borderLeftWidth) || 0) + 3;
   const rectAt = (x, y, s) => ({ left: x - s.w, right: x + s.w, top: y - s.h, bottom: y + s.h });
-  const inside = (r) => r.left >= 2 && r.top >= 2 && r.right <= feltBox.width - 2 && r.bottom <= feltBox.height - 2;
+  // Плашка целиком на сукне: все четыре угла внутри борта.
+  const inside = (r) => [[r.left, r.top], [r.right, r.top], [r.left, r.bottom], [r.right, r.bottom]]
+    .every(([x, y]) => onFelt(x, y, feltBox, border));
   const free = (r) => inside(r) && !obstacles.some((o) => hits(r, o)) && !taken.some((t) => hits(r, t));
 
   for (const s of spots) {
@@ -1830,6 +1877,12 @@ function placeBets(spots, obstacles, feltBox) {
       { x: sideX(toRight), y: fy },
       { x: sideX(toRight), y: cornerY(toDown) },
       { x: sideX(toRight), y: cornerY(!toDown) },
+      // Рядом с картами игрока, со стороны центра: на высоте карт или у их угла.
+      ...(s.cards ? [
+        { x: (toRight ? s.cards.right + BET_SPACING + s.w : s.cards.left - BET_SPACING - s.w), y: (s.cards.top + s.cards.bottom) / 2 },
+        { x: (toRight ? s.cards.right + BET_SPACING + s.w : s.cards.left - BET_SPACING - s.w), y: toDown ? s.cards.bottom - s.h : s.cards.top + s.h },
+        { x: (s.cards.left + s.cards.right) / 2, y: toDown ? s.cards.bottom + BET_SPACING + s.h : s.cards.top - BET_SPACING - s.h },
+      ] : []),
       { x: sideX(!toRight), y: fy },
       { x: sideX(!toRight), y: cornerY(toDown) },
       // Под всем местом (ниже стека и действия) или над ним — со стороны центра.
@@ -1837,9 +1890,22 @@ function placeBets(spots, obstacles, feltBox) {
       { x: fx, y: toDown ? f.bottom + BET_SPACING + s.h : f.top - BET_SPACING - s.h },
     ];
     let spot = candidates.find((c) => free(rectAt(c.x, c.y, s)));
-    // Места нет: значок на угол аватара со стороны центра — заходит на аватар,
-    // но не на имя и не на стек под ним.
-    if (!spot) spot = { x: toRight ? f.right : f.left, y: toDown ? f.bottom - s.h : f.top + s.h, badge: true };
+    // Места нет: значок на угол аватара — заходит на свой аватар, но не на
+    // общие карты, чужие места и чужие ставки. Сначала угол со стороны центра.
+    if (!spot) {
+      const corner = (right, down) => ({ x: right ? f.right : f.left, y: cornerY(down), badge: true });
+      const corners = [corner(toRight, toDown), corner(toRight, !toDown), corner(!toRight, toDown), corner(!toRight, !toDown)];
+      const fits = (r) => inside(r) && !taken.some((t) => hits(r, t))
+        && !obstacles.some((o) => o.seat !== s.i && hits(r, o));
+      // Совсем тесно — берём угол, где плашка задевает меньше всего чужого.
+      const clutter = (c) => {
+        const r = rectAt(c.x, c.y, s);
+        return (inside(r) ? 0 : 100) + taken.filter((t) => hits(r, t)).length
+          + obstacles.filter((o) => o.seat !== s.i && hits(r, o)).length;
+      };
+      spot = corners.find((c) => fits(rectAt(c.x, c.y, s)))
+        || corners.reduce((best, c) => (clutter(c) < clutter(best) ? c : best));
+    }
     s.x = spot.x;
     s.y = spot.y;
     s.bet.classList.toggle('bet--badge', !!spot.badge);
@@ -2147,7 +2213,12 @@ function playEffects(t, prev, positions) {
   t.seats.forEach((seat, i) => {
     const was = prev.seats[i];
     if (seat.empty || !was) return;
-    if (seat.lastAction && seat.lastAction !== was.action) {
+    // Ход слышен, даже если подпись не сменилась: повторный рейз того же
+    // игрока («рейз» → «рейз») или колл после колла меняют только ставку.
+    const acted = seat.lastAction !== was.action
+      || (seat.bet > was.bet && t.handId === prev.handId)
+      || (prev.acting === i && t.actingSeat !== i && t.handId === prev.handId);
+    if (seat.lastAction && acted) {
       const name = seat.allIn && !was.allIn ? 'allin' : ACTION_SOUND[seat.lastAction];
       if (name) Sound.play(name, { throttle: 60 });
     }
