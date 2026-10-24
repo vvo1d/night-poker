@@ -118,6 +118,46 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .hint { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
 .error { font-size: 13px; color: #e59a8e; margin: 0 0 12px; animation: shake 320ms ease; }
 
+/* ——— заставка загрузки ——— */
+
+.loading { align-items: center; justify-content: center; gap: 10px; padding: 24px; }
+.loading__table { position: relative; width: 190px; height: 120px; margin-bottom: 16px; }
+.loading__card {
+  position: absolute; left: 50%; top: 10px; width: 52px; height: 74px; margin-left: -26px; border-radius: 8px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1;
+  font-weight: 700; font-size: 22px; color: #222b33;
+  background: linear-gradient(158deg, #fdfbf5 0%, #f3ede1 62%, #e9e1d1 100%);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  opacity: 0; animation: dealIn 2.4s cubic-bezier(0.2, 0.9, 0.3, 1) infinite;
+}
+.loading__card i { font-style: normal; font-size: 0.8em; margin-top: 3px; }
+.loading__card--2 { color: #b0392c; animation-delay: 0.15s; --to-x: 0px; --rot: 0deg; }
+.loading__card--3 { color: #1c6b9f; animation-delay: 0.3s; --to-x: 46px; --rot: 9deg; }
+.loading__card--1 { --to-x: -46px; --rot: -9deg; }
+@keyframes dealIn {
+  0% { opacity: 0; transform: translate(0, -40px) rotate(0deg) scale(0.85); }
+  18%, 70% { opacity: 1; transform: translate(var(--to-x, 0px), 0) rotate(var(--rot, 0deg)); }
+  88%, 100% { opacity: 0; transform: translate(var(--to-x, 0px), 10px) rotate(var(--rot, 0deg)); }
+}
+.loading__chips { position: absolute; left: 50%; bottom: 0; width: 26px; margin-left: -13px; height: 30px; }
+.loading__chips i {
+  position: absolute; left: 0; width: 26px; height: 8px; border-radius: 50%;
+  background: radial-gradient(circle, #f0d68f 0 30%, var(--brass) 31% 70%, #7d6127 71%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  opacity: 0; animation: chipDrop 2.4s ease-in infinite;
+}
+.loading__chips i:nth-child(1) { bottom: 0; animation-delay: 0.45s; }
+.loading__chips i:nth-child(2) { bottom: 5px; animation-delay: 0.55s; }
+.loading__chips i:nth-child(3) { bottom: 10px; animation-delay: 0.65s; }
+.loading__chips i:nth-child(4) { bottom: 15px; animation-delay: 0.75s; }
+@keyframes chipDrop {
+  0% { opacity: 0; transform: translateY(-24px); }
+  12%, 70% { opacity: 1; transform: none; }
+  88%, 100% { opacity: 0; transform: none; }
+}
+.loading__brand { margin: 0; font-family: Fraunces, Georgia, serif; font-size: 28px; color: var(--bone); }
+.loading__text { margin: 0; font-size: 14px; color: var(--muted); animation: blink 1.6s ease-in-out infinite; }
+
 /* ——— вход ——— */
 
 #screen-auth { align-items: center; justify-content: center; padding: 24px; }
@@ -764,7 +804,10 @@ button.seat__face:focus-visible { outline: 2px solid var(--brass); outline-offse
 .seat__ring.is-low path { stroke: var(--weak); filter: drop-shadow(0 0 4px rgba(180, 84, 63, 0.8)); }
 /* Поставленные фишки лежат на сукне на постоянном месте — низкой плашкой,
    чтобы помещаться в полосу между бортом и картами на любом экране. */
-#bets { position: absolute; inset: 0; pointer-events: none; }
+/* Ставки — поверх мест: за тесным столом ставку не закрывают ни карты, ни аватар. */
+#bets { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+/* Последний вариант за тесным столом — значок на углу аватара. */
+.bet--badge .bet__value { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6); background: rgba(9, 16, 19, 0.95); }
 .bet {
   position: absolute; left: var(--x); top: var(--y); transform: translate(-50%, -50%);
   display: flex; align-items: center; gap: 6px;
@@ -783,7 +826,7 @@ button.seat__face:focus-visible { outline: 2px solid var(--brass); outline-offse
   to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 .seat__badge {
-  position: absolute; right: -7px; bottom: 14px; width: 20px; height: 20px; border-radius: 50%;
+  position: absolute; left: -8px; bottom: -6px; z-index: 2; width: 20px; height: 20px; border-radius: 50%;
   background: var(--bone); color: #16202a; font-size: 11px; font-weight: 700;
   display: grid; place-items: center; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
@@ -1290,6 +1333,10 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   .seat__cards { height: 46px; }
   .seat__name { font-size: 11px; }
   .seat__face { width: 44px; height: 44px; font-size: 19px; border-radius: 10px; }
+  /* Плашка ставки на телефоне меньше: за тесным столом ей проще найти свободное место. */
+  .bet { gap: 3px; font-size: 11px; }
+  .bet .chip { width: 15px; height: 15px; }
+  .bet__value { padding: 0 6px; }
   .seat__avatar { margin: 4px auto 3px; }
   .seat__ring { inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px); }
   .seat__stack { font-size: 12px; }
@@ -1396,6 +1443,9 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .loading__card, .loading__chips i { animation: none; opacity: 1; transform: translate(var(--to-x, 0px), 0) rotate(var(--rot, 0deg)); }
+  .loading__chips i { transform: none; }
+  .loading__text { animation: none; }
   .actions .actions__status.is-notice { animation: none; }
   .card--deal, .card--flip .card__inner, .bet.is-new, .seat__win, .raise, .seat__bubble.is-new, .react__panel,
   .room.is-new, .auth, .auth__mark span, .dialog[open], .toast, .felt__msg.is-win { animation: none; }

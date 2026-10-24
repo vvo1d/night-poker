@@ -23,7 +23,19 @@
 <body>
 
 <!-- Экран входа -->
-<section id="screen-auth" class="screen">
+<!-- Заставка, пока выясняем, вошёл ли игрок: иначе на миг мелькал экран входа -->
+<section id="screen-loading" class="screen loading" aria-live="polite">
+  <div class="loading__table" aria-hidden="true">
+    <span class="loading__card loading__card--1">A<i>♠</i></span>
+    <span class="loading__card loading__card--2">K<i>♥</i></span>
+    <span class="loading__card loading__card--3">Q<i>♦</i></span>
+    <span class="loading__chips"><i></i><i></i><i></i><i></i></span>
+  </div>
+  <p class="loading__brand">THPoker</p>
+  <p class="loading__text">Раскладываем карты…</p>
+</section>
+
+<section id="screen-auth" class="screen" hidden>
   <div class="auth">
     <div class="auth__mark" aria-hidden="true">
       <span>♠</span><span>♥</span><span>♦</span><span>♣</span>

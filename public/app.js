@@ -130,6 +130,7 @@ function show(view) {
   state.view = view;
   // За столом уведомления всплывают сверху: внизу они закрывали бы свои карты.
   document.body.dataset.view = view;
+  $('#screen-loading').hidden = true;
   $('#screen-auth').hidden = view !== 'auth';
   $('#screen-lobby').hidden = view !== 'lobby';
   $('#screen-table').hidden = view !== 'table';
@@ -1568,7 +1569,8 @@ function renderTable(t) {
     if (t.actingSeat === i) node.dataset.timer = '1';
 
 
-    if (t.buttonSeat === i && t.phase !== 'idle') node.append(el('div', 'seat__badge', 'D'));
+    // Баттон — на нижнем углу аватара: не закрывает ни имя, ни стек, ни заметку.
+    if (t.buttonSeat === i && t.phase !== 'idle') avatar.append(el('div', 'seat__badge', 'D'));
     if (seat.net > 0 && t.phase === 'showdown') node.append(el('div', 'seat__win', `+${fmt(seat.net)}`));
 
     const bubble = reactionBubble(seat);
@@ -1744,6 +1746,7 @@ function renderBets(t, hero) {
   const sample = nodes[0].bet;
   const half = { w: sample.offsetWidth / 2, h: sample.offsetHeight / 2 };
 
+  const spots = [];
   for (const { i, bet } of nodes) {
     const r = seatNodes[i].getBoundingClientRect();
     const seatBox = {
@@ -1757,13 +1760,82 @@ function renderBets(t, hero) {
       top: f.top - feltBox.top, bottom: f.bottom - feltBox.top,
     };
     const spot = betSpot(seatBox, core, feltBox, half, face);
-    const x = (spot.x / feltBox.width) * 100;
-    const y = (spot.y / feltBox.height) * 100;
+    spots.push({ i, bet, x: spot.x, y: spot.y, w: bet.offsetWidth / 2, h: bet.offsetHeight / 2, face, seat: seatBox });
+  }
+
+  placeBets(spots, seatObstacles(seatNodes, feltBox), feltBox);
+  for (const { i, bet, x: px, y: py } of spots) {
+    const x = (px / feltBox.width) * 100;
+    const y = (py / feltBox.height) * 100;
     bet.style.setProperty('--x', `${x}%`);
     bet.style.setProperty('--y', `${y}%`);
     placed.set(i, { x, y });
   }
   state.betSpots = placed;
+}
+
+// Что на сукне нельзя закрывать ставкой: карты, аватары и надписи всех мест.
+function seatObstacles(seatNodes, feltBox) {
+  const out = [];
+  for (const node of seatNodes) {
+    for (const part of node.querySelectorAll('.seat__cards, .seat__name, .seat__face, .seat__badge, .seat__stack, .seat__note')) {
+      const r = part.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      out.push({
+        left: r.left - feltBox.left, right: r.right - feltBox.left,
+        top: r.top - feltBox.top, bottom: r.bottom - feltBox.top,
+      });
+    }
+  }
+  return out;
+}
+
+const BET_SPACING = 4;
+const hits = (a, b) => a.left < b.right + BET_SPACING && b.left < a.right + BET_SPACING
+  && a.top < b.bottom + BET_SPACING && b.top < a.bottom + BET_SPACING;
+
+// Раскладка ставок без наложений. Для каждой перебираем места по порядку:
+// обычное (между игроком и центром), сбоку от аватара, у углов аватара —
+// всегда сначала со стороны центра стола. Берём первое, где ставка не закрывает
+// ни игроков, ни чужие ставки и не выходит за сукно. Если за тесным столом
+// места нет вовсе, ставка ложится значком на угол аватара — так она видна
+// и сразу понятно, чья она (слой ставок лежит поверх мест).
+function placeBets(spots, obstacles, feltBox) {
+  const cx = feltBox.width / 2;
+  const cy = feltBox.height / 2;
+  const taken = [];
+  const rectAt = (x, y, s) => ({ left: x - s.w, right: x + s.w, top: y - s.h, bottom: y + s.h });
+  const inside = (r) => r.left >= 2 && r.top >= 2 && r.right <= feltBox.width - 2 && r.bottom <= feltBox.height - 2;
+  const free = (r) => inside(r) && !obstacles.some((o) => hits(r, o)) && !taken.some((t) => hits(r, t));
+
+  for (const s of spots) {
+    const f = s.face;
+    const fx = (f.left + f.right) / 2;
+    const fy = (f.top + f.bottom) / 2;
+    const toRight = cx >= fx;
+    const toDown = cy >= fy;
+    const sideX = (right) => (right ? f.right + BET_SPACING + s.w : f.left - BET_SPACING - s.w);
+    const cornerY = (down) => (down ? f.bottom - s.h : f.top + s.h);
+    const candidates = [
+      { x: s.x, y: s.y },
+      { x: sideX(toRight), y: fy },
+      { x: sideX(toRight), y: cornerY(toDown) },
+      { x: sideX(toRight), y: cornerY(!toDown) },
+      { x: sideX(!toRight), y: fy },
+      { x: sideX(!toRight), y: cornerY(toDown) },
+      // Под всем местом (ниже стека и действия) или над ним — со стороны центра.
+      { x: fx, y: toDown ? s.seat.bottom + BET_SPACING + s.h : s.seat.top - BET_SPACING - s.h },
+      { x: fx, y: toDown ? f.bottom + BET_SPACING + s.h : f.top - BET_SPACING - s.h },
+    ];
+    let spot = candidates.find((c) => free(rectAt(c.x, c.y, s)));
+    // Места нет: значок на угол аватара со стороны центра — заходит на аватар,
+    // но не на имя и не на стек под ним.
+    if (!spot) spot = { x: toRight ? f.right : f.left, y: toDown ? f.bottom - s.h : f.top + s.h, badge: true };
+    s.x = spot.x;
+    s.y = spot.y;
+    s.bet.classList.toggle('bet--badge', !!spot.badge);
+    taken.push(rectAt(s.x, s.y, s));
+  }
 }
 
 // Самый крупный номинал, который помещается в ставку, — его и рисуем.
@@ -2138,6 +2210,12 @@ function checkPre(t) {
   if (!pre) return;
   const you = t.you;
   if (!you || !you.inHand || t.handId !== pre.handId) { state.pre = null; return; }
+  // Открылась новая улица — выбор сделан до неё, новую карту игрок ещё не учёл.
+  if (t.phase !== pre.phase) {
+    state.pre = null;
+    statusNotice('Новая улица — выберите ход заново');
+    return;
+  }
 
   const toCall = you.legal ? you.legal.toCall : callAmount(t);
   if (pre.action === 'check' && toCall > 0) {
@@ -2166,7 +2244,7 @@ function preButton(label, action, amount, hint) {
   btn.setAttribute('aria-pressed', String(!!armed));
   btn.addEventListener('click', () => {
     const t = state.table;
-    state.pre = armed ? null : { action, amount, handId: t.handId };
+    state.pre = armed ? null : { action, amount, handId: t.handId, phase: t.phase };
     Sound.play('click');
     state.actionKey = '';   // перерисуем панель, чтобы кнопка загорелась
     renderActions(t);
@@ -2933,7 +3011,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'c' || e.key === 'с') action = toCall > 0 ? 'call' : 'check';
     if (!action) return;
     const same = state.pre && state.pre.action === action;
-    state.pre = same ? null : { action, amount: action === 'call' ? toCall : 0, handId: t.handId };
+    state.pre = same ? null : { action, amount: action === 'call' ? toCall : 0, handId: t.handId, phase: t.phase };
     Sound.play('click');
     state.actionKey = '';
     renderActions(t);
@@ -3086,8 +3164,9 @@ function telegramSection() {
   const tgApp = await telegramApp();
   state.tgApp = tgApp;
 
-  const res = await fetch('/api/me');
-  const data = await res.json().catch(() => ({}));
+  // Нет связи с сервером — не держим заставку вечно, показываем вход.
+  const res = await fetch('/api/me').catch(() => null);
+  const data = res ? await res.json().catch(() => ({})) : {};
   if (data.user) {
     setUser(data.user);
     $('#admin-link').hidden = !data.admin;
