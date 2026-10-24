@@ -13,6 +13,8 @@ const { Table, setEvalBudget } = require('./src/table');
 const { BOT_NAMES } = require('./src/bot');
 const { Tournament, SNG_STACK, SNG_TIMEOUT, SNG_BUY_INS } = require('./src/tournament');
 const { ACHIEVEMENTS, achievementView, tierTotal } = require('./src/achievements');
+const { Snapshot } = require('./src/snapshot');
+const telegram = require('./src/telegram');
 
 const PORT = Number(process.env.PORT) || 3000;
 // За обратным прокси сервер стоит слушать только петлю, чтобы снаружи
@@ -21,6 +23,9 @@ const HOST = process.env.HOST || '0.0.0.0';
 // По HTTPS cookie должна помечаться Secure, по HTTP — нет, иначе браузер её не сохранит.
 const SECURE_COOKIE = process.env.COOKIE_SECURE === '1';
 const PUBLIC_DIR = path.join(__dirname, 'public');
+// Telegram включается токеном бота; адрес сайта нужен для кнопок «Играть» в боте.
+const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const APP_URL = process.env.APP_URL || 'https://thpoker.ru';
 
 // Столы заведения: стоят всегда, даже пустые, — чтобы было куда сесть сразу.
 const ROOM_CONFIGS = [
@@ -51,13 +56,36 @@ const EVAL_PER_TICK = 8;             // тяжёлых разборов руки
 
 const tables = new Map();       // tableId -> Table, в порядке создания
 const playerTable = new Map();  // userId -> Table (чтобы не перебирать все столы)
+const invites = new Map();      // код приглашения -> Table
 let tableSeq = 0;
 
-function createTable(cfg, { owner = null, sng = 0, buyIn } = {}) {
+// Код приглашения: короткий, без похожих символов, угадать перебором нельзя.
+const INVITE_ABC = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function inviteCode() {
+  let code;
+  do {
+    code = Array.from(crypto.randomBytes(10), (b) => INVITE_ABC[b % INVITE_ABC.length]).join('');
+  } while (invites.has(code));
+  return code;
+}
+
+function dropTable(table) {
+  tables.delete(table.id);
+  invites.delete(table.invite);
+}
+
+function createTable(cfg, { owner = null, sng = 0, buyIn, invite = null, privateTable = false, createdAt = 0 } = {}) {
   const n = ++tableSeq;
   const tour = sng ? new Tournament(sng, {
     pay: (player, amount) => { if (!player.isBot) store.addChips(player.userId, amount); },
-    onStart: (players) => { for (const p of players) if (!p.isBot) store.recordSng(p.userId, { start: true }); },
+    onStart: (players) => {
+      for (const p of players) {
+        if (p.isBot) continue;
+        store.recordSng(p.userId, { start: true });
+        // Записался и ушёл — бот напомнит, что турнир начался.
+        if (!isOnline(p.userId)) notify(p.userId, `Турнир начался — вас ждут за столом. Пока вас нет, блайнды списываются.`);
+      }
+    },
     onPlace: (player, place, prize) => { if (!player.isBot) store.recordSng(player.userId, { place, prize }); },
   }, buyIn) : null;
   const table = new Table({ ...cfg, id: cfg.id || `t${n}`, tour }, {
@@ -71,8 +99,13 @@ function createTable(cfg, { owner = null, sng = 0, buyIn } = {}) {
       for (const p of players) if (!p.isBot) store.countHand(p.userId);
     },
     onHandEnd: (results) => {
+      const humans = results.filter((r) => !r.player.isBot).map((r) => r.player.userId);
       for (const r of results) {
-        if (!r.player.isBot) store.recordHand(r.player.userId, { ...r, cash: !tour });
+        if (r.player.isBot) continue;
+        // Сыграл раздачу за одним столом с другом — для задания дня.
+        const me = store.user(r.player.userId);
+        const withFriend = !!me && humans.some((id) => id !== me.id && me.friends.includes(id));
+        store.recordHand(r.player.userId, { ...r, cash: !tour, withFriend });
       }
     },
     onSeat: (player, t) => { if (!player.isBot) playerTable.set(player.userId, t); },
@@ -81,9 +114,12 @@ function createTable(cfg, { owner = null, sng = 0, buyIn } = {}) {
   table.house = !owner;
   table.ownerId = owner ? owner.id : null;
   table.ownerName = owner ? owner.name : null;
-  table.createdAt = Date.now();
+  table.private = !!privateTable;          // приватный стол не виден в лобби — только по ссылке
+  table.invite = invite || inviteCode();
+  table.createdAt = createdAt || Date.now();
   table.emptyAt = Date.now();
   tables.set(table.id, table);
+  invites.set(table.invite, table);
   return table;
 }
 
@@ -95,6 +131,7 @@ function createUserTable(user, body) {
   if (tables.size >= TABLES_MAX) return { error: 'Свободных столов нет, попробуйте позже' };
 
   const name = String(body.name || '').trim().replace(/\s+/g, ' ').slice(0, 24);
+  const privateTable = !!body.private;
   if (body.kind === 'sng') {
     const seats = Number(body.seats);
     if (!SNG_SEATS.includes(seats)) return { error: 'Сит-н-гоу бывает на 6 или 9 мест' };
@@ -103,7 +140,7 @@ function createUserTable(user, body) {
     const table = createTable({
       name: name || `Сит-н-гоу на ${seats}`,
       maxSeats: seats, sb: 0, bb: 0, minBuyIn: SNG_STACK, maxBuyIn: SNG_STACK, timeout: SNG_TIMEOUT,
-    }, { owner: user, sng: seats, buyIn });
+    }, { owner: user, sng: seats, buyIn, privateTable });
     [table.sb, table.bb] = table.tour.blinds();
     return table;
   }
@@ -118,7 +155,7 @@ function createUserTable(user, body) {
   return createTable({
     name: name || `Стол ${user.name}`,
     maxSeats: seats, sb, bb, minBuyIn: bb * 20, maxBuyIn: bb * 100, timeout,
-  }, { owner: user });
+  }, { owner: user, privateTable });
 }
 
 // Пустые столы игроков закрываются, столы заведения стоят всегда.
@@ -130,11 +167,71 @@ function dropIdleTables(now) {
       ? (tour.status === 'finished' ? now - tour.finishedAt > SNG_DONE_MS
         : tour.status === 'registering' && table.emptyAt && now - table.emptyAt > SNG_IDLE_MS)
       : table.emptyAt && now - table.emptyAt > CASH_IDLE_MS;
-    if (idle) tables.delete(table.id);
+    if (idle) dropTable(table);
   }
 }
 
 for (const cfg of ROOM_CONFIGS) createTable(cfg);
+
+// ——— Telegram ———
+
+const bot = TG_TOKEN ? new telegram.Bot(TG_TOKEN, { appUrl: APP_URL }) : null;
+
+// Сообщение игроку в Telegram, если он привязан и бот работает.
+function notify(userId, text) {
+  const u = store.user(userId);
+  if (!bot || !bot.username || !u || !u.tg) return;
+  bot.notify(u.tg.id, text);
+}
+
+// Подпись от виджета на сайте или от Mini App — оба пути дают одного и того же игрока.
+function telegramIdentity(body) {
+  if (!TG_TOKEN) return null;
+  if (body.initData) return telegram.verifyWebApp(body.initData, TG_TOKEN);
+  return telegram.verifyLogin(body.data, TG_TOKEN);
+}
+
+// ——— снимок столов: фишки переживают перезапуск ———
+
+const snapshot = new Snapshot(store.dataDir);
+
+// Стол игрока из снимка открывается заново пустым — с тем же адресом и приглашением.
+function reopenTable(rec) {
+  if (tables.has(rec.id) || invites.has(rec.invite)) return false;
+  const owner = rec.ownerId && store.user(rec.ownerId);
+  if (!owner) return false;
+  const cfg = {
+    id: rec.id, name: rec.name, maxSeats: rec.maxSeats, sb: rec.sb, bb: rec.bb,
+    minBuyIn: rec.minBuyIn, maxBuyIn: rec.maxBuyIn, timeout: rec.timeout,
+  };
+  const opts = { owner, invite: rec.invite, privateTable: rec.private, createdAt: rec.createdAt };
+  if (rec.sng) {
+    const table = createTable(cfg, { ...opts, sng: rec.sng.seats, buyIn: rec.sng.buyIn });
+    [table.sb, table.bb] = table.tour.blinds();
+  } else {
+    createTable(cfg, opts);
+  }
+  return true;
+}
+
+{
+  const restored = snapshot.restore({
+    credit: (userId, amount) => store.addChips(userId, amount),
+    reopen: reopenTable,
+  });
+  // Новые столы не должны занять номера восстановленных.
+  for (const id of tables.keys()) {
+    const n = Number(/^t(\d+)$/.exec(id)?.[1]);
+    if (n > tableSeq) tableSeq = n;
+  }
+  if (restored) {
+    console.log(`Снимок столов разобран: фишки вернулись ${restored.players} игрокам `
+      + `(${restored.chips}), столов открыто заново: ${restored.tables}`);
+    // Снимок убираем, только когда возвращённые фишки легли в базу.
+    snapshot.paused = true;
+    Promise.resolve(store.flush()).then(() => { snapshot.clear(); snapshot.paused = false; });
+  }
+}
 
 const clients = new Set();          // открытые SSE-соединения
 const presence = new Map();         // userId -> { conns, lastSeen }
@@ -376,7 +473,7 @@ function tableInfo(table) {
 // и турниры, где идёт регистрация, видны всегда.
 function lobbyTables() {
   const rank = (t) => (t.house ? 3 : t.tour && t.tour.status === 'registering' ? 2 : 0) * 100 + t.humans();
-  const list = [...tables.values()];
+  const list = [...tables.values()].filter((t) => !t.private);
   if (list.length > LOBBY_LIMIT) {
     list.sort((a, b) => rank(b) - rank(a));
     list.length = LOBBY_LIMIT;
@@ -412,6 +509,87 @@ function lobbySnapshot(now = Date.now()) {
     lobbyVersion += 1;
   }
   return lobbyJson;
+}
+
+// ——— приглашения ———
+
+// Приватный стол видят хозяин, те, кто пришёл по ссылке, и друзья
+// хозяина или сидящих за столом — к другу можно подсесть без ссылки.
+function canEnter(user, session, table) {
+  if (!table.private || table.ownerId === user.id) return true;
+  if (session.invites && session.invites.has(table.id)) return true;
+  if (user.friends.includes(table.ownerId)) return true;
+  return table.players().some((p) => !p.isBot && user.friends.includes(p.userId));
+}
+
+// Что видно по ссылке ещё до входа: куда зовут и кто.
+function inviteInfo(table) {
+  const tour = table.tour;
+  return {
+    name: table.name,
+    owner: table.ownerName,
+    kind: tour ? 'sng' : 'cash',
+    sb: table.sb,
+    bb: table.bb,
+    maxSeats: table.maxSeats,
+    players: table.occupied(),
+    sng: tour ? { status: tour.status, buyIn: tour.buyIn, prizes: tour.prizes } : null,
+  };
+}
+
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
+
+// Страница ссылки-приглашения. Мессенджер по ней строит превью («Анна зовёт
+// за стол…»), а человек сразу уходит в игру с кодом приглашения.
+function invitePage(req, res, code) {
+  const table = invites.get(code);
+  const origin = `${SECURE_COOKIE ? 'https' : 'http'}://${req.headers.host}`;
+  const go = table ? `/play?join=${encodeURIComponent(code)}` : '/play';
+  let title = 'Стол уже закрыт — THPoker';
+  let text = 'Этот стол закрылся. Заходите в THPoker — бесплатный покер без денег: столы открыты круглосуточно.';
+  if (table) {
+    const info = inviteInfo(table);
+    const what = info.kind === 'sng'
+      ? `сит-н-гоу на ${info.maxSeats}, взнос ${info.sng.buyIn}`
+      : `блайнды ${info.sb}/${info.bb}, ${info.maxSeats} мест`;
+    title = `${info.owner || 'Друг'} зовёт за стол «${info.name}» — THPoker`;
+    text = `${what}. Бесплатный покер на виртуальные фишки прямо в браузере.`;
+  }
+  const html = `<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<meta name="robots" content="noindex">
+<meta name="description" content="${escapeHtml(text)}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="THPoker">
+<meta property="og:title" content="${escapeHtml(title)}">
+<meta property="og:description" content="${escapeHtml(text)}">
+<meta property="og:image" content="${origin}/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta http-equiv="refresh" content="0; url=${escapeHtml(go)}">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0d1317;color:#dfe7e6;font:16px system-ui,sans-serif}a{color:#c9a24a}</style>
+</head><body><p><a href="${escapeHtml(go)}">Открыть стол в THPoker</a></p>
+<script>location.replace(${JSON.stringify(go)});</script></body></html>`;
+  res.writeHead(table ? 200 : 404, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Length': Buffer.byteLength(html),
+    'Cache-Control': 'no-store',
+  });
+  res.end(html);
+}
+
+// Свои столы — с приглашениями: их удобно открыть заново и позвать друзей.
+function tablesOf(user) {
+  const out = [];
+  for (const t of tables.values()) {
+    if (t.ownerId !== user.id) continue;
+    out.push({ id: t.id, invite: t.invite, private: t.private, ...inviteInfo(t) });
+  }
+  return out;
 }
 
 // ——— кабинет, друзья, рейтинг ———
@@ -494,6 +672,21 @@ async function handleCommand(ctx, body) {
       if (seated) { session.roomId = seated.id; return { ok: true, roomId: seated.id }; }
       const table = tables.get(String(body.roomId));
       if (!table) return { error: 'Стол уже закрыт' };
+      if (!canEnter(user, session, table)) return { error: 'Это приватный стол — попасть за него можно по ссылке-приглашению' };
+      session.roomId = table.id;
+      return { ok: true, roomId: table.id };
+    }
+    case 'join': {
+      // Вход по ссылке-приглашению: код открывает и приватный стол.
+      const table = invites.get(String(body.code || ''));
+      if (!table) return { error: 'Стол по этой ссылке уже закрыт' };
+      session.invites = session.invites || new Set();
+      session.invites.add(table.id);
+      const seated = tableOfUser(user.id);
+      if (seated && seated !== table) {
+        session.roomId = seated.id;
+        return { error: 'Вы сидите за другим столом — встаньте из-за него, чтобы перейти по приглашению' };
+      }
       session.roomId = table.id;
       return { ok: true, roomId: table.id };
     }
@@ -600,10 +793,23 @@ async function handleCommand(ctx, body) {
     }
     case 'reload':
       return store.reload(user.id);
-    case 'addFriend':
-      return store.addFriend(user.id, body.name);
-    case 'acceptFriend':
-      return store.acceptFriend(user.id, body.name);
+    case 'claimBonus':
+      return store.claimBonus(user.id);
+    case 'claimQuest':
+      return store.claimQuest(user.id, body.id);
+    case 'addFriend': {
+      const res = store.addFriend(user.id, body.name);
+      const other = store.byNameLower(body.name);
+      if (res.status === 'out' && other) notify(other.id, `${user.name} хочет добавить вас в друзья в THPoker.`);
+      if (res.status === 'friend' && other) notify(other.id, `${user.name} теперь у вас в друзьях.`);
+      return res;
+    }
+    case 'acceptFriend': {
+      const res = store.acceptFriend(user.id, body.name);
+      const other = store.byNameLower(body.name);
+      if (res.ok && other) notify(other.id, `${user.name} принял(а) вашу заявку в друзья.`);
+      return res;
+    }
     case 'declineFriend':
       return store.declineFriend(user.id, body.name);
     case 'removeFriend':
@@ -615,10 +821,15 @@ async function handleCommand(ctx, body) {
 
 // ——— маршруты ———
 
+const MONEY_CMDS = new Set(['sit', 'standUp', 'leaveRoom', 'topUp', 'createTable', 'addBot', 'kickBot']);
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const route = url.pathname;
 
+  if ((req.method === 'GET' || req.method === 'HEAD') && route.startsWith('/t/')) {
+    return invitePage(req, res, decodeURIComponent(route.slice(3)).replace(/\/$/, ''));
+  }
   if ((req.method === 'GET' || req.method === 'HEAD') && !route.startsWith('/api/')) return serveStatic(req, res, route);
 
   try {
@@ -636,6 +847,31 @@ const server = http.createServer(async (req, res) => {
       if (error) return send(res, 400, { error });
       const token = store.createSession(user.id);
       return send(res, 200, { user: store.publicUser(user.id) }, { 'Set-Cookie': sessionCookie(token) });
+    }
+
+    if (route === '/api/config' && req.method === 'GET') {
+      return send(res, 200, { telegramBot: bot && bot.username ? bot.username : null });
+    }
+
+    // Вход через Telegram: виджет на сайте присылает data, Mini App — initData.
+    if (route === '/api/telegram/login' && req.method === 'POST') {
+      const body = await readBody(req);
+      const tg = telegramIdentity(body);
+      if (!tg) return send(res, 400, { error: 'Telegram не подтвердил вход — попробуйте ещё раз' });
+      const { user, created } = store.telegramUser(tg);
+      const token = store.createSession(user.id);
+      return send(res, 200, { user: store.publicUser(user.id), created }, { 'Set-Cookie': sessionCookie(token) });
+    }
+
+    if (route === '/api/telegram/link' && req.method === 'POST') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      const body = await readBody(req);
+      const tg = telegramIdentity(body);
+      if (!tg) return send(res, 400, { error: 'Telegram не подтвердил привязку — попробуйте ещё раз' });
+      const result = store.linkTelegram(ctx.user.id, tg);
+      if (result.error) return send(res, 400, result);
+      return send(res, 200, { ok: true, user: store.publicUser(ctx.user.id) });
     }
 
     if (route === '/api/logout' && req.method === 'POST') {
@@ -699,13 +935,19 @@ const server = http.createServer(async (req, res) => {
     if (route === '/api/friends' && req.method === 'GET') {
       const ctx = requireAuth(req, res);
       if (!ctx) return;
-      return send(res, 200, friendsOf(ctx.user));
+      return send(res, 200, { ...friendsOf(ctx.user), tables: tablesOf(ctx.user) });
     }
 
     if (route === '/api/rating' && req.method === 'GET') {
       const ctx = requireAuth(req, res);
       if (!ctx) return;
       return send(res, 200, store.rating(url.searchParams.get('by') || 'chips', ctx.user.id));
+    }
+
+    if (route === '/api/invite' && req.method === 'GET') {
+      const table = invites.get(url.searchParams.get('code') || '');
+      if (!table) return send(res, 404, { error: 'Стол по этой ссылке уже закрыт' });
+      return send(res, 200, inviteInfo(table));
     }
 
     if (route === '/api/rooms' && req.method === 'GET') {
@@ -718,6 +960,8 @@ const server = http.createServer(async (req, res) => {
       if (!allowCommand(ctx.session)) return send(res, 429, { error: 'Слишком часто. Подождите секунду' });
       const body = await readBody(req);
       const result = await handleCommand(ctx, body);
+      // Команды, которые двигают фишки между банком и столом, сразу попадают в снимок.
+      if (MONEY_CMDS.has(body.cmd) && !result.error) snapshot.save(tables);
       pushAll();
       if (result.error) return send(res, 400, result);
       return send(res, 200, { ...result, user: store.publicUser(ctx.user.id) });
@@ -871,6 +1115,7 @@ function maintain(now) {
   }
 
   dropIdleTables(now);
+  snapshot.save(tables);
 
   if (now - purgedAt > 300_000) {
     purgedAt = now;
@@ -917,6 +1162,10 @@ async function shutdown(signal) {
     server.close();
     for (const client of clients) { try { client.res.end(); } catch { /* уже закрыт */ } }
     clients.clear();
+    // Последний снимок столов: после запуска фишки вернутся игрокам в банк.
+    snapshot.paused = false;
+    snapshot.save(tables);
+    if (bot) bot.stop();
     await store.close();
   } catch (err) {
     console.error('При остановке:', err.message);
@@ -930,4 +1179,9 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 server.listen(PORT, HOST, 1024, () => {
   console.log(`THPoker работает: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
   console.log(`Столов открыто: ${tables.size}`);
+  if (bot) {
+    bot.start()
+      .then((name) => console.log(`Telegram-бот @${name} запущен`))
+      .catch((err) => console.error('Telegram-бот не запустился:', err.message));
+  }
 });

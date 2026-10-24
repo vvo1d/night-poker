@@ -20,6 +20,11 @@ Environment=DB_FILE=/var/lib/night-poker/poker.db
 Environment=UV_THREADPOOL_SIZE=16
 # Когда появится HTTPS, поставьте 1 — cookie получит флаг Secure.
 Environment=COOKIE_SECURE=0
+# Адрес сайта: на него ведут кнопки «Играть» в Telegram-боте.
+Environment=APP_URL=https://thpoker.ru
+# Секреты — не в репозитории, а в отдельном файле на сервере, например
+# TELEGRAM_BOT_TOKEN=123456:ABC… Минус значит: файла нет — служба всё равно стартует.
+EnvironmentFile=-/etc/night-poker.env
 
 # По SIGTERM сервер дописывает игроков в базу и только потом выходит.
 KillSignal=SIGTERM

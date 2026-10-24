@@ -132,6 +132,21 @@ function setUser(user) {
     if (state.view === 'lobby') showPage(state.page);   // обновим открытый раздел
   }
   state.requests = requests;
+
+  // Задания дня: выполненное — всплывашка, сама полоса перерисовывается.
+  if (user.daily) {
+    const was = state.daily;
+    if (was) {
+      for (const q of user.daily.quests) {
+        const before = was.quests.find((x) => x.id === q.id);
+        if (q.done && !q.claimed && before && !before.done) {
+          toast(`Задание выполнено: ${q.title.toLowerCase()} — заберите +${fmt(q.reward)} в лобби`, { good: true });
+        }
+      }
+    }
+    state.daily = user.daily;
+    renderToday(user.daily);
+  }
   if (before !== null && before !== user.chips) {
     retrigger($('#lobby-chips'), 'is-bump');
     retrigger($('#table-chips'), 'is-bump');
@@ -205,11 +220,17 @@ $('#auth-form').addEventListener('submit', async (e) => {
     return;
   }
   form.password.value = '';
-  setUser(data.user);
+  afterLogin(data.user);
+});
+
+// Вошли любым способом: в лобби, поток событий и — если пришли по приглашению — за стол.
+function afterLogin(user) {
+  setUser(user);
   show('lobby');
   Sound.play('chips');
   connectStream();
-});
+  joinInvite();
+}
 
 $('#logout').addEventListener('click', async () => {
   await post('/api/logout');
@@ -217,6 +238,7 @@ $('#logout').addEventListener('click', async () => {
   state.stream = null;
   state.user = null;
   show('auth');
+  renderTelegramAuth();
 });
 
 $('#reload-chips').addEventListener('click', async () => {
@@ -357,6 +379,60 @@ function renderLobby(data) {
   if (data.sngBuyIns) state.sngBuyIns = data.sngBuyIns;
 }
 
+// ——— сегодня: бонус за вход и задания дня ———
+
+function renderToday(daily) {
+  const box = $('#today');
+  box.hidden = false;
+  box.textContent = '';
+
+  // Бонус: сумма, серия по дням и кнопка.
+  const b = daily.bonus;
+  const bonus = el('article', `today__card today__bonus${b.available ? ' is-ready' : ''}`);
+  bonus.append(el('span', 'today__label', 'Бонус за вход'));
+  bonus.append(el('b', 'today__amount', `+${fmt(b.amount)}`));
+  bonus.append(el('span', 'today__sub', b.available
+    ? `${b.streak}-й день подряд`
+    : `Серия: ${b.streak} ${plural(b.streak, 'день', 'дня', 'дней')}. Завтра +${fmt(b.ladder[Math.min(b.streak, b.ladder.length - 1)])}`));
+  const ladder = el('div', 'today__ladder');
+  ladder.title = `За дни подряд: ${b.ladder.map(fmt).join(', ')}`;
+  b.ladder.forEach((_, i) => ladder.append(el('i', i < b.streak ? 'is-on' : '')));
+  bonus.append(ladder);
+  const take = el('button', `btn btn--sm ${b.available ? 'btn--primary' : 'btn--ghost'}`, b.available ? 'Забрать' : 'Получено ✓');
+  take.disabled = !b.available;
+  take.addEventListener('click', async () => {
+    const res = await cmd({ cmd: 'claimBonus' });
+    if (res.ok) toast(`+${fmt(res.reward)} фишек — бонус за ${res.streak}-й день`, { good: true });
+  });
+  bonus.append(take);
+  box.append(bonus);
+
+  // Задания: прогресс и награда.
+  for (const q of daily.quests) {
+    const card = el('article', `today__card today__quest${q.done ? ' is-done' : ''}${q.claimed ? ' is-claimed' : ''}`);
+    card.append(el('span', 'today__label', 'Задание дня'));
+    card.append(el('span', 'today__title', q.title));
+    const bar = el('span', 'today__bar');
+    const fill = el('i');
+    fill.style.width = `${Math.round((q.progress / q.goal) * 100)}%`;
+    bar.append(fill);
+    card.append(bar);
+    const foot = el('div', 'today__foot');
+    foot.append(el('span', 'today__sub', `${fmt(q.progress)} / ${fmt(q.goal)} · +${fmt(q.reward)}`));
+    if (q.done) {
+      const claim = el('button', `btn btn--sm ${q.claimed ? 'btn--ghost' : 'btn--primary'}`, q.claimed ? 'Получено ✓' : 'Забрать');
+      claim.disabled = q.claimed;
+      claim.addEventListener('click', async () => {
+        const res = await cmd({ cmd: 'claimQuest', id: q.id });
+        if (res.ok) toast(`+${fmt(res.reward)} фишек за задание`, { good: true });
+      });
+      foot.append(claim);
+    }
+    card.append(foot);
+    box.append(card);
+  }
+}
+
 // ——— разделы лобби: столы, рейтинг, кабинет ———
 
 function showPage(page) {
@@ -390,6 +466,31 @@ async function loadFriends() {
   if (!data) return;
   renderFriends($('#friends-mini'), data.friends, { mini: true });
   renderRequests($('#requests-mini'), data.incoming, () => loadFriends());
+  renderMyTables(data.tables || []);
+}
+
+// Свои столы: войти или позвать друзей. Приватный стол иначе не найти — в лобби его нет.
+function renderMyTables(list) {
+  $('#my-tables').hidden = !list.length;
+  const box = $('#my-tables-list');
+  box.textContent = '';
+  for (const t of list) {
+    const li = el('li', 'friend my-table');
+    const name = el('button', 'friend__who');
+    name.type = 'button';
+    name.append(el('span', 'friend__name', t.name));
+    name.title = 'Войти за стол';
+    name.addEventListener('click', () => goToTable(t.id));
+    li.append(name);
+    const what = t.kind === 'sng'
+      ? `сит-н-гоу · ${t.players}/${t.maxSeats}`
+      : `${fmt(t.sb)}/${fmt(t.bb)} · ${t.players}/${t.maxSeats}`;
+    li.append(el('span', 'friend__status', `${t.private ? 'приватный · ' : ''}${what}`));
+    const invite = el('button', 'btn btn--ghost btn--sm', 'Пригласить');
+    invite.addEventListener('click', () => openInvite(t));
+    li.append(invite);
+    box.append(li);
+  }
 }
 
 // Входящие заявки: принять или отклонить прямо из списка.
@@ -690,6 +791,12 @@ function renderProfile(box, data) {
   achSec.append(achList);
   root.append(achSec);
 
+  // Telegram — в своём кабинете.
+  if (data.own) {
+    const tg = telegramSection();
+    if (tg) root.append(tg);
+  }
+
   // Свои друзья и заявки — только в своём кабинете.
   if (data.own) {
     const { friends, incoming, outgoing } = data.friends;
@@ -795,7 +902,12 @@ function paintCreate() {
   }
 }
 
-$('#create-open').addEventListener('click', () => {
+$('#create-open').addEventListener('click', async () => {
+  // Блайнды и взносы приходят с лобби; если оно ещё не пришло — спросим сами.
+  if (!state.stakes || !state.sngBuyIns) {
+    const lobby = await getJson('/api/rooms');
+    if (lobby) { state.stakes = lobby.stakes; state.sngBuyIns = lobby.sngBuyIns; }
+  }
   const stakes = state.stakes || [];
   const box = $('#create-stakes');
   if (!box.children.length) {
@@ -829,16 +941,22 @@ createForm.addEventListener('submit', async (e) => {
   if (!e.submitter || e.submitter.value !== 'ok') return;
   const kind = createChoice('kind');
   const name = createForm.elements.namedItem('name').value;
+  const isPrivate = createForm.elements.namedItem('private').checked;
   const payload = kind === 'sng'
-    ? { cmd: 'createTable', kind, name, seats: Number(createChoice('sngSeats')), buyIn: Number(createChoice('buyIn')) }
+    ? { cmd: 'createTable', kind, name, private: isPrivate, seats: Number(createChoice('sngSeats')), buyIn: Number(createChoice('buyIn')) }
     : {
-      cmd: 'createTable', kind, name,
+      cmd: 'createTable', kind, name, private: isPrivate,
       stake: Number(createChoice('stake')),
       seats: Number(createChoice('seats')),
       timeout: Number(createChoice('timeout')),
     };
   const res = await cmd(payload);
-  if (res.ok) { createForm.elements.namedItem('name').value = ''; Sound.play('chips'); }
+  if (res.ok) {
+    createForm.elements.namedItem('name').value = '';
+    Sound.play('chips');
+    // Приватный стол без друзей пуст — сразу предлагаем ссылку.
+    if (isPrivate) state.inviteFor = res.roomId;
+  }
 });
 
 // «1 стол», «2 стола», «5 столов»
@@ -1131,6 +1249,8 @@ function renderTable(t) {
 
   checkPre(t);
   renderMenu(t);
+  // Только что открыли приватный стол — сразу даём ссылку для друзей.
+  if (state.inviteFor && t.id === state.inviteFor) { state.inviteFor = null; openInvite(t); }
   renderActions(t);
 
   const snap = snapshot(t);
@@ -1868,6 +1988,78 @@ menuAction('#menu-sitout', () => {
   if (you) cmd({ cmd: 'sitOut', value: !you.sittingOut });
 });
 menuAction('#menu-bot', () => cmd({ cmd: 'addBot' }));
+menuAction('#menu-invite', () => { if (state.table) openInvite(state.table); });
+
+// ——— приглашения ———
+
+function inviteUrl(code) {
+  return `${location.origin}/t/${code}`;
+}
+
+function openInvite(t) {
+  if (!t.invite) return;
+  const url = inviteUrl(t.invite);
+  const text = t.kind === 'sng'
+    ? `Залетай на сит-н-гоу «${t.name}» в THPoker — покер без денег`
+    : `Садись ко мне за стол «${t.name}» в THPoker — покер без денег`;
+  $('#invite-link').value = url;
+  $('#invite-tg').href = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+  const share = $('#invite-share');
+  share.hidden = !navigator.share;
+  share.onclick = () => navigator.share({ title: 'THPoker', text, url }).catch(() => {});
+  $('#invite-text').textContent = t.private
+    ? 'Стол приватный: в лобби его нет, попасть можно только по этой ссылке. Если у друга нет аккаунта, он зарегистрируется и сразу окажется за столом.'
+    : 'Отправьте ссылку друзьям — по ней откроется этот стол. Если у друга нет аккаунта, он зарегистрируется и сразу окажется за столом.';
+  const dialog = $('#invite-dialog');
+  if (!dialog.open) dialog.showModal();
+  Sound.play('click');
+}
+
+$('#invite-copy').addEventListener('click', async () => {
+  const input = $('#invite-link');
+  try {
+    await navigator.clipboard.writeText(input.value);
+  } catch {
+    input.select();
+    document.execCommand('copy');
+  }
+  $('#invite-copy').textContent = 'Скопировано ✓';
+  setTimeout(() => { $('#invite-copy').textContent = 'Копировать'; }, 1800);
+  Sound.play('click');
+});
+
+// Код из ссылки ?join=… держим до входа в аккаунт, адрес сразу чистим.
+const joinParams = new URLSearchParams(location.search);
+state.joinCode = joinParams.get('join');
+if (state.joinCode) {
+  joinParams.delete('join');
+  const rest = joinParams.toString();
+  history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`);
+}
+
+// До входа показываем, куда зовут: так понятнее, зачем регистрироваться.
+async function showInviteNote() {
+  if (!state.joinCode) return;
+  const res = await fetch(`/api/invite?code=${encodeURIComponent(state.joinCode)}`);
+  const note = $('#invite-note');
+  if (!res.ok) {
+    note.textContent = 'Стол по ссылке уже закрыт, но играть можно за любым другим.';
+    note.hidden = false;
+    state.joinCode = null;
+    return;
+  }
+  const t = await res.json();
+  const what = t.kind === 'sng' ? `сит-н-гоу на ${t.maxSeats}` : `блайнды ${fmt(t.sb)}/${fmt(t.bb)}`;
+  note.textContent = `${t.owner || 'Вас'} зовёт за стол «${t.name}» (${what}). Войдите или зарегистрируйтесь — и сразу окажетесь за ним.`;
+  note.hidden = false;
+}
+
+async function joinInvite() {
+  const code = state.joinCode;
+  if (!code) return;
+  state.joinCode = null;
+  await cmd({ cmd: 'join', code });
+}
 menuAction('#menu-stand', () => cmd({ cmd: 'standUp' }));
 
 function renderMenu(t) {
@@ -2144,17 +2336,141 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ——— Telegram ———
+
+// Внутри Telegram (Mini App) адрес содержит tgWebAppData.
+function inTelegram() {
+  return /tgWebApp/.test(location.hash) || /tgWebApp/.test(location.search);
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.append(s);
+  });
+}
+
+// Mini App: подстраиваемся под Telegram и отдаём объект с подписью initData.
+async function telegramApp() {
+  if (!inTelegram()) return null;
+  try {
+    await loadScript('https://telegram.org/js/telegram-web-app.js');
+  } catch {
+    return null;
+  }
+  const app = window.Telegram && window.Telegram.WebApp;
+  if (!app || !app.initData) return null;
+  app.ready();
+  app.expand();
+  // Свайп вниз по столу не должен закрывать игру.
+  if (app.disableVerticalSwipes) app.disableVerticalSwipes();
+  try { app.setHeaderColor('#0d1317'); app.setBackgroundColor('#0d1317'); } catch { /* старый клиент Telegram */ }
+  document.documentElement.classList.add('in-telegram');
+  return app;
+}
+
+// Виджет «Войти через Telegram» на обычном сайте. onauth — имя глобальной функции.
+function telegramWidget(box, onauth) {
+  box.textContent = '';
+  const s = document.createElement('script');
+  s.async = true;
+  s.src = 'https://telegram.org/js/telegram-widget.js?22';
+  s.dataset.telegramLogin = state.config.telegramBot;
+  s.dataset.size = 'large';
+  s.dataset.radius = '10';
+  s.dataset.requestAccess = 'write';   // чтобы бот мог написать о заявках и турнирах
+  s.dataset.onauth = `${onauth}(user)`;
+  box.append(s);
+}
+
+async function telegramLogin(payload) {
+  const { ok, data } = await post('/api/telegram/login', payload);
+  if (!ok || data.error) { toast(data.error || 'Не удалось войти через Telegram'); return false; }
+  afterLogin(data.user);
+  if (data.created) toast(`Добро пожаловать, ${data.user.name}! На счету 10 000 фишек`, { good: true });
+  return true;
+}
+
+async function telegramLink(payload) {
+  const { ok, data } = await post('/api/telegram/link', payload);
+  if (!ok || data.error) { toast(data.error || 'Не удалось привязать Telegram'); return; }
+  setUser(data.user);
+  toast('Telegram привязан — теперь можно входить через него', { good: true });
+  if (state.page === 'profile') loadOwnProfile();
+}
+
+window.onTelegramAuth = (user) => telegramLogin({ data: user });
+window.onTelegramLink = (user) => telegramLink({ data: user });
+
+// Кнопка входа на экране авторизации: в Telegram — одним нажатием, на сайте — виджет.
+function renderTelegramAuth() {
+  const box = $('#tg-login');
+  if (state.tgApp) {
+    box.textContent = '';
+    const btn = el('button', 'btn btn--tg btn--wide', 'Войти через Telegram');
+    btn.type = 'button';
+    btn.addEventListener('click', () => telegramLogin({ initData: state.tgApp.initData }));
+    box.append(btn);
+  } else if (state.config.telegramBot) {
+    telegramWidget(box, 'onTelegramAuth');
+  } else {
+    return;
+  }
+  $('#tg-auth').hidden = false;
+}
+
+// Блок в кабинете: привязан ли Telegram, и если нет — привязать.
+function telegramSection() {
+  const user = state.user;
+  if (!user || (!state.config.telegramBot && !user.telegram)) return null;
+  const sec = profileSection('Telegram');
+  if (user.telegram) {
+    sec.append(el('p', 'tg-linked', `Привязан ${user.telegram} — входите через Telegram, бот пишет о заявках в друзья и старте ваших турниров.`));
+    return sec;
+  }
+  sec.append(el('p', 'hint', 'Привяжите Telegram, чтобы входить без пароля и получать от бота сообщения о заявках в друзья и старте турниров.'));
+  const box = el('div', 'tg-auth__box');
+  if (state.tgApp) {
+    const btn = el('button', 'btn btn--tg', 'Привязать этот Telegram');
+    btn.addEventListener('click', () => telegramLink({ initData: state.tgApp.initData }));
+    box.append(btn);
+  } else {
+    telegramWidget(box, 'onTelegramLink');
+  }
+  sec.append(box);
+  return sec;
+}
+
 // ——— старт ———
 
 (async function init() {
+  state.config = {};
+  const [tgApp, config] = await Promise.all([
+    telegramApp(),
+    fetch('/api/config').then((r) => r.json()).catch(() => ({})),
+  ]);
+  state.tgApp = tgApp;
+  state.config = config || {};
+
   const res = await fetch('/api/me');
   const data = await res.json().catch(() => ({}));
   if (data.user) {
     setUser(data.user);
     show(data.roomId ? 'table' : 'lobby');
     connectStream();
+    joinInvite();
+    // Открыли игру в Telegram под аккаунтом без привязки — привязываем молча.
+    if (tgApp && !data.user.telegram) post('/api/telegram/link', { initData: tgApp.initData });
+  } else if (tgApp && await telegramLogin({ initData: tgApp.initData })) {
+    // Вошли через Telegram одним касанием — без формы.
   } else {
     show('auth');
+    showInviteNote();
+    renderTelegramAuth();
   }
   if (window.innerWidth > 900) toggleLog(true);
 })();

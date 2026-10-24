@@ -1,7 +1,8 @@
 'use strict';
 const crypto = require('node:crypto');
 const { openStorage } = require('./db');
-const { freshStats, unlockNew, tierTotal, TIER_NAMES } = require('./achievements');
+const { freshStats, unlockNew, tierTotal, TIER_NAMES, category } = require('./achievements');
+const daily = require('./daily');
 
 const START_CHIPS = 10000;
 const RELOAD_CHIPS = 2000; // бесплатное пополнение для игроков без фишек
@@ -40,6 +41,7 @@ class Store {
     this.backend = openStorage(file);
     this.users = new Map();      // id -> игрок
     this.byName = new Map();     // имя в нижнем регистре -> id
+    this.byTg = new Map();       // id в Telegram -> id игрока
     this.sessions = new Map();   // токен -> { userId, created, seen, roomId }
 
     this.dirtyUsers = new Set();
@@ -57,12 +59,16 @@ class Store {
     this.load();
   }
 
+  // Папка с данными: рядом с базой лежит и снимок столов.
+  get dataDir() { return require('node:path').dirname(this.backend.where); }
+
   load() {
     const { users, sessions } = this.backend.load(SESSION_TTL);
     for (const user of users) {
       this.prepare(user);
       this.users.set(user.id, user);
       this.byName.set(user.name.toLowerCase(), user.id);
+      if (user.tg) this.byTg.set(user.tg.id, user.id);
     }
     this.convertLegacyFriends();
     for (const user of this.users.values()) {
@@ -228,12 +234,67 @@ class Store {
     const id = this.byName.get(String(name || '').trim().toLowerCase());
     const user = id && this.users.get(id);
     if (!user) return { error: 'Игрок с таким именем не найден' };
+    if (!user.hash) return { error: 'Этот аккаунт входит через Telegram' };
     const attempt = await scrypt(String(password || ''), user.salt);
     const stored = Buffer.from(user.hash, 'hex');
     if (attempt.length !== stored.length || !crypto.timingSafeEqual(attempt, stored)) {
       return { error: 'Неверный пароль' };
     }
     return { user };
+  }
+
+  // ——— Telegram ———
+
+  // Имя за столом из Telegram: только разрешённые символы, 3–16 знаков, без повторов.
+  nameFromTelegram(tg) {
+    const clean = (s) => String(s || '').replace(/[^\p{L}\p{N}_ -]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 16);
+    let base = clean(tg.username) || clean(tg.firstName);
+    if (base.length < 3) base = 'Игрок';
+    let name = base;
+    for (let n = 2; this.byName.has(name.toLowerCase()); n++) {
+      const tail = String(n);
+      name = `${base.slice(0, 16 - tail.length)}${tail}`;
+    }
+    return name;
+  }
+
+  // Вход через Telegram: свой аккаунт, а при первом входе — новый, без пароля.
+  telegramUser(tg) {
+    const known = this.byTg.get(tg.id);
+    if (known && this.users.has(known)) {
+      const u = this.users.get(known);
+      if (tg.username && u.tg.username !== tg.username) { u.tg.username = tg.username; this.touch(u); }
+      return { user: u, created: false };
+    }
+    const user = {
+      id: crypto.randomUUID(),
+      name: this.nameFromTelegram(tg),
+      salt: '',
+      hash: '',                       // пароля нет: такой аккаунт входит только через Telegram
+      chips: START_CHIPS,
+      handsPlayed: 0,
+      createdAt: Date.now(),
+      tg: { id: tg.id, username: tg.username || null },
+    };
+    this.prepare(user);
+    this.users.set(user.id, user);
+    this.byName.set(user.name.toLowerCase(), user.id);
+    this.byTg.set(tg.id, user.id);
+    this.touch(user);
+    return { user, created: true };
+  }
+
+  // Привязать Telegram к уже существующему аккаунту — чтобы входить и так, и так.
+  linkTelegram(userId, tg) {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    const other = this.byTg.get(tg.id);
+    if (other && other !== userId) return { error: 'Этот Telegram уже привязан к другому аккаунту' };
+    if (u.tg && u.tg.id !== tg.id) this.byTg.delete(u.tg.id);
+    u.tg = { id: tg.id, username: tg.username || null };
+    this.byTg.set(tg.id, userId);
+    this.touch(u);
+    return { ok: true };
   }
 
   // ——— сессии ———
@@ -313,6 +374,18 @@ class Store {
       s.bestHand = { value: r.result.value, name: r.result.name, cards: r.result.cards };
     }
     if (r.cash) s.cashNet += r.won - r.contributed;
+
+    // Задания дня.
+    daily.progress(u, 'hand');
+    if (r.won > 0) {
+      daily.progress(u, 'win');
+      if (r.showdown) daily.progress(u, 'showdownWin');
+      if (r.allIn) daily.progress(u, 'allInWin');
+      if (r.bb && r.won >= r.bb * 20) daily.progress(u, 'bigPot');
+    }
+    if (r.result && category(r.result.value) >= 4) daily.progress(u, 'straightPlus');
+    if (r.withFriend) daily.progress(u, 'friendHand');
+
     this.checkAchievements(u);
     this.touch(u);
   }
@@ -322,11 +395,31 @@ class Store {
     const u = this.users.get(userId);
     if (!u) return;
     const s = u.stats;
-    if (start) s.sngPlayed += 1;
-    if (prize > 0) { s.sngCashes += 1; s.sngPrizes += prize; }
+    if (start) { s.sngPlayed += 1; daily.progress(u, 'sngPlay'); }
+    if (prize > 0) { s.sngCashes += 1; s.sngPrizes += prize; daily.progress(u, 'sngCash'); }
     if (place === 1) s.sngWins += 1;
     this.checkAchievements(u);
     this.touch(u);
+  }
+
+  // ——— бонус и задания дня ———
+
+  claimBonus(userId) {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    const res = daily.claimBonus(u);
+    if (res.error) return res;
+    this.addChips(userId, res.reward);
+    return res;
+  }
+
+  claimQuest(userId, questId) {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    const res = daily.claimQuest(u, String(questId));
+    if (res.error) return res;
+    this.addChips(userId, res.reward);
+    return res;
   }
 
   checkAchievements(u) {
@@ -483,19 +576,24 @@ class Store {
       id: u.id, name: u.name, chips: u.chips, handsPlayed: u.handsPlayed,
       achievement: this.news.get(id) || null,   // последняя взятая ступень — клиент покажет всплывашку
       friendRequests: u.friendsIn.length,        // входящие заявки — значок на «Кабинете»
+      daily: daily.view(u),                      // бонус за вход и задания дня
+      telegram: u.tg ? (u.tg.username ? `@${u.tg.username}` : 'привязан') : null,
+      hasPassword: !!u.hash,
     };
   }
 
   // Готовое событие для потока: строка собирается один раз до следующего изменения.
+  // В полночь задания и бонус обновляются сами, поэтому кадр помнит, за какой он день.
   publicUserFrame(id) {
-    let frame = this.publicJson.get(id);
-    if (frame === undefined) {
+    const day = daily.dayKey();
+    let cached = this.publicJson.get(id);
+    if (cached === undefined || cached.day !== day) {
       const view = this.publicUser(id);
       if (!view) return null;
-      frame = `event: user\ndata: ${JSON.stringify(view)}\n\n`;
-      this.publicJson.set(id, frame);
+      cached = { day, frame: `event: user\ndata: ${JSON.stringify(view)}\n\n` };
+      this.publicJson.set(id, cached);
     }
-    return frame;
+    return cached.frame;
   }
 
   userVersion(id) {

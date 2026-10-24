@@ -747,6 +747,7 @@ class Table {
         allIn: p.allIn,
         showdown,
         result: showdown ? this.results.get(p) : null,
+        bb: this.bb,
       });
     }
     if (out.length) this.onHandEnd(out, this);
@@ -818,6 +819,8 @@ class Table {
       id: this.id,
       kind: this.tour ? 'sng' : 'cash',
       name: this.name,
+      invite: this.invite || null,       // код ссылки-приглашения за этот стол
+      private: !!this.private,
       owner: this.ownerName || null,
       tour: this.tour ? this.tour.publicState(now) : null,
       maxSeats: this.maxSeats,

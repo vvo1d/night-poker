@@ -36,6 +36,7 @@
       <button class="tab" data-mode="register" role="tab">Регистрация</button>
     </div>
 
+    <p class="invite-note" id="invite-note" hidden></p>
     <form id="auth-form" autocomplete="on">
       <label class="field">
         <span>Имя за столом</span>
@@ -49,6 +50,12 @@
       <p class="error" id="auth-error" hidden></p>
       <button class="btn btn--primary btn--wide" type="submit" id="auth-submit">Войти</button>
     </form>
+    <!-- Вход через Telegram: появляется, если на сервере настроен бот -->
+    <div class="tg-auth" id="tg-auth" hidden>
+      <div class="tg-auth__or"><span>или</span></div>
+      <div class="tg-auth__box" id="tg-login"></div>
+      <p class="hint">Аккаунт создастся сам, имя возьмём из Telegram. Бот сообщит о заявках в друзья и старте турниров.</p>
+    </div>
   </div>
 </section>
 
@@ -80,6 +87,9 @@
       </div>
       <button class="btn btn--primary" id="create-open">Создать стол</button>
     </div>
+    <!-- Бонус за вход и задания дня -->
+    <section class="today" id="today" aria-label="Сегодня" hidden></section>
+
     <div class="lobby__list">
       <div class="filters" role="tablist" id="lobby-filter">
         <button class="filter is-active" data-filter="all" role="tab">Все</button>
@@ -92,6 +102,10 @@
     </div>
 
     <aside class="board-top">
+      <div class="my-tables" id="my-tables" hidden>
+        <h3>Мои столы</h3>
+        <ul class="friends friends--mini" id="my-tables-list"></ul>
+      </div>
       <h3>Друзья</h3>
       <ul class="friends friends--mini friends--requests" id="requests-mini" hidden></ul>
       <ul class="friends friends--mini" id="friends-mini"></ul>
@@ -151,6 +165,7 @@
           <div class="menu__sep"></div>
           <button class="menu__item" id="menu-topup" role="menuitem">Докупить фишки</button>
           <button class="menu__item" id="menu-sitout" role="menuitem">Пропустить раздачи</button>
+          <button class="menu__item" id="menu-invite" role="menuitem">Пригласить друзей</button>
           <button class="menu__item" id="menu-bot" role="menuitem">Позвать бота</button>
           <button class="menu__item menu__item--danger" id="menu-stand" role="menuitem">Встать из-за стола</button>
         </div>
@@ -269,10 +284,31 @@
       </div>
     </div>
 
+    <label class="check">
+      <input type="checkbox" name="private">
+      <span><b>Приватный стол</b> — не виден в лобби, попасть можно только по ссылке-приглашению или к другу</span>
+    </label>
     <p class="dialog__note" id="create-note"></p>
     <div class="dialog__row">
       <button class="btn btn--ghost" value="cancel" type="submit">Отмена</button>
       <button class="btn btn--primary" value="ok" type="submit">Открыть стол</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Приглашение за стол -->
+<dialog id="invite-dialog" class="dialog">
+  <form method="dialog">
+    <h3>Пригласить за стол</h3>
+    <p class="dialog__note" id="invite-text">Отправьте ссылку друзьям — по ней откроется этот стол. Если у друга нет аккаунта, он зарегистрируется и сразу попадёт к вам.</p>
+    <div class="invite-link">
+      <input id="invite-link" readonly aria-label="Ссылка-приглашение">
+      <button class="btn btn--sm" type="button" id="invite-copy">Копировать</button>
+    </div>
+    <div class="dialog__row dialog__row--share">
+      <a class="btn btn--tg" id="invite-tg" target="_blank" rel="noopener">Отправить в Telegram</a>
+      <button class="btn" type="button" id="invite-share" hidden>Поделиться…</button>
+      <button class="btn btn--ghost" value="close" type="submit">Готово</button>
     </div>
   </form>
 </dialog>

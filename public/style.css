@@ -244,7 +244,38 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .board-top h3 { font-size: 15px; margin-bottom: 10px; }
 .board-top .hint { margin: 0; }
 
+/* ——— сегодня: бонус и задания ——— */
+
+.today { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: -12px; }
+.today__card {
+  display: flex; flex-direction: column; gap: 6px; padding: 14px 16px;
+  background: var(--ink-2); border: 1px solid var(--line); border-radius: 14px; min-width: 0;
+}
+.today__label { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.today__bonus.is-ready {
+  border-color: var(--brass);
+  background: radial-gradient(120% 120% at 0% 0%, rgba(201, 162, 74, 0.16), transparent 60%), var(--ink-2);
+}
+.today__amount { font-family: Fraunces, Georgia, serif; font-size: 26px; font-weight: 500; color: var(--brass); line-height: 1.1; }
+.today__sub { font-size: 12px; color: var(--muted); }
+.today__ladder { display: flex; gap: 4px; margin: 2px 0 4px; }
+.today__ladder i { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+.today__ladder i.is-on { background: var(--brass); }
+.today__card .btn { align-self: flex-start; margin-top: auto; }
+.today__title { font-size: 14px; color: var(--bone); line-height: 1.35; flex: 1; }
+.today__bar { height: 5px; border-radius: 999px; background: var(--ink-3); overflow: hidden; }
+.today__bar i { display: block; height: 100%; border-radius: 999px; background: var(--brass-dim); transition: width 300ms ease; }
+.today__quest.is-done .today__bar i { background: var(--strong); }
+.today__quest.is-done:not(.is-claimed) { border-color: rgba(79, 157, 106, 0.6); }
+.today__quest.is-claimed { opacity: 0.6; }
+.today__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; }
+.today__foot .btn { margin-top: 0; }
+
 /* ——— разделы лобби ——— */
+
+@media (max-width: 900px) and (min-width: 621px) {
+  .today { grid-template-columns: repeat(2, 1fr); }
+}
 
 .pages { display: flex; gap: 4px; margin-right: auto; margin-left: 28px; }
 .pages__tab {
@@ -924,6 +955,37 @@ strong, .num { font-variant-numeric: tabular-nums; }
 .dialog input[type="range"] { width: 100%; accent-color: var(--brass); }
 .dialog__row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
 .dialog--wide { width: min(440px, 94vw); }
+
+/* приглашения */
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted); margin: 4px 0 14px; cursor: pointer; }
+.check input { width: 16px; height: 16px; margin-top: 2px; accent-color: var(--brass); flex: 0 0 auto; }
+.check b { color: var(--text); font-weight: 500; }
+.invite-link { display: flex; gap: 8px; }
+.invite-link input {
+  flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--bone);
+  background: #0b1215; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+}
+.dialog__row--share { flex-wrap: wrap; }
+.dialog__row--share .btn { flex: 1; }
+.dialog__row--share .btn--tg { flex-basis: 100%; }
+.btn--tg { background: #2aabee; border-color: #2aabee; color: #fff; text-decoration: none; }
+.btn--tg:hover:not(:disabled) { background: #229ed9; border-color: #229ed9; }
+.tg-auth { margin-top: 18px; }
+.tg-auth__or { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+.tg-auth__or::before, .tg-auth__or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.tg-auth__box { display: flex; justify-content: center; min-height: 40px; margin-bottom: 10px; }
+.profile__section .tg-auth__box { justify-content: flex-start; }
+.tg-auth .hint { text-align: center; }
+.tg-linked { color: var(--text); font-size: 14px; margin: 0; }
+.tg-linked::before { content: '✓ '; color: var(--strong); }
+.invite-note {
+  margin: -8px 0 20px; padding: 10px 14px; border-radius: 10px; font-size: 14px;
+  color: var(--bone); background: rgba(201, 162, 74, 0.1); border: 1px solid var(--brass-dim);
+}
+.my-tables { margin-bottom: 22px; }
+.my-table { grid-template-columns: 1fr auto; }
+.my-table .friend__status { grid-column: 1; grid-row: 2; padding-left: 0; }
+.my-table .btn { grid-column: 2; grid-row: 1 / 3; }
 .dialog--profile {
   position: relative; width: min(820px, 94vw); max-height: 88vh; padding: 26px;
   scrollbar-width: thin; scrollbar-color: #2c414a transparent;
@@ -1060,6 +1122,9 @@ strong, .num { font-variant-numeric: tabular-nums; }
   .room { grid-template-columns: 1fr auto; }
   .room__seats { display: none; }
   .lobby__head { flex-direction: column; align-items: stretch; }
+  /* на телефоне карточки дня листаются вбок */
+  .today { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; margin: -8px -22px 0; padding: 0 22px 4px; scroll-padding: 0 22px; scrollbar-width: none; }
+  .today__card { flex: 0 0 78%; scroll-snap-align: start; }
   /* разделы встают второй строкой шапки — в одну не помещаются */
   .topbar:not(.topbar--table) { flex-wrap: wrap; row-gap: 8px; justify-content: flex-end; }
   .topbar:not(.topbar--table) .brand { display: none; }

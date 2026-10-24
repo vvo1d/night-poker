@@ -48,6 +48,10 @@ const MIGRATIONS = [
     ALTER TABLE users ADD COLUMN achievements TEXT NOT NULL DEFAULT '{}';
     ALTER TABLE users ADD COLUMN friends TEXT NOT NULL DEFAULT '[]';
   `),
+  // Привязка к Telegram: { id, username } или NULL.
+  (db) => db.exec(`
+    ALTER TABLE users ADD COLUMN telegram TEXT;
+  `),
 ];
 
 function parseJson(text, fallback) {
@@ -98,12 +102,13 @@ function sqliteBackend(file = DEFAULT_DB) {
 
   const sql = {
     saveUser: db.prepare(`INSERT INTO users
-      (id, name, name_lower, salt, hash, chips, hands_played, created_at, stats, achievements, friends)
-      VALUES ($id, $name, $nameLower, $salt, $hash, $chips, $hands, $created, $stats, $achievements, $friends)
+      (id, name, name_lower, salt, hash, chips, hands_played, created_at, stats, achievements, friends, telegram)
+      VALUES ($id, $name, $nameLower, $salt, $hash, $chips, $hands, $created, $stats, $achievements, $friends, $telegram)
       ON CONFLICT (id) DO UPDATE SET
-        name = excluded.name, name_lower = excluded.name_lower,
+        name = excluded.name, name_lower = excluded.name_lower, salt = excluded.salt, hash = excluded.hash,
         chips = excluded.chips, hands_played = excluded.hands_played,
-        stats = excluded.stats, achievements = excluded.achievements, friends = excluded.friends`),
+        stats = excluded.stats, achievements = excluded.achievements, friends = excluded.friends,
+        telegram = excluded.telegram`),
     saveSession: db.prepare(`INSERT INTO sessions (token, user_id, created, seen)
       VALUES ($token, $userId, $created, $seen)
       ON CONFLICT (token) DO UPDATE SET seen = excluded.seen`),
@@ -132,6 +137,7 @@ function sqliteBackend(file = DEFAULT_DB) {
         stats: parseJson(row.stats, {}),
         achievements: parseJson(row.achievements, {}),
         friends: parseJson(row.friends, []),
+        tg: row.telegram ? parseJson(row.telegram, null) : null,
       }));
       const sessions = sql.liveSessions.all(Date.now() - sessionTtl)
         .map((row) => [row.token, { userId: row.user_id, created: row.created, seen: row.seen, roomId: null }]);
@@ -151,6 +157,7 @@ function sqliteBackend(file = DEFAULT_DB) {
             achievements: JSON.stringify(u.achievements || {}),
             // Друзья и заявки в обе стороны — одним полем.
             friends: JSON.stringify({ list: u.friends || [], in: u.friendsIn || [], out: u.friendsOut || [] }),
+            telegram: u.tg ? JSON.stringify(u.tg) : null,
           });
         }
         for (const [token, s] of sessions) {
