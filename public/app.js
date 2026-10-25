@@ -735,6 +735,7 @@ function openFriendInvite() {
   $('#invite-title').textContent = 'Пригласить друга';
   // В поле — читаемая ссылка с именем кириллицей: браузеры и мессенджеры её понимают.
   try { $('#invite-link').value = decodeURI(url); } catch { $('#invite-link').value = url; }
+  showQr(url);
   $('#invite-tg').href = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
   const share = $('#invite-share');
   share.hidden = !navigator.share;
@@ -3081,6 +3082,47 @@ function inviteUrl(code) {
   return `${location.origin}/t/${code}`;
 }
 
+// QR-код ссылки. Библиотека (qrcode-generator, MIT) грузится только при первом
+// приглашении — остальным страницам она не нужна.
+let qrLib = null;
+function loadQr() {
+  if (!qrLib) {
+    qrLib = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = '/vendor/qrcode.js';
+      s.onload = () => resolve(window.qrcode);
+      s.onerror = () => { qrLib = null; reject(new Error('QR не загрузился')); };
+      document.head.append(s);
+    });
+  }
+  return qrLib;
+}
+
+// Рисуем сами — одним SVG-путём, чёрным по белому с полями: так код читает любая камера.
+// Ссылка должна быть в ASCII (кириллицу кодируем): библиотека пишет байты как есть.
+async function showQr(url) {
+  const box = $('#invite-qr');
+  box.textContent = '';
+  box.closest('.invite-qr').hidden = false;
+  try {
+    const qrcode = await loadQr();
+    const qr = qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    const n = qr.getModuleCount();
+    const pad = 4;
+    let d = '';
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) if (qr.isDark(y, x)) d += `M${x + pad} ${y + pad}h1v1h-1z`;
+    }
+    const size = n + pad * 2;
+    box.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges" aria-hidden="true">`
+      + `<rect width="${size}" height="${size}" fill="#fff"/><path d="${d}" fill="#111"/></svg>`;
+  } catch {
+    box.closest('.invite-qr').hidden = true;
+  }
+}
+
 function openInvite(t) {
   if (!t.invite) return;
   const url = inviteUrl(t.invite);
@@ -3089,6 +3131,7 @@ function openInvite(t) {
     : `Садись ко мне за стол «${t.name}» в THPoker — покер без денег`;
   $('#invite-title').textContent = 'Пригласить за стол';
   $('#invite-link').value = url;
+  showQr(url);
   $('#invite-tg').href = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
   const share = $('#invite-share');
   share.hidden = !navigator.share;
