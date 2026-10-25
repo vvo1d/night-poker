@@ -8,10 +8,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const { Store } = require('./src/store');
+const { Store, REF_HANDS } = require('./src/store');
+const { CATALOG: SHOP_CATALOG } = require('./src/shop');
 const { Table, setEvalBudget, REACTIONS, PHRASES } = require('./src/table');
 const { BOT_NAMES } = require('./src/bot');
-const { Tournament, SNG_STACK, SNG_TIMEOUT, SNG_BUY_INS } = require('./src/tournament');
+const { Tournament, SNG_STACK, SNG_TIMEOUT, SNG_BUY_INS, SPIN_STACK, SPIN_TIMEOUT } = require('./src/tournament');
 const { ACHIEVEMENTS, achievementView, tierTotal } = require('./src/achievements');
 const { Snapshot, mttRefunds, tableRecord, refunds } = require('./src/snapshot');
 const telegram = require('./src/telegram');
@@ -63,6 +64,10 @@ const SNG_SEATS = [6, 9];
 const TIMEOUTS = [12, 25, 40];
 
 const store = new Store();
+// Приглашённый друг сыграл первые раздачи — пригласившему пишет бот (если Telegram привязан).
+store.onReferral = (inviter, friend, paid) => notify(inviter.id, paid
+  ? `${friend.name} сыграл ${REF_HANDS} раздач по вашему приглашению — вам +${paid} фишек!`
+  : `${friend.name} сыграл ${REF_HANDS} раздач по вашему приглашению.`);
 
 // Столы живут, пока они нужны: свой стол игрок заводит сам, пустой закрывается.
 const CASH_IDLE_MS = 5 * 60_000;     // пустой кэш-стол ждёт столько, прежде чем закрыться
@@ -71,6 +76,18 @@ const SNG_DONE_MS = 2 * 60_000;      // законченный турнир ещ
 const TABLES_PER_USER = 3;           // сколько своих столов без игроков можно держать открытыми
 const TABLES_PER_USER_MAX = 10;      // и сколько своих столов всего — даже если за всеми играют
 const TABLES_MAX = 5000;
+const BOTS_ONLY_MS = 60_000;         // стол, где остались одни боты, столько ждёт людей, потом боты уходят
+const QUICK_PLAYERS = 5;             // «Играть сейчас»: столько игроков за столом вместе с вами (добираем ботами)
+const HOUSE_SNG_FILL_MS = 30_000;    // sit-n-go заведения: через столько после первой записи места занимают боты
+// Sit-n-go заведения — всегда есть свободный турнир на каждый взнос.
+const HOUSE_SNGS = [
+  { key: 'sng6-100', seats: 6, buyIn: 100, name: 'Быстрый турнир' },
+  { key: 'sng6-500', seats: 6, buyIn: 500, name: 'Средний турнир' },
+  { key: 'sng9-1000', seats: 9, buyIn: 1000, name: 'Большой турнир' },
+  // Спины — на троих, места добираются быстрее: это формат «сел и играешь».
+  { key: 'spin-100', seats: 3, buyIn: 100, name: 'Спин', spin: true, fillMs: 10_000 },
+  { key: 'spin-1000', seats: 3, buyIn: 1000, name: 'Спин', spin: true, fillMs: 10_000 },
+];
 const LOBBY_LIMIT = 150;             // столько столов уходит в лобби — самые живые
 const EVAL_PER_TICK = 8;             // тяжёлых разборов руки за тик (по ~4 мс каждый)
 
@@ -96,7 +113,7 @@ function dropTable(table) {
 }
 
 function createTable(cfg, {
-  owner = null, sng = 0, buyIn, invite = null, privateTable = false, createdAt = 0, mttTour = null, mttId = null,
+  owner = null, sng = 0, buyIn, spin = false, invite = null, privateTable = false, createdAt = 0, mttTour = null, mttId = null,
 } = {}) {
   const n = ++tableSeq;
   // Стол турнира по расписанию получает «переходник» от турнира, sit-n-go — свой Tournament.
@@ -113,7 +130,7 @@ function createTable(cfg, {
     onPlace: (player, place, prize) => {
       if (!player.isBot) store.recordSng(player.userId, { place, prize, humans: tour.humans, seats: tour.seats });
     },
-  }, buyIn) : null);
+  }, buyIn, { spin }) : null);
   const table = new Table({ ...cfg, id: cfg.id || `t${n}`, tour }, {
     onChipsReturn: (player, chips) => {
       if (player.isBot) return;
@@ -139,6 +156,7 @@ function createTable(cfg, {
       if (player.isBot) return;
       playerTable.set(player.userId, t);
       player.avatar = store.avatarUrl(store.user(player.userId));   // аватар — на месте за столом
+      player.frame = store.frameOf(store.user(player.userId));       // и рамка из магазина
     },
     // Пересаженного в турнире уже записали за новый стол — старый не должен его стереть.
     onUnseat: (player, t) => { if (!player.isBot && playerTable.get(player.userId) === t) playerTable.delete(player.userId); },
@@ -178,12 +196,7 @@ function createUserTable(user, body) {
     if (!SNG_SEATS.includes(seats)) return { error: 'Sit-n-go бывает на 6 или 9 мест' };
     const buyIn = Number(body.buyIn);
     if (!SNG_BUY_INS.includes(buyIn)) return { error: 'Выберите взнос' };
-    const table = createTable({
-      name: name || `Sit-n-go на ${seats}`,
-      maxSeats: seats, sb: 0, bb: 0, minBuyIn: SNG_STACK, maxBuyIn: SNG_STACK, timeout: SNG_TIMEOUT,
-    }, { owner: user, sng: seats, buyIn, privateTable });
-    [table.sb, table.bb] = table.tour.blinds();
-    return table;
+    return createSngTable(name || `Sit-n-go на ${seats}`, seats, buyIn, { owner: user, privateTable });
   }
 
   const seats = Number(body.seats);
@@ -199,10 +212,132 @@ function createUserTable(user, body) {
   }, { owner: user, privateTable });
 }
 
-// Пустые столы игроков закрываются, столы заведения стоят всегда.
+function createSngTable(name, seats, buyIn, opts = {}) {
+  const stack = opts.spin ? SPIN_STACK : SNG_STACK;
+  const table = createTable({
+    name, maxSeats: seats, sb: 0, bb: 0, minBuyIn: stack, maxBuyIn: stack, timeout: opts.spin ? SPIN_TIMEOUT : SNG_TIMEOUT,
+  }, { ...opts, sng: seats, buyIn });
+  [table.sb, table.bb] = table.tour.blinds();
+  return table;
+}
+
+// Посадить бота на первое свободное место.
+function addBotTo(table) {
+  const seat = table.seats.findIndex((s) => s === null);
+  if (seat < 0) return { error: 'Свободных мест нет' };
+  const taken = new Set(table.players().map((p) => p.name));
+  const name = BOT_NAMES.find((n) => !taken.has(n)) || `Бот-${seat + 1}`;
+  const stack = table.tour ? table.tour.stack : Math.round((table.minBuyIn + table.maxBuyIn) / 2);
+  return table.sit({ id: `bot-${crypto.randomUUID()}`, name, isBot: true }, seat, stack);
+}
+
+// Посадить игрока: взнос или закупка списывается из банка до посадки —
+// последний участник sit-n-go сразу запускает турнир.
+function seatUser(user, table, buyIn, seat) {
+  const tour = table.tour;
+  if (tour && tour.status !== 'registering') return { error: 'Регистрация на турнир закрыта' };
+  const pay = tour ? tour.buyIn : buyIn;
+  const stack = tour ? tour.stack : pay;
+  const fresh = store.user(user.id);
+  if (pay > fresh.chips) return { error: 'В банке недостаточно фишек' };
+  if (!Number.isInteger(seat) || seat < 0) seat = table.seats.findIndex((x) => x === null);
+  if (seat < 0) return { error: 'Свободных мест нет' };
+  store.addChips(user.id, -pay);
+  const res = table.sit({ id: user.id, name: user.name }, seat, stack);
+  if (res.error) { store.addChips(user.id, pay); return res; }
+  store.markSit(user);
+  // Sit-n-go заведения: таймер добора ботов идёт с первой записи — сразу, а не со следующего обхода.
+  if (table.houseSng && tour.status === 'registering' && !tour.fillAt) { tour.fillAt = Date.now() + table.fillMs; table.touch(); }
+  return { ok: true };
+}
+
+// «Играть сейчас»: кэш-стол заведения по банку игрока — закупка не больше
+// четверти банка, — и боты, чтобы раздача началась сразу.
+function quickPlay(user, session) {
+  const seated = tableOfUser(user.id);
+  if (seated) { session.roomId = seated.id; return { ok: true, roomId: seated.id }; }
+  const chips = store.user(user.id).chips;
+  const cash = [...tables.values()]
+    .filter((t) => t.house && !t.tour && t.maxSeats >= 4 && t.occupied() < t.maxSeats)
+    .sort((a, b) => a.bb - b.bb);
+  if (!cash.length) return { error: 'Свободных столов нет, попробуйте позже' };
+  const fit = cash.filter((t) => t.maxBuyIn * 4 <= chips);
+  const table = fit.length ? fit[fit.length - 1] : cash[0];
+  const buyIn = Math.min(table.maxBuyIn, chips);
+  if (buyIn < table.minBuyIn) return { error: 'В банке мало фишек — пополните его в шапке', reload: true };
+  const res = seatUser(user, table, buyIn);
+  if (res.error) return res;
+  while (table.occupied() < Math.min(QUICK_PLAYERS, table.maxSeats) && !addBotTo(table).error) { /* добираем ботов */ }
+  session.roomId = table.id;
+  return { ok: true, roomId: table.id };
+}
+
+// «Ещё sit-n-go»: записаться в свободный турнир заведения — с тем же взносом
+// или самым близким, который по карману.
+function quickSng(user, session, buyIn, spin = false) {
+  const seated = tableOfUser(user.id);
+  if (seated) {
+    if (!seated.tour) return { error: 'Сначала встаньте из-за кэш-стола' };
+    if (seated.tour.status === 'running') return { error: 'Вы ещё играете в турнире' };
+    seated.leave(user.id);   // запись на другой турнир отменяется, взнос — в банк
+  }
+  const chips = store.user(user.id).chips;
+  const open = [...tables.values()].filter((t) => t.houseSng && t.tour.status === 'registering'
+    && t.tour.spin === spin && t.occupied() < t.maxSeats && t.tour.buyIn <= chips);
+  if (!open.length) return { error: 'В банке не хватает на взнос' };
+  open.sort((a, b) => Math.abs(a.tour.buyIn - buyIn) - Math.abs(b.tour.buyIn - buyIn));
+  const res = seatUser(user, open[0]);
+  if (res.error) return res;
+  session.roomId = open[0].id;
+  return { ok: true, roomId: open[0].id };
+}
+
+// Sit-n-go заведения: у каждого шаблона всегда есть турнир с открытой записью.
+// Записался хотя бы один человек — через полминуты свободные места занимают боты
+// и турнир стартует. Ушли все люди — таймер сбрасывается.
+function maintainHouseSngs(now) {
+  for (const tpl of HOUSE_SNGS) {
+    const open = [...tables.values()].find((t) => t.houseSng === tpl.key && t.tour.status === 'registering');
+    if (!open) {
+      const table = createSngTable(tpl.name, tpl.seats, tpl.buyIn, { spin: !!tpl.spin });
+      table.houseSng = tpl.key;
+      table.fillMs = tpl.fillMs || HOUSE_SNG_FILL_MS;
+      continue;
+    }
+    const tour = open.tour;
+    // Кадр стола собирается заново только после touch — иначе таймер не дойдёт до игроков.
+    if (!open.humans()) { if (tour.fillAt) { tour.fillAt = 0; open.touch(); } continue; }
+    if (!tour.fillAt) { tour.fillAt = now + open.fillMs; open.touch(); }
+    if (now >= tour.fillAt) {
+      while (open.occupied() < open.maxSeats && !addBotTo(open).error) { /* до полного стола — турнир стартует */ }
+      open.maybeStartHand();
+    }
+  }
+}
+
+// Боты без людей: за кэш-столом, где не осталось ни одного человека, боты
+// ждут минуту и уходят — иначе стол играл бы сам с собой вечно.
+// Sit-n-go заведения, из которого вылетели все люди, доигрывать незачем.
+function dropLonelyBots(now) {
+  for (const table of tables.values()) {
+    if (table.mttId || table.humans() || !table.occupied()) { table.botsOnlyAt = 0; continue; }
+    if (table.tour && !(table.houseSng && table.tour.status === 'running')) continue;
+    if (!table.botsOnlyAt) { table.botsOnlyAt = now; continue; }
+    if (now - table.botsOnlyAt < BOTS_ONLY_MS) continue;
+    if (table.tour) { dropTable(table); continue; }
+    for (const p of table.players()) {
+      if (p.inHand && table.phase !== 'idle') p.leaving = true;
+      else table.removePlayer(p);
+    }
+  }
+}
+
+// Пустые столы игроков закрываются, столы заведения стоят всегда
+// (кроме сыгранных sit-n-go заведения — на их место встают новые).
 function dropIdleTables(now) {
   for (const table of tables.values()) {
-    if (table.house || table.mttId || table.occupied()) continue;
+    if ((table.house && !table.houseSng) || table.mttId || table.occupied()) continue;
+    if (table.houseSng && table.tour.status === 'registering') continue;
     const tour = table.tour;
     const idle = tour
       ? (tour.status === 'finished' ? now - tour.finishedAt > SNG_DONE_MS
@@ -407,6 +542,7 @@ function refreshSeatAvatar(userId) {
   const p = table && table.byUser(userId);
   if (!p) return;
   p.avatar = store.avatarUrl(store.user(userId));
+  p.frame = store.frameOf(store.user(userId));
   table.touch();
 }
 
@@ -642,6 +778,10 @@ function tableInfo(table) {
       level: tour.level + 1,
       left: table.occupied(),
       winner: tour.status === 'finished' && tour.places[0] ? tour.places[0].name : null,
+      fillLeft: tour.fillAt ? Math.max(0, tour.fillAt - Date.now()) : 0,
+      fillMs: table.fillMs || 0,
+      spin: tour.spin,
+      multiplier: tour.multiplier,
     } : null,
   };
 }
@@ -897,6 +1037,10 @@ async function handleCommand(ctx, body) {
       session.roomId = table.id;
       return { ok: true, roomId: table.id };
     }
+    case 'quickPlay':
+      return quickPlay(user, session);
+    case 'quickSng':
+      return quickSng(user, session, Number(body.buyIn) || 0, !!body.spin);
     case 'createTable': {
       const seated = tableOfUser(user.id);
       if (seated) return { error: 'Сначала встаньте из-за текущего стола' };
@@ -922,23 +1066,8 @@ async function handleCommand(ctx, body) {
       const table = room();
       if (!table) return { error: 'Сначала войдите в комнату' };
       if (tableOfUser(user.id) && tableOfUser(user.id) !== table) return { error: 'Вы уже сидите за другим столом' };
-      const tour = table.tour;
-      if (tour && tour.status !== 'registering') return { error: 'Регистрация на турнир закрыта' };
-      // В турнире платят взнос, а играют турнирным стеком.
-      const pay = tour ? tour.buyIn : Math.round(Number(body.buyIn) || 0);
-      const stack = tour ? tour.stack : pay;
-      const fresh = store.user(user.id);
-      if (pay > fresh.chips) return { error: 'В банке недостаточно фишек' };
-      // Место можно не выбирать: тогда сажаем на первое свободное.
-      let seat = Number(body.seat);
-      if (!Number.isInteger(seat) || seat < 0) seat = table.seats.findIndex((x) => x === null);
-      if (seat < 0) return { error: 'Свободных мест нет' };
-      // Взнос списываем до посадки: последний участник сразу запускает турнир.
-      store.addChips(user.id, -pay);
-      const res = table.sit({ id: user.id, name: user.name }, seat, stack);
-      if (!res.error) store.markSit(user);
-      if (res.error) { store.addChips(user.id, pay); return res; }
-      return { ok: true };
+      // В турнире платят взнос, а играют турнирным стеком. Место можно не выбирать.
+      return seatUser(user, table, Math.round(Number(body.buyIn) || 0), Number(body.seat));
     }
     case 'standUp': {
       const table = room();
@@ -983,12 +1112,7 @@ async function handleCommand(ctx, body) {
       const table = room();
       if (!table) return { error: 'Сначала войдите в комнату' };
       if (table.tour && table.tour.status !== 'registering') return { error: 'Турнир уже идёт' };
-      const seat = table.seats.findIndex((s) => s === null);
-      if (seat < 0) return { error: 'Свободных мест нет' };
-      const taken = new Set(table.players().map((p) => p.name));
-      const name = BOT_NAMES.find((n) => !taken.has(n)) || `Бот-${seat + 1}`;
-      const stack = table.tour ? table.tour.stack : Math.round((table.minBuyIn + table.maxBuyIn) / 2);
-      return table.sit({ id: `bot-${crypto.randomUUID()}`, name, isBot: true }, seat, stack);
+      return addBotTo(table);
     }
     case 'kickBot': {
       const table = room();
@@ -1037,6 +1161,12 @@ async function handleCommand(ctx, body) {
       return store.claimBonus(user.id);
     case 'claimQuest':
       return store.claimQuest(user.id, body.id);
+    case 'shopBuy':
+    case 'shopEquip': {
+      const res = cmd === 'shopBuy' ? store.buyItem(user.id, body.id) : store.equipItem(user.id, body.id);
+      if (res.ok && res.item.kind === 'frame') refreshSeatAvatar(user.id);
+      return res;
+    }
     case 'addFriend': {
       const res = store.addFriend(user.id, body.name);
       const other = store.byNameLower(body.name);
@@ -1094,7 +1224,7 @@ const server = http.createServer(async (req, res) => {
       const wait = isDirectLocal(req) ? 0 : loginGuard.canRegister(ip);
       if (wait) return send(res, 429, { error: `С этого адреса уже много новых аккаунтов. Попробуйте через ${waitText(wait)}` });
       const body = await readBody(req);
-      const { user, error } = await store.register(body.name, body.password, body.source);
+      const { user, error } = await store.register(body.name, body.password, body.source, body.friend);
       if (error) return send(res, 400, { error });
       loginGuard.registered(ip);
       const token = store.createSession(user.id);
@@ -1121,6 +1251,7 @@ const server = http.createServer(async (req, res) => {
         reactions: REACTIONS,
         phrases: PHRASES,
         metrika: METRIKA_ID || null,
+        shop: SHOP_CATALOG,
       });
     }
 
@@ -1129,7 +1260,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const tg = telegramIdentity(body);
       if (!tg) return send(res, 400, { error: 'Telegram не подтвердил вход — попробуйте ещё раз' });
-      const { user, created, error } = store.telegramUser(tg, body.source);
+      const { user, created, error } = store.telegramUser(tg, body.source, body.friend);
       if (error) return send(res, 403, { error });
       const token = store.createSession(user.id);
       return send(res, 200, { user: store.publicUser(user.id), created }, { 'Set-Cookie': sessionCookie(token) });
@@ -1392,12 +1523,7 @@ const admin = createAdmin({
       mtts.tick();
     } else if (body.action === 'bots') {
       if (mtt.status !== 'registering') { send(res, 400, { error: 'Регистрация закрыта' }); return true; }
-      const count = Math.min(50, Math.max(1, Number(body.count) || 5));
-      for (let i = 0; i < count; i++) {
-        const n = mtt.entries.size + 1;
-        const userId = `bot-${crypto.randomUUID()}`;
-        mtt.entries.set(userId, { userId, name: `${BOT_NAMES[n % BOT_NAMES.length]}-${n}`, isBot: true });
-      }
+      mtt.addBots(Math.min(50, Math.max(1, Number(body.count) || 5)));
     } else {
       send(res, 400, { error: 'Неизвестное действие' });
       return true;
@@ -1575,6 +1701,8 @@ function maintain(now) {
   }
 
   dropIdleTables(now);
+  dropLonelyBots(now);
+  maintainHouseSngs(now);
   mtts.tick(now);
   saveSnapshot();
   store.seasonSweep(now);           // в полночь первого числа — итоги сезона

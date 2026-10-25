@@ -99,7 +99,10 @@
         <h2>Столы</h2>
         <p>Садитесь за готовый стол или откройте свой — с нужными блайндами. В sit-n-go играют на вылет за призовой фонд.</p>
       </div>
-      <button class="btn btn--primary" id="create-open">Создать стол</button>
+      <div class="lobby__actions">
+        <button class="btn btn--primary" id="quick-play" title="Стол по вашему банку, с ботами — раздача начнётся сразу">Играть сейчас</button>
+        <button class="btn" id="create-open">Создать стол</button>
+      </div>
     </div>
     <!-- Бонус за вход и задания дня -->
     <section class="today" id="today" aria-label="Сегодня" hidden></section>
@@ -211,6 +214,11 @@
         <div class="felt__msg" id="felt-msg"></div>
       </div>
       <div id="bets"></div>
+      <div class="spin-reveal" id="spin-reveal" hidden aria-live="polite">
+        <span class="spin-reveal__label">Множитель</span>
+        <strong id="spin-reveal-x">×2</strong>
+        <span class="spin-reveal__prize" id="spin-reveal-prize"></span>
+      </div>
       <div id="seats"></div>
       <div class="fly" id="fly" aria-hidden="true"></div>
 
@@ -341,7 +349,7 @@
 <!-- Приглашение за стол -->
 <dialog id="invite-dialog" class="dialog">
   <form method="dialog">
-    <h3>Пригласить за стол</h3>
+    <h3 id="invite-title">Пригласить за стол</h3>
     <p class="dialog__note" id="invite-text">Отправьте ссылку друзьям — по ней откроется этот стол. Если у друга нет аккаунта, он зарегистрируется и сразу попадёт к вам.</p>
     <div class="invite-link">
       <input id="invite-link" readonly aria-label="Ссылка-приглашение">
@@ -359,6 +367,21 @@
 <dialog id="profile-dialog" class="dialog dialog--profile">
   <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="profile-close" title="Закрыть" aria-label="Закрыть"></button>
   <div id="profile-body"></div>
+</dialog>
+
+<!-- Итог турнира: место, приз и сразу — следующий турнир -->
+<dialog id="result-dialog" class="dialog result">
+  <form method="dialog">
+    <div class="result__place" id="result-place"></div>
+    <h3 id="result-title"></h3>
+    <p class="dialog__note" id="result-note"></p>
+    <div class="result__sum" id="result-sum"></div>
+    <div class="dialog__row result__row">
+      <button class="btn btn--primary" type="button" id="result-again"></button>
+      <button class="btn" type="button" id="result-lobby">В лобби</button>
+      <button class="btn btn--ghost" value="close" type="submit">Смотреть стол</button>
+    </div>
+  </form>
 </dialog>
 
 <div class="toast" id="toast" hidden></div>

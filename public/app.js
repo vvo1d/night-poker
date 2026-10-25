@@ -115,6 +115,16 @@ function captureSource(fallback) {
 }
 captureSource(new URLSearchParams(location.search).get('join') ? 'invite' : null);
 
+// Пришёл по личной ссылке друга (?friend=Имя) — запоминаем до регистрации.
+const FRIEND_KEY = 'thp-friend';
+try {
+  const friend = new URLSearchParams(location.search).get('friend');
+  if (friend && !localStorage.getItem(FRIEND_KEY)) localStorage.setItem(FRIEND_KEY, friend.slice(0, 40));
+} catch { /* без памяти — без пригласившего */ }
+function currentFriend() {
+  try { return localStorage.getItem(FRIEND_KEY); } catch { return null; }
+}
+
 function currentSource() {
   try { return localStorage.getItem(SOURCE_KEY); } catch { return null; }
 }
@@ -145,6 +155,7 @@ function setUser(user) {
   $('#lobby-chips').textContent = fmt(user.chips);
   $('#table-chips').textContent = fmt(user.chips);
   $('#reload-chips').hidden = user.chips >= 200;
+  applyLook(user.shop);
   // Новая ачивка. Ту, что открылась до входа на страницу, заново не показываем.
   const ach = user.achievement;
   if (ach && state.achSeen !== undefined && ach.at > state.achSeen) {
@@ -176,8 +187,17 @@ function setUser(user) {
       }
     }
     state.daily = user.daily;
-    renderToday(user.daily);
+    renderToday(user.daily, user.referral);
   }
+
+  // Награда за приглашение: всплывашка, если она пришла, пока страница открыта.
+  const news = user.referral && user.referral.news;
+  if (news && state.refSeen !== undefined && news.at > state.refSeen) {
+    toast(news.invitee
+      ? `+${fmt(news.amount)} фишек — подарок за первые раздачи по приглашению ${news.name}`
+      : `${news.name} сыграл первые раздачи по вашему приглашению${news.amount ? ` — вам +${fmt(news.amount)}` : ''}`, { good: true });
+  }
+  state.refSeen = Math.max(state.refSeen || 0, news ? news.at : 0);
   if (before !== null && before !== user.chips) {
     retrigger($('#lobby-chips'), 'is-bump');
     retrigger($('#table-chips'), 'is-bump');
@@ -240,7 +260,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
 $('#auth-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
-  const payload = { name: form.name.value, password: form.password.value, source: currentSource() };
+  const payload = { name: form.name.value, password: form.password.value, source: currentSource(), friend: currentFriend() };
   const { ok, data } = await post(authMode === 'login' ? '/api/login' : '/api/register', payload);
   if (!ok || data.error) {
     const err = $('#auth-error');
@@ -351,6 +371,11 @@ function seatDots(seats) {
 function roomMeta(room) {
   if (room.kind === 'sng') {
     const sng = room.sng;
+    if (sng.spin) {
+      return sng.multiplier
+        ? `Спин на троих · взнос ${fmt(sng.buyIn)} · выпало ×${sng.multiplier} — приз ${fmt(sng.buyIn * sng.multiplier)}`
+        : `Спин на троих · взнос ${fmt(sng.buyIn)} · приз — взнос ×2…×100, всё победителю`;
+    }
     return `Sit-n-go на ${room.maxSeats} · взнос ${fmt(sng.buyIn)} · призы ${sng.prizes.map(fmt).join(' / ')}`;
   }
   const who = room.house ? 'стол заведения' : `открыл ${room.owner}`;
@@ -361,7 +386,12 @@ function roomStatus(room) {
   const taken = room.seats.filter(Boolean).length;
   if (room.kind === 'sng') {
     const sng = room.sng;
-    if (sng.status === 'registering') return { text: `Регистрация ${taken}/${room.maxSeats}`, hot: false };
+    if (sng.status === 'registering') {
+      // Sit-n-go заведения не ждёт полного стола: свободные места займут боты.
+      if (sng.fillLeft > 0) return { text: `Регистрация ${taken}/${room.maxSeats} · старт через ~${Math.ceil(sng.fillLeft / 1000)} с`, hot: true };
+      if (room.house) return { text: `Регистрация ${taken}/${room.maxSeats} · старт через ${Math.round((sng.fillMs || 30000) / 1000)} с после записи`, hot: false };
+      return { text: `Регистрация ${taken}/${room.maxSeats}`, hot: false };
+    }
     if (sng.status === 'running') {
       return { text: `Идёт · уровень ${sng.level} · ${fmt(room.sb)}/${fmt(room.bb)} · осталось ${sng.left}`, hot: true };
     }
@@ -383,7 +413,7 @@ function renderLobby(data) {
 
     const left = el('div');
     const name = el('div', 'room__name', room.name);
-    if (room.kind === 'sng') name.append(el('span', 'room__tag', 'турнир'));
+    if (room.kind === 'sng') name.append(el('span', `room__tag${room.sng.spin ? ' room__tag--spin' : ''}`, room.sng.spin ? 'до ×100' : 'турнир'));
     left.append(name);
     left.append(el('div', 'room__meta', roomMeta(room)));
     li.append(left);
@@ -474,7 +504,7 @@ function renderMtts() {
 
     const foot = el('div', 'mtt__foot');
     foot.append(el('span', 'mtt__count', m.status === 'registering'
-      ? `записалось ${fmt(m.registered)} · нужно от ${m.minPlayers}`
+      ? `записалось ${fmt(m.registered)}${m.registered < m.minPlayers ? ' · недостающих добавят боты' : ''}`
       : m.myPlace ? `ваше место — ${m.myPlace.place}${m.myPlace.prize ? `, приз ${fmt(m.myPlace.prize)}` : ''}` : ''));
     if (m.status === 'registering') {
       const btn = el('button', `btn btn--sm ${m.me ? 'btn--ghost' : 'btn--primary'}`, m.me ? 'Отменить запись' : 'Записаться');
@@ -514,7 +544,7 @@ setInterval(() => {
 
 // ——— сегодня: бонус за вход и задания дня ———
 
-function renderToday(daily) {
+function renderToday(daily, referral) {
   const box = $('#today');
   box.hidden = false;
   box.textContent = '';
@@ -564,6 +594,51 @@ function renderToday(daily) {
     card.append(foot);
     box.append(card);
   }
+  if (referral) box.append(referralCard(referral));
+}
+
+// Приглашение друга: новичку — сколько раздач до подарка, остальным — позвать друга.
+function referralCard(r) {
+  const card = el('article', 'today__card today__quest today__ref');
+  if (r.invitedBy && r.handsLeft > 0) {
+    card.append(el('span', 'today__label', 'Подарок от друга'));
+    card.append(el('span', 'today__title', `Вас пригласил ${r.invitedBy}: сыграйте ${r.hands} раздач`));
+    const bar = el('span', 'today__bar');
+    const fill = el('i');
+    fill.style.width = `${Math.round(((r.hands - r.handsLeft) / r.hands) * 100)}%`;
+    bar.append(fill);
+    card.append(bar);
+    card.append(el('span', 'today__sub', `ещё ${fmt(r.handsLeft)} · +${fmt(r.reward)} вам и другу`));
+    return card;
+  }
+  card.append(el('span', 'today__label', 'Пригласите друга'));
+  card.append(el('span', 'today__title', `Друг сыграет ${r.hands} раздач — вам обоим по ${fmt(r.reward)}`));
+  const foot = el('div', 'today__foot');
+  foot.append(el('span', 'today__sub', r.count ? `Пришли ${fmt(r.count)} · +${fmt(r.earned)}` : 'Ссылка — в один клик'));
+  const btn = el('button', 'btn btn--sm btn--primary', 'Позвать');
+  btn.addEventListener('click', openFriendInvite);
+  foot.append(btn);
+  card.append(foot);
+  return card;
+}
+
+// Личная ссылка-приглашение: по ней новичок регистрируется и сразу становится другом.
+function openFriendInvite() {
+  if (!state.user) return;
+  const url = `${location.origin}/?friend=${encodeURIComponent(state.user.name)}`;
+  const r = state.user.referral || { hands: 20, reward: 2000 };
+  const text = 'Сыграем в покер? THPoker — бесплатно, на фишки, прямо в браузере';
+  $('#invite-title').textContent = 'Пригласить друга';
+  // В поле — читаемая ссылка с именем кириллицей: браузеры и мессенджеры её понимают.
+  try { $('#invite-link').value = decodeURI(url); } catch { $('#invite-link').value = url; }
+  $('#invite-tg').href = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+  const share = $('#invite-share');
+  share.hidden = !navigator.share;
+  share.onclick = () => navigator.share({ title: 'THPoker', text, url }).catch(() => {});
+  $('#invite-text').textContent = `Друг зарегистрируется по ссылке и сразу окажется у вас в друзьях. Когда он сыграет ${r.hands} раздач, вы оба получите по ${fmt(r.reward)} фишек.`;
+  const dialog = $('#invite-dialog');
+  if (!dialog.open) dialog.showModal();
+  Sound.play('click');
 }
 
 // ——— разделы лобби: столы, рейтинг, кабинет ———
@@ -937,6 +1012,77 @@ function statCard(value, label, note = '') {
   return card;
 }
 
+// ——— магазин оформления ———
+
+// Надетое оформление: рубашка и сукно — атрибуты на body, CSS сам перекрашивает.
+function applyLook(shop) {
+  if (!shop) return;
+  document.body.dataset.back = shop.equip.back;
+  document.body.dataset.felt = shop.equip.felt;
+}
+
+const SHOP_KINDS = [
+  ['back', 'Рубашки карт', 'Видите только вы — на картах соперников и колоде.'],
+  ['felt', 'Сукно стола', 'Цвет стола у вас на экране.'],
+  ['frame', 'Рамки аватара', 'Рамку видят все за столом.'],
+];
+
+// Образец предмета: карта рубашкой, кусок сукна или аватар в рамке.
+function shopSample(it) {
+  if (it.kind === 'back') {
+    const card = el('div', 'card card--sm card--back shop__card');
+    card.dataset.back = it.id;
+    const inner = el('div', 'card__inner');
+    inner.append(el('div', 'card__face card__front'), el('div', 'card__face card__back'));
+    card.append(inner);
+    return card;
+  }
+  if (it.kind === 'felt') {
+    const felt = el('div', 'shop__felt');
+    felt.dataset.felt = it.id;
+    return felt;
+  }
+  const wrap = el('div', 'seat__avatar shop__frame');
+  if (it.id !== 'frame-none') wrap.dataset.frame = it.id;
+  wrap.append(el('span', 'seat__face', state.user ? state.user.name.slice(0, 1).toUpperCase() : '?'));
+  return wrap;
+}
+
+function shopSection(box, data) {
+  const catalog = (state.config && state.config.shop) || [];
+  const mine = state.user && state.user.shop;
+  if (!catalog.length || !mine) return null;
+  const sec = profileSection('Магазин', 'оформление за фишки');
+  for (const [kind, title, note] of SHOP_KINDS) {
+    sec.append(el('h4', 'profile__sub-head', title));
+    sec.append(el('p', 'shop__note', note));
+    const list = el('ul', 'shop');
+    for (const it of catalog.filter((x) => x.kind === kind)) {
+      const owned = mine.owned.includes(it.id);
+      const on = mine.equip[kind] === it.id;
+      const li = el('li', `shop__item${on ? ' is-on' : ''}`);
+      li.append(shopSample(it));
+      li.append(el('span', 'shop__name', it.name));
+      const btn = el('button', `btn btn--sm ${on ? 'btn--ghost' : owned ? '' : 'btn--primary'}`,
+        on ? 'Надето ✓' : owned ? 'Надеть' : `${fmt(it.price)} фишек`);
+      btn.disabled = on;
+      btn.addEventListener('click', async () => {
+        if (!owned && !confirm(`Купить «${it.name}» за ${fmt(it.price)} фишек?`)) return;
+        const res = await cmd({ cmd: owned ? 'shopEquip' : 'shopBuy', id: it.id });
+        if (!res.ok) return;
+        if (res.user) setUser(res.user);
+        Sound.play(owned ? 'click' : 'chips');
+        if (!owned) toast(`«${it.name}» — ваше`, { good: true });
+        refreshProfile(data, box);
+      });
+      li.append(btn);
+      list.append(li);
+    }
+    sec.append(list);
+  }
+  return sec;
+}
+
 function profileSection(title, extra) {
   const sec = el('section', 'profile__section');
   const h = el('h3', null, title);
@@ -1129,6 +1275,12 @@ function renderProfile(box, data) {
   achSec.append(achList);
   root.append(achSec);
 
+  // Магазин оформления — в своём кабинете.
+  if (data.own) {
+    const shop = shopSection(box, data);
+    if (shop) root.append(shop);
+  }
+
   // Telegram — в своём кабинете.
   if (data.own) {
     const tg = telegramSection();
@@ -1239,6 +1391,13 @@ function paintCreate() {
       : '';
   }
 }
+
+// «Играть сейчас»: сервер сам подбирает стол по банку и сажает ботов.
+$('#quick-play').addEventListener('click', async () => {
+  Sound.play('click');
+  const res = await cmd({ cmd: 'quickPlay' });
+  if (res.ok) Sound.play('chips');
+});
 
 $('#create-open').addEventListener('click', async () => {
   // Блайнды и взносы приходят с лобби; если оно ещё не пришло — спросим сами.
@@ -1418,9 +1577,9 @@ function renderTable(t) {
   $('#table-stakes').textContent = !tour ? `блайнды ${fmt(t.sb)}/${fmt(t.bb)} · ${stage}`
     : tour.kind === 'mtt' ? (tour.status === 'finished' ? 'турнир завершён'
       : `уровень ${tour.level} · ${fmt(t.sb)}/${fmt(t.bb)} · осталось ${fmt(tour.alive)} из ${fmt(tour.entrants)} · ${stage}`)
-      : tour.status === 'registering' ? `sit-n-go · регистрация · взнос ${fmt(tour.buyIn)}`
-      : tour.status === 'finished' ? 'sit-n-go · турнир завершён'
-        : `уровень ${tour.level} · блайнды ${fmt(t.sb)}/${fmt(t.bb)} · ${stage}`;
+      : tour.status === 'registering' ? `${tour.spin ? 'спин' : 'sit-n-go'} · регистрация · взнос ${fmt(tour.buyIn)}`
+      : tour.status === 'finished' ? `${tour.spin ? 'спин' : 'sit-n-go'} · турнир завершён`
+        : `${tour.spin ? `×${tour.multiplier} · приз ${fmt(tour.pool)} · ` : ''}уровень ${tour.level} · блайнды ${fmt(t.sb)}/${fmt(t.bb)} · ${stage}`;
   // Часы уровня тикают сами между кадрами — см. tickTimer.
   state.levelDeadline = tour && tour.status === 'running' && tour.next
     ? performance.now() + tour.levelLeft : 0;
@@ -1477,7 +1636,8 @@ function renderTable(t) {
     const seated = t.seats.filter((s) => !s.empty && (tour || !s.sittingOut)).length;
     msg.textContent = seated >= 2
       ? 'Раздаём карты…'
-      : 'Нужно минимум два игрока. Займите место или позовите бота.';
+      : t.you ? 'Нужно минимум два игрока. Позовите ботов кнопкой внизу или дождитесь соперников.'
+        : 'Нужно минимум два игрока. Займите место — и можно позвать ботов.';
   }
   felt.classList.toggle('is-win', won.size > 0);
 
@@ -1498,8 +1658,16 @@ function renderTable(t) {
     if (seat.empty) {
       // В идущий турнир не садятся: свободные места — это вылетевшие.
       const closed = !!(tour && tour.status !== 'registering');
-      const btn = el('button', 'seat__empty', t.you || closed ? `Место ${i + 1}` : `Сесть на ${i + 1}`);
-      btn.disabled = !!t.you || closed;
+      // Сесть сюда нельзя (вы уже за столом или турнир идёт) — вместо плашки
+      // только неприметная точка: на тесном столе плашки загромождали сукно.
+      if (t.you || closed) {
+        const dot = el('span', 'seat__vacant');
+        dot.title = `Место ${i + 1} свободно`;
+        node.append(dot);
+        seatsBox.append(node);
+        return;
+      }
+      const btn = el('button', 'seat__empty', `Сесть на ${i + 1}`);
       btn.addEventListener('click', () => openBuyIn(i, t));
       node.append(btn);
       seatsBox.append(node);
@@ -1555,6 +1723,7 @@ function renderTable(t) {
     }
     // Аватар в обёртке: у того, кто ходит, вокруг него бежит рамка-таймер.
     const avatar = el('div', 'seat__avatar');
+    if (seat.frame) avatar.dataset.frame = seat.frame;
     avatar.append(face);
     if (t.actingSeat === i) avatar.append(timerRing());
     plate.append(name, avatar);
@@ -1629,15 +1798,100 @@ function renderTable(t) {
   // Только что открыли приватный стол — сразу даём ссылку для друзей.
   if (state.inviteFor && t.id === state.inviteFor) { state.inviteFor = null; openInvite(t); }
   renderActions(t);
+  showResult(t);
+  revealSpin(t);
 
   const snap = snapshot(t);
   playEffects(t, prev, positions);
   state.snap = snap;
 }
 
+// ——— спин: раскрытие множителя ———
+
+// Множитель выпадает на старте — показываем его крупно, как барабан:
+// числа мелькают и останавливаются на выпавшем.
+state.spinShown = new Set();
+function revealSpin(t) {
+  const tour = t.tour;
+  if (!tour || !tour.spin || !tour.multiplier || tour.status !== 'running') return;
+  if (state.spinShown.has(t.id)) return;
+  state.spinShown.add(t.id);
+  // Зашли за стол посреди спина — без барабана.
+  if (tour.level > 1 || t.handId > 2) return;
+  const box = $('#spin-reveal');
+  const num = $('#spin-reveal-x');
+  box.hidden = false;
+  box.classList.remove('is-done');
+  const faces = [2, 3, 5, 10, 100];
+  let i = 0;
+  const spinTimer = setInterval(() => {
+    num.textContent = `×${faces[i++ % faces.length]}`;
+    Sound.play('click');
+  }, 90);
+  setTimeout(() => {
+    clearInterval(spinTimer);
+    num.textContent = `×${tour.multiplier}`;
+    $('#spin-reveal-prize').textContent = `Приз ${fmt(tour.pool)}`;
+    box.classList.add('is-done');
+    Sound.play(tour.multiplier >= 5 ? 'win' : 'chips');
+  }, 1600);
+  setTimeout(() => { box.hidden = true; }, 4200);
+}
+
+// ——— итог турнира ———
+
+// Вылетели или выиграли — один раз показываем место, приз и кнопку следующего
+// турнира: здесь игрок решает, играть ли дальше, и решать должно быть легко.
+state.resultShown = new Set();
+function showResult(t) {
+  const place = !t.you && myPlace(t);
+  if (!place) return;
+  const key = `${t.id}:${t.tour.kind || 'sng'}:${place.place}`;
+  if (state.resultShown.has(key)) return;
+  state.resultShown.add(key);
+  const tour = t.tour;
+  const mtt = tour.kind === 'mtt';
+  const field = mtt ? tour.entrants : t.maxSeats;
+  const dialog = $('#result-dialog');
+  dialog.classList.toggle('result--win', place.place === 1);
+  $('#result-place').textContent = place.place === 1 ? '🏆' : `${place.place}`;
+  $('#result-title').textContent = place.place === 1 ? 'Победа в турнире!'
+    : place.prize ? `${place.place} место — в призах` : `${place.place} место`;
+  $('#result-note').textContent = place.place === 1
+    ? `Вы обыграли всех ${fmt(field - 1)} соперников.`
+    : `Из ${fmt(field)} участников. ${place.prize ? 'Приз уже в банке.' : 'В следующий раз повезёт — призы получают лучшие места.'}`;
+  const sum = $('#result-sum');
+  sum.textContent = '';
+  const row = (label, value, plus) => {
+    const div = el('div');
+    div.append(el('span', null, label), el('b', plus ? 'is-plus' : null, value));
+    sum.append(div);
+  };
+  row('Взнос', tour.buyIn ? fmt(tour.buyIn) : 'бесплатно');
+  row('Приз', place.prize ? `+${fmt(place.prize)}` : '—', place.prize > 0);
+  const net = place.prize - tour.buyIn;
+  if (tour.buyIn) row('Итог', `${net > 0 ? '+' : net < 0 ? '−' : ''}${fmt(Math.abs(net))}`, net > 0);
+  const again = $('#result-again');
+  again.hidden = mtt;
+  again.textContent = `${tour.spin ? 'Ещё спин' : 'Ещё sit-n-go'} · взнос ${fmt(tour.buyIn)}`;
+  again.onclick = async () => {
+    const res = await cmd({ cmd: 'quickSng', buyIn: tour.buyIn, spin: !!tour.spin });
+    if (res.ok) { dialog.close(); Sound.play('chips'); }
+  };
+  $('#result-lobby').onclick = () => { dialog.close(); $('#back-to-lobby').click(); };
+  if (!dialog.open) dialog.showModal();
+  Sound.play(place.prize ? 'win' : 'lose');
+}
+
 // Что пишет сукно турнирного стола, пока карт нет: регистрация или итоги.
 function tourMessage(msg, t) {
   const tour = t.tour;
+  if (tour.status === 'registering' && tour.spin) {
+    const taken = t.seats.filter((s) => !s.empty).length;
+    msg.append(el('span', null, `Спин: ${taken} из ${t.maxSeats} · победитель получит взнос `));
+    msg.append(el('b', null, '×2…×100'));
+    return;
+  }
   if (tour.status === 'registering') {
     const taken = t.seats.filter((s) => !s.empty).length;
     msg.append(el('span', null, `Регистрация ${taken} из ${t.maxSeats} · фонд `));
@@ -2266,7 +2520,7 @@ function playEffects(t, prev, positions) {
 
 // ——— анимация таймера ———
 
-const REVEAL_WINDOW = 5000;
+const REVEAL_WINDOW = 3000;   // столько же, сколько REVEAL_ASK на сервере
 
 function tickTimer() {
   const reveal = state.revealDeadline > 0;
@@ -2440,7 +2694,8 @@ function buildActions(t) {
   const pre = state.pre ? `${state.pre.action}:${state.pre.amount}` : '';
   const key = JSON.stringify([t.handId, t.phase, t.actingSeat, legal, you && you.stack, you && you.sittingOut,
     you && you.inHand, !!you, you && you.canReveal, t.reveal && t.reveal.seat, pre, callAmount(t),
-    mySeat && mySeat.folded, mySeat && mySeat.allIn, raiseOpen]);
+    mySeat && mySeat.folded, mySeat && mySeat.allIn, raiseOpen,
+    t.seats.filter((x) => !x.empty).length, t.tour && t.tour.status, t.tour && t.tour.fillLeft > 0]);
   if (key === state.actionKey) return;
   state.actionKey = key;
   box.textContent = '';
@@ -2543,6 +2798,8 @@ function buildActions(t) {
     status.textContent = folded ? `${acting} · вы сбросили карты`
       : allIn ? `${acting} · вы в олл-ине`
         : acting;
+    const bots = botsButton(t);
+    if (bots) status.append(bots);
     main.append(deadButton('Фолд'), deadButton('Чек'), deadButton('Рейз'));
     return;
   }
@@ -2565,10 +2822,33 @@ function idleStatus(t) {
   const tour = t.tour;
   if (tour && tour.status === 'registering') {
     const taken = t.seats.filter((s) => !s.empty).length;
+    if (tour.fillLeft > 0) return `Регистрация: ${taken} из ${t.maxSeats}. Скоро старт — свободные места займут боты`;
     return `Регистрация: ${taken} из ${t.maxSeats}. Турнир начнётся, когда займут все места`;
   }
   if (tour && tour.status === 'finished') return 'Турнир завершён';
   return 'Ждём начала раздачи';
+}
+
+// Сидите и ждёте соперников: боты зовутся прямо отсюда, а не из меню стола.
+// За кэш-столом добираем до пяти игроков, в своём sit-n-go — до полного стола
+// (тогда турнир сразу стартует). В sit-n-go заведения боты придут сами.
+function botsButton(t) {
+  if (t.phase !== 'idle' || !t.you) return null;
+  const tour = t.tour;
+  const taken = t.seats.filter((x) => !x.empty).length;
+  if (tour && (tour.status !== 'registering' || tour.fillLeft > 0)) return null;
+  const target = tour ? t.maxSeats : Math.min(5, t.maxSeats);
+  if (!tour && taken >= 2) return null;
+  if (taken >= target) return null;
+  const btn = el('button', 'btn btn--sm actions__back', tour ? 'Заполнить ботами' : 'Позвать ботов');
+  btn.addEventListener('click', async () => {
+    Sound.play('click');
+    for (let i = taken; i < target; i++) {
+      const res = await cmd({ cmd: 'addBot' }, { quiet: i > taken });
+      if (res.error) break;
+    }
+  });
+  return btn;
 }
 
 // Кнопка-заглушка: держит строй, пока ходить нельзя.
@@ -2707,6 +2987,7 @@ function openInvite(t) {
   const text = t.kind === 'sng'
     ? `Залетай на sit-n-go «${t.name}» в THPoker — покер без денег`
     : `Садись ко мне за стол «${t.name}» в THPoker — покер без денег`;
+  $('#invite-title').textContent = 'Пригласить за стол';
   $('#invite-link').value = url;
   $('#invite-tg').href = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
   const share = $('#invite-share');
@@ -3207,7 +3488,7 @@ function telegramWidget(box, onauth, onReady = () => {}) {
 }
 
 async function telegramLogin(payload) {
-  const { ok, data } = await post('/api/telegram/login', { ...payload, source: currentSource() });
+  const { ok, data } = await post('/api/telegram/login', { ...payload, source: currentSource(), friend: currentFriend() });
   if (!ok || data.error) { toast(data.error || 'Не удалось войти через Telegram'); return false; }
   afterLogin(data.user);
   if (data.created) {

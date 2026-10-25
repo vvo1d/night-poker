@@ -1,19 +1,23 @@
 'use strict';
 // Турниры по расписанию: много столов, пересадка игроков, финальный стол.
 //
-// Турнир живёт так: регистрация → старт в назначенное время (если набралось
-// хотя бы MIN_PLAYERS) → игра на вылет с ростом блайндов по часам → победитель.
+// Турнир живёт так: регистрация → старт в назначенное время (если людей меньше
+// MIN_PLAYERS, недостающих добирают боты) → игра на вылет с ростом блайндов
+// по часам → победитель.
 // Столы — обычные Table, у каждого вместо Tournament стоит «переходник»
 // (tableTour): сам стол спрашивает у него блайнды и сообщает о вылетевших,
 // а турнир решает, какие места и призы им положены и кого куда пересадить.
 
+const crypto = require('node:crypto');
 const { dayKey } = require('./daily');
+const { BOT_NAMES } = require('./bot');
 
 const TABLE_SEATS = 9;
 const STACK = 5000;
 const LEVEL_MS = 5 * 60_000;           // блайнды растут каждые 5 минут
 const TIMEOUT = 20;                    // секунд на ход
-const MIN_PLAYERS = 4;                 // меньше — турнир отменяется
+const MIN_PLAYERS = 4;                 // меньше — недостающих добирают боты
+const BOT_FILL = 6;                    // до стольких участников добираем ботами, если людей мало
 const REG_OPENS_MS = 12 * 3600_000;    // регистрация открывается за 12 часов
 const KEEP_DONE_MS = 60 * 60_000;      // законченный турнир виден в лобби ещё час
 const REMIND_MS = 5 * 60_000;          // напоминание за 5 минут до старта
@@ -101,6 +105,15 @@ class Mtt {
     this.entries.delete(userId);
     if (!entry.isBot && this.buyIn) this.hooks.refund(entry, this.buyIn);
     return { ok: true };
+  }
+
+  // Добрать ботов: при малом онлайне турнир не отменяется, а играется с ботами.
+  addBots(count) {
+    for (let i = 0; i < count; i++) {
+      const n = this.entries.size + 1;
+      const userId = `bot-${crypto.randomUUID()}`;
+      this.entries.set(userId, { userId, name: `${BOT_NAMES[n % BOT_NAMES.length]}-${n}`, isBot: true });
+    }
   }
 
   // Отмена: до старта — взносы назад; во время игры — невыплаченный фонд делится по стекам.
@@ -347,6 +360,7 @@ class Mtt {
       me: viewerId ? this.entries.has(viewerId) : false,
       myPlace: viewerId ? (this.places.find((p) => p.userId === viewerId) || null) : null,
       minPlayers: MIN_PLAYERS,
+      botFill: BOT_FILL,
       cancelReason: this.cancelReason || null,
     };
   }
@@ -397,8 +411,13 @@ class MttManager {
           }
         }
         if (now >= mtt.startAt) {
-          if (mtt.entries.size < MIN_PLAYERS) mtt.cancel(`набралось меньше ${MIN_PLAYERS} игроков`);
-          else mtt.start(now);
+          // Людей нет — играть некому. Людей мало — недостающих добирают боты.
+          const humans = [...mtt.entries.values()].filter((e) => !e.isBot).length;
+          if (!humans) mtt.cancel('никто не записался');
+          else {
+            if (mtt.entries.size < MIN_PLAYERS) mtt.addBots(BOT_FILL - mtt.entries.size);
+            mtt.start(now);
+          }
         }
       }
       mtt.tick(now);

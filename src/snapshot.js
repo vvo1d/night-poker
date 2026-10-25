@@ -40,6 +40,7 @@ function tableRecord(table) {
       seats: tour.seats,
       buyIn: tour.buyIn,
       status: tour.status,
+      pool: tour.pool,
       paid: tour.places.reduce((sum, p) => sum + p.prize, 0),
     } : null,
     players: table.players().map((p) => ({
@@ -66,7 +67,7 @@ function refunds(rec) {
   } else if (sng.status === 'running') {
     // Турнир оборвался: невыплаченную часть фонда делим по стекам,
     // как делят призы при договорной остановке турнира.
-    const left = sng.seats * sng.buyIn - sng.paid;
+    const left = (sng.pool ?? sng.seats * sng.buyIn) - sng.paid;
     const total = rec.players.reduce((s, p) => s + p.chips, 0);
     if (total > 0) for (const p of humans) out.push({ userId: p.userId, amount: Math.floor((left * p.chips) / total) });
   }

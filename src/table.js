@@ -9,7 +9,7 @@ const PHASES = ['preflop', 'flop', 'turn', 'river'];
 const FEED_KINDS = new Set(['chat', 'result']);
 
 const REVEAL_STEP = 600;   // пауза перед обязательным вскрытием
-const REVEAL_ASK = 5000;   // сколько человек думает, показывать ли проигравшую руку
+const REVEAL_ASK = 3000;   // сколько человек думает, показывать ли проигравшую руку
 const REVEAL_BOT = 500;    // бот решает быстро
 // Олл-ин: карты открываются сразу, а борд выходит по улице — с паузой, чтобы было видно.
 const RUNOUT_FIRST = 1500;  // от вскрытия карт до первой улицы
@@ -20,6 +20,7 @@ const REACTIONS = ['👍', '😂', '😮', '😡', '🔥', '👏', '🤔', '😎
 const PHRASES = ['Хорошо сыграно', 'Удачи всем', 'Повезло!', 'Ну ты даёшь', 'Спасибо', 'Думаю…', 'Блеф?', 'Ещё раздачу!'];
 const REACTION_MS = 3500;  // сколько облачко висит над местом
 const REACTION_GAP = 2000; // не чаще раза в две секунды — иначе это спам
+const BANTER_GAP = 15_000; // боты отзываются за столом не чаще раза в 15 секунд
 
 let handCounter = 0;
 
@@ -134,6 +135,33 @@ class Table {
 
   touch() { this.version++; }
 
+  // Боты не молчат: после крупного банка или обидного вскрытия кто-нибудь из них
+  // отзывается реакцией или фразой. Редко — не чаще раза в BANTER_GAP и только
+  // если за столом есть люди: живой стол, а не болтливый.
+  botBanter(out, rand = Math.random) {
+    const now = Date.now();
+    if (!this.humans() || now - (this.banterAt || 0) < BANTER_GAP) return;
+    const big = this.bb * 10;
+    const pick = (list) => list[Math.floor(rand() * list.length)];
+    const say = (p, list, chance) => {
+      if (rand() >= chance) return false;
+      if (this.react(p.userId, pick(list)).ok) { this.banterAt = now; return true; }
+      return false;
+    };
+    for (const r of out) {
+      const p = r.player;
+      const net = r.won - r.contributed;
+      if (p.isBot && net >= big && say(p, ['😎', '🔥', '👍', 'Повезло!', 'Ещё раздачу!'], 0.45)) return;
+      if (p.isBot && r.showdown && !r.won && r.contributed >= big && say(p, ['😡', '😮', '🤔', 'Ну ты даёшь'], 0.5)) return;
+    }
+    // Человек выиграл вскрытие — кто-то из проигравших ботов отдаёт должное.
+    const humanWin = out.some((r) => !r.player.isBot && r.showdown && r.won > r.contributed);
+    if (humanWin) {
+      const loser = out.find((r) => r.player.isBot && r.showdown && !r.won);
+      if (loser) say(loser.player, ['👏', 'Хорошо сыграно', '😮', 'Блеф?'], 0.4);
+    }
+  }
+
   nextOccupied(from, filter) {
     for (let i = 1; i <= this.maxSeats; i++) {
       const seat = (from + i) % this.maxSeats;
@@ -159,8 +187,19 @@ class Table {
     this.onSeat(p, this);
     this.note(`${p.name} садится на место ${seat + 1} с ${buyIn} фишками`, 'seat');
     this.touch();
+    this.botGreet(p);
     this.maybeStartHand();
     return { ok: true };
+  }
+
+  // Человек и боты встретились за столом — кто-нибудь из ботов здоровается.
+  botGreet(newcomer, rand = Math.random) {
+    const now = Date.now();
+    if (!this.humans() || now - (this.banterAt || 0) < BANTER_GAP || rand() >= 0.6) return;
+    const bot = newcomer.isBot ? newcomer : this.players().find((x) => x.isBot);
+    if (!bot) return;
+    const text = ['Удачи всем', '👍', 'Удачи всем'][Math.floor(rand() * 3)];
+    if (this.react(bot.userId, text).ok) this.banterAt = now;
   }
 
   addChips(userId, amount) {
@@ -814,6 +853,7 @@ class Table {
       });
     }
     if (out.length) this.onHandEnd(out, this);
+    if (out.length) this.botBanter(out);
   }
 
   potTotal() {
@@ -920,6 +960,7 @@ class Table {
           name: p.name,
           isBot: p.isBot,
           avatar: p.avatar || null,
+          frame: p.frame || null,
           stack: p.stack,
           bet: p.bet,
           inHand: p.inHand,

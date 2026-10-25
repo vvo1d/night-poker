@@ -10,6 +10,23 @@ const SNG_LEVEL_MS = 120_000; // блайнды растут каждые две
 const SNG_TIMEOUT = 20;       // секунд на ход
 const SNG_AWAY_MS = 1500;     // сколько стол ждёт отошедшего игрока: блайнды он платит, карты сбрасывает
 
+// Спин: турбо на троих, победитель забирает всё. Приз — взнос, умноженный на
+// множитель, который выпадает при старте. Средний множитель ≈3,05, то есть
+// в среднем приз равен трём взносам — «честный» турнир, редкий ×100 — праздник.
+const SPIN_STACK = 500;
+const SPIN_LEVEL_MS = 60_000;
+const SPIN_TIMEOUT = 15;
+const SPIN_MULTIPLIERS = [[2, 75], [3, 15], [5, 7], [10, 2.5], [100, 0.5]];   // [множитель, шанс в %]
+
+function drawMultiplier(rand = Math.random) {
+  let r = rand() * 100;
+  for (const [mult, chance] of SPIN_MULTIPLIERS) {
+    if (r < chance) return mult;
+    r -= chance;
+  }
+  return SPIN_MULTIPLIERS[0][0];
+}
+
 const SNG_LEVELS = [
   [10, 20], [15, 30], [25, 50], [50, 100], [75, 150], [100, 200], [150, 300],
   [200, 400], [300, 600], [400, 800], [600, 1200], [800, 1600], [1000, 2000],
@@ -35,23 +52,27 @@ function prizeTable(seats, buyIn = SNG_BUY_IN) {
 class Tournament {
   // hooks.pay(player, amount, place) — приз в банк игрока,
   // hooks.onStart(players) и hooks.onPlace(player, place, prize) — для статистики игроков.
-  constructor(seats, hooks = {}, buyIn = SNG_BUY_IN) {
+  constructor(seats, hooks = {}, buyIn = SNG_BUY_IN, { spin = false } = {}) {
     this.seats = seats;
     this.buyIn = buyIn;
-    this.stack = SNG_STACK;
-    this.prizes = prizeTable(seats, this.buyIn);
+    this.spin = spin;
+    this.multiplier = 0;         // спин: выпадает при старте
+    this.stack = spin ? SPIN_STACK : SNG_STACK;
+    this.levelMs = spin ? SPIN_LEVEL_MS : SNG_LEVEL_MS;
+    this.prizes = spin ? [] : prizeTable(seats, this.buyIn);
     this.status = 'registering'; // registering → running → finished
     this.level = 0;
     this.startedAt = 0;
     this.levelAt = 0;            // когда начался текущий уровень
     this.finishedAt = 0;
     this.places = [];            // { place, name, prize } — по мере вылета
+    this.fillAt = 0;             // sit-n-go заведения: когда свободные места займут боты
     this.pay = hooks.pay || (() => {});
     this.onStart = hooks.onStart || (() => {});
     this.onPlace = hooks.onPlace || (() => {});
   }
 
-  get pool() { return this.seats * this.buyIn; }
+  get pool() { return this.spin ? this.buyIn * this.multiplier : this.seats * this.buyIn; }
 
   blinds(level = this.level) {
     return SNG_LEVELS[Math.min(level, SNG_LEVELS.length - 1)];
@@ -65,17 +86,23 @@ class Tournament {
     this.level = 0;
     [table.sb, table.bb] = this.blinds();
     table.minRaise = table.bb;
-    table.note(`Турнир начался: ${this.seats} игроков, призовой фонд ${this.pool}`, 'result');
+    if (this.spin) {
+      this.multiplier = drawMultiplier();
+      this.prizes = [this.pool];
+      table.note(`Спин начался: множитель ×${this.multiplier} — победитель забирает ${this.pool}`, 'result');
+    } else {
+      table.note(`Турнир начался: ${this.seats} игроков, призовой фонд ${this.pool}`, 'result');
+    }
     this.onStart(table.players());
   }
 
   // Уровень меняется между раздачами: посреди торговли блайнды не трогаем.
   beforeHand(table, now = Date.now()) {
     if (this.status !== 'running') return;
-    const level = Math.floor((now - this.startedAt) / SNG_LEVEL_MS);
+    const level = Math.floor((now - this.startedAt) / this.levelMs);
     if (level <= this.level || this.level >= SNG_LEVELS.length - 1) return;
     this.level = Math.min(level, SNG_LEVELS.length - 1);
-    this.levelAt = this.startedAt + this.level * SNG_LEVEL_MS;
+    this.levelAt = this.startedAt + this.level * this.levelMs;
     [table.sb, table.bb] = this.blinds();
     table.note(`Блайнды растут: ${table.sb}/${table.bb}`, 'result');
   }
@@ -122,13 +149,19 @@ class Tournament {
       pool: this.pool,
       prizes: this.prizes,
       level: this.level + 1,
-      levelMs: SNG_LEVEL_MS,
+      levelMs: this.levelMs,
       levelLeft: this.status === 'running' && !last
-        ? Math.max(0, this.startedAt + (this.level + 1) * SNG_LEVEL_MS - now) : 0,
+        ? Math.max(0, this.startedAt + (this.level + 1) * this.levelMs - now) : 0,
+      spin: this.spin,
+      multiplier: this.multiplier,
       next: last ? null : { sb, bb },
       places: this.places,
+      fillLeft: this.status === 'registering' && this.fillAt ? Math.max(0, this.fillAt - now) : 0,
     };
   }
 }
 
-module.exports = { Tournament, prizeTable, SNG_BUY_IN, SNG_BUY_INS, SNG_STACK, SNG_TIMEOUT, SNG_AWAY_MS, SNG_LEVELS };
+module.exports = {
+  Tournament, prizeTable, drawMultiplier, SNG_BUY_IN, SNG_BUY_INS, SNG_STACK, SNG_TIMEOUT, SNG_AWAY_MS, SNG_LEVELS,
+  SPIN_STACK, SPIN_TIMEOUT, SPIN_MULTIPLIERS,
+};

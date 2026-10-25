@@ -4,9 +4,14 @@ const { openStorage } = require('./db');
 const { freshStats, unlockNew, tierTotal, TIER_NAMES, category } = require('./achievements');
 const daily = require('./daily');
 const seasons = require('./seasons');
+const shop = require('./shop');
 
 const START_CHIPS = 10000;
 const RELOAD_CHIPS = 2000; // бесплатное пополнение для игроков без фишек
+// Приглашение друга: новичок по ссылке сыграл REF_HANDS раздач — оба получают REF_REWARD.
+const REF_HANDS = 20;
+const REF_REWARD = 2000;
+const REF_MAX = 50;        // за стольких друзей пригласивший получает награду (новичок — всегда)
 
 const WRITE_EVERY = 400;            // как часто изменения уходят в базу
 const LEADERBOARD_TTL = 5_000;      // таблица лидеров пересчитывается не чаще
@@ -58,6 +63,8 @@ class Store {
     this.board = { at: 0, list: [] };
     this.ratings = new Map();    // вид рейтинга -> { at, order: [id…] }
     this.news = new Map();       // id -> последняя открытая ачивка, для всплывашки
+    this.refNews = new Map();    // id -> последняя награда за приглашение, для всплывашки
+    this.onReferral = null;      // (пригласивший, новичок, награда) — сервер напишет в Telegram
 
     this.load();
   }
@@ -208,7 +215,7 @@ class Store {
     return null;
   }
 
-  async register(name, password, source = null) {
+  async register(name, password, source = null, friend = null) {
     name = String(name || '').trim();
     password = String(password || '');
     const bad = this.checkName(name);
@@ -235,8 +242,41 @@ class Store {
     this.users.set(user.id, user);
     this.byName.set(name.toLowerCase(), user.id);
     this.markActive(user);
+    this.linkReferral(user, friend);
     this.touch(user);
     return { user };
+  }
+
+  // Новичок пришёл по ссылке друга: запоминаем, кто позвал, и сразу делаем их друзьями.
+  linkReferral(user, friendName) {
+    const o = friendName ? this.byNameLower(String(friendName)) : null;
+    if (!o || o.id === user.id || this.isBanned(o)) return;
+    user.meta.invitedBy = o.id;
+    if (user.friends.length < FRIENDS_MAX && o.friends.length < FRIENDS_MAX) {
+      user.friends.push(o.id);
+      if (!o.friends.includes(user.id)) o.friends.push(user.id);
+      this.checkAchievements(o);
+    }
+    this.touch(o);
+  }
+
+  // Награда за приглашение — когда новичок сыграл свои первые раздачи:
+  // так платим за живого игрока, а не за пустую регистрацию.
+  checkReferral(u) {
+    const m = u.meta;
+    if (!m.invitedBy || m.refPaid || u.handsPlayed < REF_HANDS) return;
+    m.refPaid = Date.now();
+    const o = this.users.get(m.invitedBy);
+    this.addChips(u.id, REF_REWARD);
+    this.refNews.set(u.id, { at: m.refPaid, name: o ? o.name : '', amount: REF_REWARD, invitee: true });
+    if (!o) return;
+    const ref = o.meta.ref || (o.meta.ref = { count: 0, earned: 0 });
+    ref.count += 1;
+    const paid = ref.count <= REF_MAX ? REF_REWARD : 0;
+    if (paid) { ref.earned += paid; this.addChips(o.id, paid); }
+    this.refNews.set(o.id, { at: m.refPaid, name: u.name, amount: paid, invitee: false });
+    this.touch(o);
+    if (this.onReferral) this.onReferral(o, u, paid);
   }
 
   async login(name, password) {
@@ -338,7 +378,7 @@ class Store {
   }
 
   // Вход через Telegram: свой аккаунт, а при первом входе — новый, без пароля.
-  telegramUser(tg, source = null) {
+  telegramUser(tg, source = null, friend = null) {
     const known = this.byTg.get(tg.id);
     if (known && this.users.has(known)) {
       const u = this.users.get(known);
@@ -362,6 +402,7 @@ class Store {
     this.users.set(user.id, user);
     this.byName.set(user.name.toLowerCase(), user.id);
     this.byTg.set(tg.id, user.id);
+    this.linkReferral(user, friend);
     this.touch(user);
     return { user, created: true };
   }
@@ -701,6 +742,7 @@ class Store {
     if (!u) return;
     u.handsPlayed += 1;
     this.checkAchievements(u);
+    this.checkReferral(u);
     this.touch(u);
   }
 
@@ -747,7 +789,59 @@ class Store {
       daily: daily.view(u),                      // бонус за вход и задания дня
       season: seasons.view(u),                   // очки и лига текущего сезона
       telegram: u.tg ? (u.tg.username ? `@${u.tg.username}` : 'привязан') : null,
+      referral: this.referralView(u),
+      shop: shop.view(u),                        // купленное оформление и что надето
       hasPassword: !!u.hash,
+    };
+  }
+
+  // ——— магазин оформления ———
+
+  buyItem(userId, id) {
+    const u = this.users.get(userId);
+    const it = shop.item(id);
+    if (!u || !it) return { error: 'Такого предмета нет' };
+    const mine = shop.view(u);
+    if (mine.owned.includes(it.id)) return { error: 'Уже куплено' };
+    if (u.chips < it.price) return { error: 'В банке не хватает фишек' };
+    const s = u.meta.shop || (u.meta.shop = { owned: [], equip: {} });
+    s.owned = [...(s.owned || []), it.id];
+    s.equip = { ...(s.equip || {}), [it.kind]: it.id };   // купленное сразу надеваем
+    this.addChips(userId, -it.price);
+    this.touch(u);
+    return { ok: true, item: it };
+  }
+
+  equipItem(userId, id) {
+    const u = this.users.get(userId);
+    const it = shop.item(id);
+    if (!u || !it) return { error: 'Такого предмета нет' };
+    if (!shop.view(u).owned.includes(it.id)) return { error: 'Сначала купите' };
+    const s = u.meta.shop || (u.meta.shop = { owned: [], equip: {} });
+    s.equip = { ...(s.equip || {}), [it.kind]: it.id };
+    this.touch(u);
+    return { ok: true, item: it };
+  }
+
+  // Рамка аватара — её видят соперники, поэтому она едет и на место за столом.
+  frameOf(u) {
+    const id = u ? shop.view(u).equip.frame : null;
+    return id && id !== shop.DEFAULTS.frame ? id : null;
+  }
+
+  // Приглашения: кто позвал меня и сколько ещё раздач до награды; скольких позвал я.
+  referralView(u) {
+    const m = u.meta;
+    const inviter = m.invitedBy ? this.users.get(m.invitedBy) : null;
+    const ref = m.ref || { count: 0, earned: 0 };
+    return {
+      hands: REF_HANDS,
+      reward: REF_REWARD,
+      invitedBy: inviter ? inviter.name : null,
+      handsLeft: inviter && !m.refPaid ? Math.max(0, REF_HANDS - u.handsPlayed) : 0,
+      count: ref.count,
+      earned: ref.earned,
+      news: this.refNews.get(u.id) || null,
     };
   }
 
@@ -798,4 +892,4 @@ function cleanSource(source) {
   return s || null;
 }
 
-module.exports = { Store, START_CHIPS, RELOAD_CHIPS };
+module.exports = { Store, START_CHIPS, RELOAD_CHIPS, REF_HANDS, REF_REWARD };
