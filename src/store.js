@@ -585,6 +585,82 @@ class Store {
     weekly.progress(u, event);
   }
 
+  // ——— история раздач ———
+
+  // Раздача сыграна: сохраняем её и кладём в «последние раздачи» каждому живому участнику.
+  saveHand(record) {
+    const uids = record.players.map((x) => x.uid).filter(Boolean);
+    if (!uids.length) return null;   // одни боты — смотреть некому
+    const id = crypto.randomBytes(6).toString('base64url');
+    try {
+      this.backend.saveHand(id, record.at, record, uids);
+    } catch (err) {
+      console.error('Не удалось сохранить раздачу:', err.message);
+      return null;
+    }
+    return id;
+  }
+
+  // Что из раздачи видно: свои карты, карты, открытые на вскрытии, и карты того,
+  // кто поделился ссылкой. Остальное — рубашкой. Внутренние id игроков наружу не идут.
+  handView(h, { viewerId = null, revealSeat = -1 } = {}) {
+    const mine = h.players.find((x) => viewerId && x.uid === viewerId);
+    return {
+      id: h.id, at: h.at, table: h.table, kind: h.kind, sb: h.sb, bb: h.bb, button: h.button,
+      board: h.board, pot: h.pot, actions: h.actions,
+      mySeat: mine ? mine.seat : revealSeat,
+      players: h.players.map((x) => ({
+        seat: x.seat, name: x.name, bot: x.bot, stack: x.stack,
+        cards: x.shown || x.seat === revealSeat || (mine && x.seat === mine.seat) ? x.cards : null,
+        shown: !!x.shown, folded: !!x.folded, won: x.won || 0, net: x.net || 0, hand: x.hand || null,
+      })),
+    };
+  }
+
+  // Последние раздачи игрока — коротко, для списка.
+  recentHands(userId) {
+    let list = [];
+    try { list = this.backend.recentHands(userId); } catch { return []; }
+    return list.map((h) => {
+      const me = h.players.find((x) => x.uid === userId) || {};
+      const top = h.players.reduce((a, b) => ((b.won || 0) > (a.won || 0) ? b : a), {});
+      return {
+        id: h.id, at: h.at, table: h.table, kind: h.kind, sb: h.sb, bb: h.bb,
+        cards: me.cards || [], board: h.board, net: me.net || 0, pot: h.pot,
+        hand: me.hand || top.hand || null, winner: top.name || null, players: h.players.length,
+      };
+    });
+  }
+
+  // Раздача целиком — только для её участника.
+  handFor(userId, id) {
+    const h = this.backend.getHand(String(id));
+    if (!h || !h.players.some((x) => x.uid === userId)) return null;
+    return this.handView(h, { viewerId: userId });
+  }
+
+  // Поделиться: короткий код ссылки; по ней видны карты поделившегося.
+  shareHand(userId, id) {
+    const h = this.backend.getHand(String(id));
+    const me = h && h.players.find((x) => x.uid === userId);
+    if (!me) return { error: 'Это не ваша раздача' };
+    const code = this.backend.shareHand(h.id, me.seat, userId, crypto.randomBytes(6).toString('base64url'));
+    return { ok: true, code };
+  }
+
+  sharedHand(code) {
+    const share = this.backend.getShare(String(code));
+    const h = share && this.backend.getHand(share.handId);
+    if (!h) return null;
+    const view = this.handView(h, { revealSeat: share.seat });
+    view.sharedBy = (h.players.find((x) => x.seat === share.seat) || {}).name || null;
+    return view;
+  }
+
+  pruneHands(before) {
+    try { this.backend.pruneHands(before); } catch (err) { console.error('Чистка истории раздач:', err.message); }
+  }
+
   // ——— уровень ———
 
   // Опыт: за каждый взятый уровень — фишки, на особых уровнях — предмет из магазина.

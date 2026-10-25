@@ -160,6 +160,8 @@ function createTable(cfg, {
         store.recordHand(r.player.userId, { ...r, cash: !tour, withFriend, withHuman: humans.length > 1 });
       }
     },
+    // Сыгранная раздача — в историю участников («Последние раздачи»).
+    onHandRecord: (record) => store.saveHand(record),
     onSeat: (player, t) => {
       if (player.isBot) return;
       playerTable.set(player.userId, t);
@@ -1230,6 +1232,8 @@ async function handleCommand(ctx, body) {
       return store.claimBonus(user.id);
     case 'claimQuest':
       return store.claimQuest(user.id, body.id);
+    case 'shareHand':
+      return store.shareHand(user.id, body.id);
     case 'claimWeekly':
       return store.claimWeekly(user.id, body.id);
     case 'claimChest':
@@ -1283,6 +1287,15 @@ const server = http.createServer(async (req, res) => {
     if (!user || store.isBanned(user)) return send(res, 404, 'Игрок не найден');
     const origin = `${SECURE_COOKIE ? 'https' : 'http'}://${req.headers.host}`;
     const html = withMetrika(pages.profilePage(user, origin, store.avatarUrl(user)));
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(html), 'Cache-Control': 'no-cache' });
+    return res.end(html);
+  }
+  // Раздача, которой поделились: страница повтора, со своим превью для мессенджеров.
+  if ((req.method === 'GET' || req.method === 'HEAD') && route.startsWith('/h/')) {
+    const code = decodeURIComponent(route.slice(3)).replace(/\/$/, '');
+    const hand = store.sharedHand(code);
+    if (!hand) return send(res, 404, 'Раздача не найдена');
+    const html = withMetrika(handPage(hand, `${SECURE_COOKIE ? 'https' : 'http'}://${req.headers.host}`, code));
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(html), 'Cache-Control': 'no-cache' });
     return res.end(html);
   }
@@ -1410,6 +1423,23 @@ const server = http.createServer(async (req, res) => {
         rssMb: Math.round(mem.rss / 1048576),
         heapMb: Math.round(mem.heapUsed / 1048576),
       });
+    }
+
+    // История раздач: список своих последних, одна своя целиком, чужая — по коду ссылки.
+    if (route === '/api/hands' && req.method === 'GET') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      return send(res, 200, { hands: store.recentHands(ctx.user.id) });
+    }
+    if (route === '/api/hand' && req.method === 'GET') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      const hand = store.handFor(ctx.user.id, url.searchParams.get('id'));
+      return hand ? send(res, 200, { hand }) : send(res, 404, { error: 'Раздача не найдена' });
+    }
+    if (route === '/api/shared-hand' && req.method === 'GET') {
+      const hand = store.sharedHand(url.searchParams.get('code'));
+      return hand ? send(res, 200, { hand }) : send(res, 404, { error: 'Раздача не найдена' });
     }
 
     if (route === '/api/profile' && req.method === 'GET') {
@@ -1755,7 +1785,32 @@ function notifyLeft(p) {
   }
 }
 
+// Страница общей раздачи: заголовок и превью из итога, повтор рисует hand.js.
+const HAND_KIND = { cash: 'кэш-стол', sng: 'sit-n-go', spin: 'спин', mtt: 'турнир' };
+function handPage(hand, origin, code) {
+  const top = hand.players.reduce((a, b) => (b.won > a.won ? b : a), hand.players[0]);
+  const title = `${hand.sharedBy || 'Игрок'} делится раздачей${top && top.hand ? ` — ${top.hand}` : ''} · THPoker`;
+  const desc = `${HAND_KIND[hand.kind] || 'стол'} «${hand.table}», блайнды ${hand.sb}/${hand.bb}, банк ${hand.pot}. `
+    + 'Повтор раздачи по улицам — смотреть без регистрации.';
+  const tpl = fs.readFileSync(path.join(PUBLIC_DIR, 'hand.html'), 'utf8');
+  return tpl
+    .replace('<title>Раздача · THPoker</title>', `<title>${escapeHtml(title)}</title>`)
+    .replace('<!--meta-->', [
+      `<meta name="description" content="${escapeHtml(desc)}">`,
+      `<meta property="og:title" content="${escapeHtml(title)}">`,
+      `<meta property="og:description" content="${escapeHtml(desc)}">`,
+      `<meta property="og:url" content="${escapeHtml(`${origin}/h/${code}`)}">`,
+      `<meta property="og:image" content="${escapeHtml(`${origin}/og.png`)}">`,
+      '<meta property="og:type" content="website">',
+      '<meta name="robots" content="noindex">',
+    ].join('\n'));
+}
+
+let handsPrunedAt = 0;
+const HANDS_KEEP_MS = 7 * 24 * 3600_000;   // обычная раздача хранится неделю; общая — без срока
+
 function maintain(now) {
+  if (now - handsPrunedAt > 3600_000) { handsPrunedAt = now; store.pruneHands(now - HANDS_KEEP_MS); }
   updateAudience();
   for (const table of tables.values()) {
     if (table.phase === 'idle' && !table.tour) {

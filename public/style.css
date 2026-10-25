@@ -1326,6 +1326,92 @@ body:has(.actions.is-raising) .react { display: none; }
 .actions__return { min-width: min(320px, 100%); }
 .sitout-left { color: var(--brass); font-variant-numeric: tabular-nums; }
 
+/* ——— последние раздачи ——— */
+.dialog--hands { position: relative; width: min(640px, 94vw); max-height: 90vh; padding: 24px; scrollbar-width: thin; }
+.dialog--hands h3 { margin-bottom: 14px; }
+.hand-list { display: grid; gap: 8px; margin-bottom: 12px; }
+.hand-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; width: 100%;
+  padding: 10px 12px; text-align: left; font: inherit; color: var(--text); cursor: pointer;
+  background: rgba(255, 255, 255, 0.025); border: 1px solid var(--line); border-radius: 10px;
+}
+.hand-row:hover { border-color: var(--brass-dim); }
+.hand-row__head { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.hand-row__head b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hand-row__head span { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.hand-row__cards { grid-column: 1; display: flex; gap: 3px; align-items: center; flex-wrap: wrap; }
+.hand-row__sep { color: var(--muted); margin: 0 3px; }
+.hand-row__res { grid-row: 1; grid-column: 2; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); }
+.hand-row.is-win .hand-row__res { color: var(--brass); }
+.hand-row.is-loss .hand-row__res { color: #d98a78; }
+.hand-row__note { grid-column: 2; font-size: 12px; color: var(--muted); text-align: right; }
+.hand-back { margin-bottom: 12px; }
+
+/* Повтор раздачи */
+.replay { display: grid; gap: 12px; }
+.replay__head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.replay__head b { font-family: Fraunces, Georgia, serif; font-size: 20px; font-weight: 500; }
+.replay__head span { font-size: 13px; color: var(--muted); }
+.replay__by { color: var(--brass) !important; }
+.replay__felt {
+  display: grid; justify-items: center; gap: 8px; padding: 16px 10px; border-radius: 999px / 70px;
+  background: radial-gradient(120% 100% at 50% 40%, var(--felt) 0%, var(--felt-deep) 74%);
+  border: 6px solid #241a11; box-shadow: 0 0 0 1px var(--brass-dim);
+}
+.replay__board { display: flex; gap: 6px; min-height: 63px; align-items: center; }
+.replay__slot { width: 44px; height: 63px; border-radius: 7px; border: 1px dashed rgba(255, 255, 255, 0.12); }
+.replay__board .card { width: 44px; height: 63px; --r: 7px; }
+.replay__pot { min-height: 18px; font-size: 13px; color: var(--bone); }
+.replay__players { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.replay__player {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto 70px; grid-template-areas: "name cards stack" "act act act";
+  gap: 2px 10px; align-items: center; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line);
+  transition: border-color 160ms ease, background 160ms ease, opacity 160ms ease;
+}
+.replay__player.is-active { border-color: var(--brass); background: rgba(201, 162, 74, 0.07); }
+.replay__player.is-folded { opacity: 0.45; }
+.replay__player.is-winner { border-color: var(--brass); box-shadow: 0 0 14px rgba(201, 162, 74, 0.25); }
+.replay__player.is-me .replay__name { color: var(--brass); }
+.replay__name { grid-area: name; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+.replay__dealer {
+  display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 6px; border-radius: 50%;
+  font-style: normal; font-size: 9px; font-weight: 700; color: #16202a; background: var(--bone); vertical-align: 1px;
+}
+.replay__cards { grid-area: cards; display: flex; gap: 3px; min-height: 46px; }
+.replay__cards .card { width: 32px; height: 46px; --r: 5px; }
+.replay__cards .card .card__r { font-size: 14px; }
+.replay__cards .card .card__s { font-size: 11px; }
+.replay__stack { grid-area: stack; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.replay__act { grid-area: act; font-size: 12px; color: var(--muted); min-height: 1.3em; }
+.replay__player.is-active .replay__act, .replay__player.is-winner .replay__act { color: var(--brass); }
+.replay__caption { margin: 0; min-height: 1.4em; text-align: center; font-size: 15px; color: var(--bone); }
+.replay__controls { display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap; }
+.replay__btn { min-width: 44px; }
+.replay__count { font-size: 12px; color: var(--muted); margin-left: 6px; font-variant-numeric: tabular-nums; }
+.replay__foot {
+  position: sticky; bottom: -24px; z-index: 2; display: grid; gap: 8px; justify-items: center;
+  margin: 0 -24px -24px; padding: 10px 24px 16px; background: var(--ink-2); border-top: 1px solid var(--line);
+}
+.hand-page .replay__foot { bottom: 0; margin: 0 -16px; padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--ink); }
+@media (max-width: 620px) {
+  .dialog--hands { padding: 18px 14px; }
+  .dialog--hands .replay__foot { margin: 0 -14px -18px; padding: 8px 14px 12px; bottom: -18px; }
+  .replay__player { padding: 6px 8px; grid-template-columns: minmax(0, 1fr) auto 64px; }
+  .replay__cards { min-height: 40px; }
+  .replay__cards .card { width: 28px; height: 40px; --r: 5px; }
+  .replay__cards .card .card__r { font-size: 13px; }
+  .replay__board .card, .replay__slot { width: 38px; height: 54px; }
+  .replay__board { min-height: 54px; gap: 5px; }
+  .replay__btn { min-width: 40px; padding: 6px 8px; }
+}
+
+/* Страница общей раздачи */
+.hand-page { min-height: 100vh; background: var(--ink); }
+.hand-page__top { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.hand-page__main { width: min(640px, 100%); margin: 0 auto; padding: 22px 16px 40px; display: grid; gap: 18px; }
+.hand-page__note { color: var(--muted); font-size: 13px; text-align: center; margin: 0; }
+.hand-page__note a { color: var(--brass); }
+
 /* Итог турнира */
 .result { text-align: center; }
 .result__place {

@@ -731,6 +731,90 @@ function referralCard(r) {
   return card;
 }
 
+// ——— последние раздачи ———
+
+const handsDialog = $('#hands-dialog');
+let handsReplay = null;
+$('#hands-close').addEventListener('click', () => handsDialog.close());
+handsDialog.addEventListener('click', (e) => { if (e.target === handsDialog) handsDialog.close(); });
+handsDialog.addEventListener('close', () => { if (handsReplay) handsReplay.stop(); });
+
+const HAND_TIME = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+// Строка списка: когда и где, мои карты, борд и итог в фишках.
+function handRow(h, onOpen) {
+  const row = el('button', `hand-row${h.net > 0 ? ' is-win' : h.net < 0 ? ' is-loss' : ''}`);
+  row.type = 'button';
+  const head = el('span', 'hand-row__head');
+  head.append(el('b', null, h.table), el('span', null, `${fmt(h.sb)}/${fmt(h.bb)} · ${HAND_TIME.format(new Date(h.at))}`));
+  const cards = el('span', 'hand-row__cards');
+  for (const c of h.cards) cards.append(miniCard(c));
+  if (h.board.length) {
+    cards.append(el('span', 'hand-row__sep', '·'));
+    for (const c of h.board) cards.append(miniCard(c));
+  }
+  const res = el('span', 'hand-row__res', h.net > 0 ? `+${fmt(h.net)}` : h.net < 0 ? `−${fmt(-h.net)}` : '0');
+  const note = el('span', 'hand-row__note', h.hand || (h.winner ? `банк ${fmt(h.pot)} — ${h.winner}` : ''));
+  row.append(head, cards, res, note);
+  row.addEventListener('click', () => onOpen(h.id));
+  return row;
+}
+
+async function loadHands() {
+  const data = await getJson('/api/hands');
+  return (data && data.hands) || [];
+}
+
+// Окно со списком последних раздач; клик — повтор в том же окне.
+async function openHands() {
+  const body = $('#hands-body');
+  body.textContent = '';
+  body.append(el('h3', null, 'Последние раздачи'));
+  const list = el('div', 'hand-list');
+  list.append(el('p', 'hint', 'Загружаем…'));
+  body.append(list);
+  if (!handsDialog.open) handsDialog.showModal();
+  Sound.play('click');
+  const hands = await loadHands();
+  list.textContent = '';
+  if (!hands.length) list.append(el('p', 'hint', 'Здесь появятся ваши последние 20 раздач — сыграйте хотя бы одну.'));
+  for (const h of hands) list.append(handRow(h, openHandReplay));
+}
+
+async function openHandReplay(id) {
+  const body = $('#hands-body');
+  const data = await getJson(`/api/hand?id=${encodeURIComponent(id)}`);
+  if (!data || !data.hand) { toast('Раздача не найдена — история хранится неделю'); return; }
+  body.textContent = '';
+  const back = el('button', 'btn btn--ghost btn--sm hand-back', '← Все раздачи');
+  back.type = 'button';
+  back.addEventListener('click', () => { if (handsReplay) handsReplay.stop(); openHands(); });
+  const box = el('div');
+  body.append(back, box);
+  if (!handsDialog.open) handsDialog.showModal();
+  handsReplay = HandReplay.mount(box, data.hand, { onShare: shareHand });
+}
+
+// Поделиться раздачей: ссылка /h/код — смотреть можно без регистрации.
+async function shareHand(hand) {
+  const res = await cmd({ cmd: 'shareHand', id: hand.id });
+  if (!res.ok) return;
+  const url = `${location.origin}/h/${res.code}`;
+  const top = hand.players.reduce((a, b) => (b.won > a.won ? b : a), hand.players[0]);
+  const text = `Смотри, какая раздача в THPoker${top && top.hand ? ` — ${top.hand}` : ''}`;
+  $('#invite-title').textContent = 'Поделиться раздачей';
+  $('#invite-link').value = url;
+  $('#invite-tg').href = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+  const share = $('#invite-share');
+  share.hidden = !navigator.share;
+  share.onclick = () => navigator.share({ title: 'THPoker', text, url }).catch(() => {});
+  $('#invite-text').textContent = 'По ссылке раздачу можно посмотреть шаг за шагом без регистрации. Видны ваши карты и карты, открытые на вскрытии.';
+  showQr(url);
+  const dialog = $('#invite-dialog');
+  if (!dialog.open) dialog.showModal();
+  goal('hand_share');
+}
+
 // Личная ссылка-приглашение: по ней новичок регистрируется и сразу становится другом.
 function openFriendInvite() {
   if (!state.user) return;
@@ -1387,6 +1471,25 @@ function renderProfile(box, data) {
   for (const a of data.achievements) achList.append(achievementItem(a));
   achSec.append(achList);
   root.append(achSec);
+
+  // Последние раздачи — в своём кабинете: пять свежих и кнопка ко всем.
+  if (data.own) {
+    const sec = profileSection('Последние раздачи');
+    const list = el('div', 'hand-list');
+    sec.append(list);
+    const all = el('button', 'btn btn--sm', 'Все раздачи');
+    all.type = 'button';
+    all.addEventListener('click', openHands);
+    sec.append(all);
+    root.append(sec);
+    loadHands().then((hands) => {
+      if (!hands.length) list.append(el('p', 'hint', 'Здесь появятся ваши последние раздачи — с повтором по улицам и ссылкой, чтобы поделиться.'));
+      for (const h of hands.slice(0, 5)) {
+        list.append(handRow(h, (id) => { openHandReplay(id); }));
+      }
+      all.hidden = hands.length <= 5;
+    });
+  }
 
   // Магазин оформления — в своём кабинете.
   if (data.own) {
@@ -3100,6 +3203,7 @@ menuAction('#menu-sitout', () => {
 });
 menuAction('#menu-bot', () => cmd({ cmd: 'addBot' }));
 menuAction('#menu-invite', () => { if (state.table) openInvite(state.table); });
+menuAction('#menu-hands', () => openHands());
 
 // ——— приглашения ———
 

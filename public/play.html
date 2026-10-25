@@ -210,6 +210,7 @@
           <button class="menu__item" id="menu-topup" role="menuitem">Докупить фишки</button>
           <button class="menu__item" id="menu-sitout" role="menuitem">Отойти</button>
           <button class="menu__item" id="menu-invite" role="menuitem">Пригласить друзей</button>
+          <button class="menu__item" id="menu-hands" role="menuitem">Последние раздачи</button>
           <button class="menu__item" id="menu-bot" role="menuitem">Позвать бота</button>
           <button class="menu__item menu__item--danger" id="menu-stand" role="menuitem">Встать из-за стола</button>
           <button class="menu__item menu__item--danger" id="menu-close" role="menuitem" hidden>Закрыть стол</button>
@@ -414,7 +415,14 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<!-- Последние раздачи: список и повтор по улицам -->
+<dialog id="hands-dialog" class="dialog dialog--hands">
+  <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="hands-close" title="Закрыть" aria-label="Закрыть"></button>
+  <div id="hands-body"></div>
+</dialog>
+
 <script src="/sound.js"></script>
+<script src="/replay.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

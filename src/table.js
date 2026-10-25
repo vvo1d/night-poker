@@ -91,6 +91,7 @@ class Table {
     this.onChipsReturn = hooks.onChipsReturn || (() => {});
     this.onHandStart = hooks.onHandStart || (() => {});
     this.onHandEnd = hooks.onHandEnd || (() => {});
+    this.onHandRecord = hooks.onHandRecord || (() => {});   // запись раздачи для истории
     this.onSeat = hooks.onSeat || (() => {});
     this.onUnseat = hooks.onUnseat || (() => {});
     this.version = 0;
@@ -257,7 +258,7 @@ class Table {
     }
     if (p.inHand && !p.folded && this.phase !== 'idle') {
       if (this.actingSeat === p.seat) this.applyAction(p, 'fold');
-      else { p.folded = true; p.lastAction = 'fold'; this.afterFoldCheck(); }
+      else { p.folded = true; p.lastAction = 'fold'; this.logAction(p, 'fold'); this.afterFoldCheck(); }
     }
     // Вне раздачи — выбывает сразу; иначе место за столом освободится, когда раздача доиграется.
     if (this.phase === 'idle' && this.byUser(userId)) {
@@ -288,7 +289,7 @@ class Table {
     if (p.inHand && !p.folded && this.phase !== 'idle') {
       p.leaving = true;
       if (this.actingSeat === p.seat) this.applyAction(p, 'fold');
-      else { p.folded = true; p.lastAction = 'fold'; this.afterFoldCheck(); }
+      else { p.folded = true; p.lastAction = 'fold'; this.logAction(p, 'fold'); this.afterFoldCheck(); }
       this.note(`${p.name} выходит из-за стола`, 'seat');
       this.touch();
       return { ok: true, pending: true };
@@ -393,6 +394,18 @@ class Table {
     const sbSeat = heads ? this.buttonSeat : this.nextOccupied(this.buttonSeat, isReady);
     const bbSeat = this.nextOccupied(sbSeat, isReady);
 
+    // История раздачи: кто с каким стеком сел, затем каждое действие и улица.
+    this.history = {
+      at: Date.now(),
+      table: this.name,
+      kind: this.mttId ? 'mtt' : this.tour ? (this.tour.spin ? 'spin' : 'sng') : 'cash',
+      sb: this.sb,
+      bb: this.bb,
+      button: this.buttonSeat,
+      players: ready.map((p) => ({ seat: p.seat, name: p.name, bot: !!p.isBot, uid: p.isBot ? null : p.userId, stack: p.stack, cards: [] })),
+      actions: [],
+      board: [],
+    };
     this.postBlind(this.seats[sbSeat], this.sb, 'small blind');
     this.postBlind(this.seats[bbSeat], this.bb, 'big blind');
     this.currentBet = Math.max(this.sb, this.bb);
@@ -407,6 +420,7 @@ class Table {
       }
     }
 
+    for (const h of this.history.players) h.cards = [...this.seats[h.seat].cards];
     this.phase = 'preflop';
     this.bbSeat = bbSeat;
     const first = heads ? this.buttonSeat : this.nextOccupied(bbSeat, (p) => p.inHand && !p.allIn);
@@ -423,6 +437,13 @@ class Table {
     p.contributed += pay;
     if (p.stack === 0) p.allIn = true;
     p.lastAction = label;
+    this.logAction(p, label === 'small blind' ? 'sb' : 'bb', pay, 'preflop');
+  }
+
+  // Действие — в историю раздачи: сколько фишек положил и до скольки выросла ставка.
+  logAction(p, action, amount = 0, street = this.phase) {
+    if (!this.history) return;
+    this.history.actions.push({ st: street, seat: p.seat, a: action, amt: amount, to: p.bet, allIn: !!p.allIn });
   }
 
   // За отошедшего ходит сам стол: чек, если можно, иначе пас.
@@ -488,14 +509,17 @@ class Table {
     if (action === 'fold') {
       p.folded = true;
       p.lastAction = 'fold';
+      this.logAction(p, 'fold');
       this.note(`${p.name}: фолд`, 'action');
     } else if (action === 'check') {
       p.lastAction = 'check';
+      this.logAction(p, 'check');
       this.note(`${p.name}: чек`, 'action');
     } else if (action === 'call') {
       const pay = Math.min(this.currentBet - p.bet, p.stack);
       this.moveChips(p, pay);
       p.lastAction = 'call';
+      this.logAction(p, 'call', pay);
       this.note(`${p.name}: колл ${pay}${p.allIn ? ' (олл-ин)' : ''}`, 'action');
     } else if (action === 'raise') {
       const pay = raiseTo - p.bet;
@@ -513,6 +537,7 @@ class Table {
         }
       }
       p.lastAction = wasBet === 0 ? 'bet' : 'raise';
+      this.logAction(p, p.lastAction, pay);
       this.lastAggressorSeat = p.seat;
       this.note(`${p.name}: ${wasBet === 0 ? 'бет' : 'рейз до'} ${p.bet}${p.allIn ? ' (олл-ин)' : ''}`, 'action');
     }
@@ -608,6 +633,7 @@ class Table {
     this.deck.pop(); // сжигаем карту
     const count = phase === 'flop' ? 3 : 1;
     for (let i = 0; i < count; i++) this.board.push(this.deck.pop());
+    if (this.history) this.history.actions.push({ st: phase, a: 'board', cards: this.board.slice(-count) });
     this.note(`${{ flop: 'Флоп', turn: 'Тёрн', river: 'Ривер' }[phase]}: ${this.board.join(' ')}`, 'street');
     this.touch();
   }
@@ -881,6 +907,7 @@ class Table {
     // Страховка: если раздачу закрывают в обход очереди вскрытия, банки всё равно раздаются.
     if (this.pendingWinners.length) { this.reveal = null; this.awardPots(); }
     this.reportHand();
+    this.recordHistory();
     const busted = [];
     const ghosts = [];
     for (const p of this.players()) {
@@ -910,6 +937,25 @@ class Table {
     this.phase = 'idle';
     this.touch();
     this.maybeStartHand();
+  }
+
+  // Раздача сыграна — дописываем итог (кто что показал и сколько выиграл) и отдаём в историю.
+  recordHistory() {
+    const h = this.history;
+    this.history = null;
+    if (!h) return;
+    h.board = [...this.board];
+    for (const x of h.players) {
+      const p = this.seats[x.seat];
+      if (!p || p.name !== x.name) continue;   // встал посреди раздачи — итог неизвестен
+      x.shown = !!(p.showCards && !p.mucked);
+      x.folded = !!p.folded;
+      x.won = p.won || 0;
+      x.net = (p.won || 0) - (p.contributed || 0);
+      x.hand = x.shown ? p.handName || null : null;
+    }
+    h.pot = h.players.reduce((sum, x) => sum + (x.won || 0), 0);
+    this.onHandRecord(h, this);
   }
 
   // Итог раздачи по каждому участнику — для статистики игрока. Комбинацию

@@ -56,7 +56,35 @@ const MIGRATIONS = [
   (db) => db.exec(`
     ALTER TABLE users ADD COLUMN meta TEXT NOT NULL DEFAULT '{}';
   `),
+  // История раздач: сама раздача, у каждого участника — его последние раздачи,
+  // и ссылки «поделиться» (раздача, которой поделились, хранится без срока).
+  (db) => db.exec(`
+    CREATE TABLE hands (
+      id   TEXT PRIMARY KEY,
+      at   INTEGER NOT NULL,
+      data TEXT NOT NULL,
+      keep INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX hands_at ON hands (at);
+    CREATE TABLE user_hands (
+      user_id TEXT NOT NULL,
+      hand_id TEXT NOT NULL,
+      at      INTEGER NOT NULL,
+      PRIMARY KEY (user_id, hand_id)
+    );
+    CREATE INDEX user_hands_recent ON user_hands (user_id, at DESC);
+    CREATE TABLE hand_shares (
+      code    TEXT PRIMARY KEY,
+      hand_id TEXT NOT NULL,
+      seat    INTEGER NOT NULL,
+      user_id TEXT NOT NULL,
+      at      INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX hand_shares_owner ON hand_shares (hand_id, user_id);
+  `),
 ];
+
+const HANDS_PER_USER = 20;
 
 function parseJson(text, fallback) {
   try { return JSON.parse(text); } catch { return fallback; }
@@ -121,6 +149,19 @@ function sqliteBackend(file = DEFAULT_DB) {
     liveSessions: db.prepare('SELECT * FROM sessions WHERE seen > ?'),
     top: db.prepare('SELECT name, chips FROM users ORDER BY chips DESC LIMIT ?'),
     count: db.prepare('SELECT COUNT(*) AS n FROM users'),
+    addHand: db.prepare('INSERT OR IGNORE INTO hands (id, at, data) VALUES (?, ?, ?)'),
+    linkHand: db.prepare('INSERT OR IGNORE INTO user_hands (user_id, hand_id, at) VALUES (?, ?, ?)'),
+    trimHands: db.prepare(`DELETE FROM user_hands WHERE user_id = ? AND hand_id NOT IN
+      (SELECT hand_id FROM user_hands WHERE user_id = ? ORDER BY at DESC LIMIT ${HANDS_PER_USER})`),
+    recentHands: db.prepare(`SELECT h.id, h.data FROM user_hands u JOIN hands h ON h.id = u.hand_id
+      WHERE u.user_id = ? ORDER BY u.at DESC LIMIT ?`),
+    getHand: db.prepare('SELECT id, data FROM hands WHERE id = ?'),
+    keepHand: db.prepare('UPDATE hands SET keep = 1 WHERE id = ?'),
+    shareOf: db.prepare('SELECT code FROM hand_shares WHERE hand_id = ? AND user_id = ?'),
+    addShare: db.prepare('INSERT INTO hand_shares (code, hand_id, seat, user_id, at) VALUES (?, ?, ?, ?, ?)'),
+    getShare: db.prepare('SELECT hand_id, seat FROM hand_shares WHERE code = ?'),
+    pruneHands: db.prepare('DELETE FROM hands WHERE at < ? AND keep = 0'),
+    pruneLinks: db.prepare('DELETE FROM user_hands WHERE at < ?'),
   };
 
   importOldFiles(db, sql, path.dirname(file));
@@ -178,6 +219,46 @@ function sqliteBackend(file = DEFAULT_DB) {
     },
 
     top(limit) { return sql.top.all(limit); },
+
+    // ——— история раздач ———
+    saveHand(id, at, data, userIds) {
+      db.exec('BEGIN');
+      try {
+        sql.addHand.run(id, at, JSON.stringify(data));
+        for (const uid of userIds) {
+          sql.linkHand.run(uid, id, at);
+          sql.trimHands.run(uid, uid);
+        }
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+    },
+    recentHands(userId, limit = HANDS_PER_USER) {
+      return sql.recentHands.all(userId, limit).map((row) => ({ id: row.id, ...parseJson(row.data, {}) }));
+    },
+    getHand(id) {
+      const row = sql.getHand.get(id);
+      return row ? { id: row.id, ...parseJson(row.data, {}) } : null;
+    },
+    // Ссылка «поделиться»: одна на игрока и раздачу; раздача с ней больше не удаляется.
+    shareHand(handId, seat, userId, code) {
+      const had = sql.shareOf.get(handId, userId);
+      if (had) return had.code;
+      sql.addShare.run(code, handId, seat, userId, Date.now());
+      sql.keepHand.run(handId);
+      return code;
+    },
+    getShare(code) {
+      const row = sql.getShare.get(code);
+      return row ? { handId: row.hand_id, seat: row.seat } : null;
+    },
+    pruneHands(before) {
+      sql.pruneHands.run(before);
+      sql.pruneLinks.run(before);
+    },
+
     close() { db.close(); },
   };
 }
@@ -254,6 +335,32 @@ function fileBackend(dir = DATA_DIR) {
   let snapshotAt = Date.now();
   let known = new Map();   // что лежит в файлах — нужно для снимка
 
+  const handsFile = path.join(dir, 'hands.json');
+  const hands = { byId: new Map(), byUser: new Map(), shares: new Map() };
+  try {
+    const raw = JSON.parse(fs.readFileSync(handsFile, 'utf8'));
+    hands.byId = new Map(raw.byId || []);
+    hands.byUser = new Map(raw.byUser || []);
+    hands.shares = new Map(raw.shares || []);
+  } catch { /* истории ещё нет */ }
+  let handsTimer = null;
+  const writeHands = () => {
+    clearTimeout(handsTimer);
+    handsTimer = null;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(`${handsFile}.tmp`, JSON.stringify({
+        byId: [...hands.byId], byUser: [...hands.byUser], shares: [...hands.shares],
+      }));
+      fs.renameSync(`${handsFile}.tmp`, handsFile);
+    } catch (err) { console.error('Не удалось сохранить историю раздач:', err.message); }
+  };
+  const saveHandsSoon = () => {
+    if (handsTimer) return;
+    handsTimer = setTimeout(writeHands, 5000);
+    handsTimer.unref();   // запись истории не должна держать процесс при остановке
+  };
+
   const snapshot = async () => {
     await fsp.mkdir(dir, { recursive: true });
     const tmp = `${usersFile}.tmp`;
@@ -308,7 +415,43 @@ function fileBackend(dir = DATA_DIR) {
         .map((u) => ({ name: u.name, chips: u.chips }));
     },
 
-    async close() { await snapshot(); },
+    // ——— история раздач: в памяти и файлом hands.json (запасной путь) ———
+    saveHand(id, at, data, userIds) {
+      if (!hands.byId.has(id)) hands.byId.set(id, { id, at, data, keep: false });
+      for (const uid of userIds) {
+        const list = (hands.byUser.get(uid) || []).filter((x) => x !== id);
+        list.unshift(id);
+        hands.byUser.set(uid, list.slice(0, HANDS_PER_USER));
+      }
+      saveHandsSoon();
+    },
+    recentHands(userId, limit = HANDS_PER_USER) {
+      return (hands.byUser.get(userId) || []).slice(0, limit)
+        .map((id) => hands.byId.get(id)).filter(Boolean).map((h) => ({ id: h.id, ...h.data }));
+    },
+    getHand(id) {
+      const h = hands.byId.get(id);
+      return h ? { id: h.id, ...h.data } : null;
+    },
+    shareHand(handId, seat, userId, code) {
+      for (const [c, x] of hands.shares) if (x.handId === handId && x.userId === userId) return c;
+      hands.shares.set(code, { handId, seat, userId });
+      const h = hands.byId.get(handId);
+      if (h) h.keep = true;
+      saveHandsSoon();
+      return code;
+    },
+    getShare(code) {
+      const x = hands.shares.get(code);
+      return x ? { handId: x.handId, seat: x.seat } : null;
+    },
+    pruneHands(before) {
+      for (const [id, h] of hands.byId) if (h.at < before && !h.keep) hands.byId.delete(id);
+      for (const [uid, list] of hands.byUser) hands.byUser.set(uid, list.filter((id) => hands.byId.has(id)));
+      saveHandsSoon();
+    },
+
+    async close() { await snapshot(); writeHands(); },
   };
 }
 

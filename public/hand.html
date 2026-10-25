@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Раздача · THPoker</title>
+<!--meta-->
+<meta name="theme-color" content="#0d1317">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-120.png" sizes="120x120" type="image/png">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="hand-page">
+<header class="hand-page__top">
+  <a class="brand" href="/">THPoker</a>
+  <a class="btn btn--primary btn--sm" href="/play">Играть бесплатно</a>
+</header>
+<main class="hand-page__main">
+  <div id="replay"><p class="hand-page__note">Загружаем раздачу…</p></div>
+  <p class="hand-page__note">Покер на виртуальные фишки — без денег, прямо в браузере. <a href="/">Что такое THPoker</a></p>
+</main>
+<script src="/replay.js"></script>
+<script>
+  // Код раздачи — в адресе: /h/КОД.
+  (async () => {
+    const code = decodeURIComponent(location.pathname.split('/')[2] || '');
+    const box = document.getElementById('replay');
+    try {
+      const res = await fetch(`/api/shared-hand?code=${encodeURIComponent(code)}`);
+      const data = await res.json();
+      if (!res.ok || !data.hand) throw new Error();
+      HandReplay.mount(box, data.hand);
+    } catch {
+      box.innerHTML = '<p class="hand-page__note">Раздача не найдена — возможно, ссылка неполная.</p>';
+    }
+  })();
+</script>
+</body>
+</html>
