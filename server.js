@@ -58,7 +58,13 @@ const ROOM_CONFIGS = [
 ];
 
 // Из чего игрок собирает свой стол. Закупка — от 20 до 100 больших блайндов.
-const STAKES = [[1, 2], [2, 5], [5, 10], [10, 20], [25, 50], [50, 100], [100, 200]];
+const STAKES = [[1, 2], [2, 5], [5, 10], [10, 20], [25, 50], [50, 100], [100, 200]];   // подсказки в форме
+// Круглые ряды значений: «67», «666» или «120» не годятся — только привычные ступени.
+// Большой блайнд — ряд 1-2-5 (малый — половина: 1/2, 2/5, 5/10, 25/50 …).
+const BLIND_STEPS = [2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10_000, 20_000, 50_000, 100_000];
+// Взнос sit-n-go — ряд 1-2-2,5-5: 10, 20, 25, 50, 100 … 1 000 000.
+const BUY_IN_STEPS = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10_000, 20_000, 25_000,
+  50_000, 100_000, 200_000, 250_000, 500_000, 1_000_000];
 const CASH_SEATS = [2, 4, 6, 9];
 const SNG_SEATS = [6, 9];
 const TIMEOUTS = [12, 25, 40];
@@ -198,17 +204,18 @@ function createUserTable(user, body) {
     const seats = Number(body.seats);
     if (!SNG_SEATS.includes(seats)) return { error: 'Sit-n-go бывает на 6 или 9 мест' };
     const buyIn = Number(body.buyIn);
-    if (!SNG_BUY_INS.includes(buyIn)) return { error: 'Выберите взнос' };
+    if (!BUY_IN_STEPS.includes(buyIn)) return { error: 'Выберите взнос из ряда: 10, 20, 25, 50, 100 … 1 000 000' };
     return createSngTable(name || `Sit-n-go на ${seats}`, seats, buyIn, { owner: user, privateTable });
   }
 
   const seats = Number(body.seats);
-  const stake = STAKES[Number(body.stake)];
+  // Большой блайнд — любое целое в пределах; малый — половина (вниз). Старые клиенты шлют номер подсказки.
+  const bb = body.bb !== undefined ? Number(body.bb) : (STAKES[Number(body.stake)] || [])[1];
   const timeout = Number(body.timeout);
   if (!CASH_SEATS.includes(seats)) return { error: 'Мест за столом может быть 2, 4, 6 или 9' };
-  if (!stake) return { error: 'Выберите блайнды' };
+  if (!BLIND_STEPS.includes(bb)) return { error: 'Выберите блайнды из ряда: 1/2, 2/5, 5/10 … 50 000/100 000' };
   if (!TIMEOUTS.includes(timeout)) return { error: 'Выберите время на ход' };
-  const [sb, bb] = stake;
+  const sb = Math.max(1, Math.floor(bb / 2));
   return createTable({
     name: name || `Стол ${user.name}`,
     maxSeats: seats, sb, bb, minBuyIn: bb * 20, maxBuyIn: bb * 100, timeout,
@@ -401,6 +408,8 @@ function telegramIdentity(body) {
 const snapshot = new Snapshot(store.dataDir);
 
 // Стол игрока из снимка открывается заново пустым — с тем же адресом и приглашением.
+const presence = new Map();         // userId -> { conns, lastSeen }
+
 function reopenTable(rec) {
   if (tables.has(rec.id) || invites.has(rec.invite)) return false;
   const owner = rec.ownerId && store.user(rec.ownerId);
@@ -419,10 +428,61 @@ function reopenTable(rec) {
   return true;
 }
 
+// Стол из снимка — вместе с игроками: кэш — со стеками на тех же местах,
+// sit-n-go — с регистрациями, а идущий — с уровнем, временем, местами и множителем.
+// Недоигранная раздача отменяется: вложенное в неё уже лежит в стеках снимка.
+// Если стол поднять нельзя (хозяин пропал и т. п.) — фишки вернутся по-старому.
+function restoreTable(rec) {
+  const sng = rec.sng;
+  const humans = rec.players.filter((p) => !p.isBot);
+  if (sng && sng.status === 'finished') return false;
+  if (!humans.length) return false;
+  if (rec.players.some((p) => !Number.isInteger(p.seat))) return false;   // снимок старого формата
+
+  let table = tables.get(rec.id);
+  if (!table) {
+    if (rec.house && rec.houseSng) {
+      table = createTable({
+        id: rec.id, name: rec.name, maxSeats: rec.maxSeats, sb: 0, bb: 0,
+        minBuyIn: rec.minBuyIn, maxBuyIn: rec.maxBuyIn, timeout: rec.timeout,
+      }, { sng: sng.seats, buyIn: sng.buyIn, spin: !!sng.spin, invite: rec.invite, createdAt: rec.createdAt });
+      table.houseSng = rec.houseSng;
+      table.fillMs = rec.fillMs || HOUSE_SNG_FILL_MS;
+      [table.sb, table.bb] = table.tour.blinds();
+    } else if (!rec.house && reopenTable(rec)) {
+      table = tables.get(rec.id);
+    }
+  }
+  if (!table || !!table.tour !== !!sng) return false;
+
+  if (sng && sng.status === 'running') {
+    const tour = table.tour;
+    tour.status = 'running';
+    tour.startedAt = Date.now() - (sng.elapsed || 0);
+    tour.level = sng.level || 0;
+    tour.levelAt = tour.startedAt + tour.level * tour.levelMs;
+    tour.places = sng.places || [];
+    tour.humans = sng.humans || humans.length;
+    if (tour.spin) tour.multiplier = sng.multiplier || 2;
+    tour.prizes = sng.prizes && sng.prizes.length ? sng.prizes : tour.prizes;
+    [table.sb, table.bb] = tour.blinds();
+    table.minRaise = table.bb;
+  }
+  for (const p of rec.players) {
+    table.restoreSeat({ id: p.userId, name: p.name, isBot: p.isBot }, p.seat, p.chips, !!p.sittingOut);
+    // Не вернувшийся после перезапуска уйдёт в «пропуск раздач», а с кэш-стола — встанет (см. maintain).
+    if (!p.isBot && !presence.has(p.userId)) presence.set(p.userId, { conns: 0, lastSeen: Date.now() });
+  }
+  table.note('Сервер перезапускался — стол восстановлен, недоигранная раздача отменена', 'result');
+  table.maybeStartHand();
+  return true;
+}
+
 {
   const restored = snapshot.restore({
     credit: (userId, amount) => store.addChips(userId, amount),
     reopen: reopenTable,
+    restore: restoreTable,
   });
   // Новые столы не должны занять номера восстановленных.
   for (const id of tables.keys()) {
@@ -437,8 +497,8 @@ function reopenTable(rec) {
       restored.players += 1;
       restored.chips += r.amount;
     }
-    console.log(`Снимок столов разобран: фишки вернулись ${restored.players} игрокам `
-      + `(${restored.chips}), столов открыто заново: ${restored.tables}`);
+    console.log(`Снимок столов разобран: столов поднято ${restored.tables}, игроков вернулось за столы ${restored.seated}; `
+      + `фишки в банк вернулись ${restored.players} игрокам (${restored.chips})`);
     // Снимок убираем, только когда возвращённые фишки легли в базу.
     snapshot.paused = true;
     Promise.resolve(store.flush()).then(() => { snapshot.clear(); snapshot.paused = false; });
@@ -446,7 +506,6 @@ function reopenTable(rec) {
 }
 
 const clients = new Set();          // открытые SSE-соединения
-const presence = new Map();         // userId -> { conns, lastSeen }
 
 // ——— наблюдение за нагрузкой ———
 // Задержка игрового цикла — главный признак перегрузки: если она растёт,
@@ -826,6 +885,8 @@ function lobbySnapshot(now = Date.now()) {
     announcement: admin.getAnnouncement(),
     stakes: STAKES,
     sngBuyIns: SNG_BUY_INS,
+    blindSteps: BLIND_STEPS,
+    buyInSteps: BUY_IN_STEPS,
     mtts: mtts.overview(null),
   });
   if (next !== lobbyJson) {
@@ -1077,7 +1138,8 @@ async function handleCommand(ctx, body) {
     case 'standUp': {
       const table = room();
       if (!table) return { error: 'Вы не за столом' };
-      return table.leave(user.id);
+      // Из идущего турнира — только сдавшись: турнирные фишки сгорают.
+      return body.forfeit ? table.forfeit(user.id) : table.leave(user.id);
     }
     case 'act': {
       const table = room();
@@ -1111,7 +1173,7 @@ async function handleCommand(ctx, body) {
       const res = table.addChips(user.id, amount);
       if (res.error) return res;
       store.addChips(user.id, -amount);
-      return { ok: true };
+      return { ok: true, pending: !!res.pending };
     }
     case 'addBot': {
       const table = room();
@@ -1314,7 +1376,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, {
         user: store.publicUser(ctx.user.id),
         admin: admin.isAdmin(ctx.user),
-        roomId: ctx.session.roomId,
+        roomId: ctx.session.roomId || (tableOfUser(ctx.user.id) || {}).id || null,
         leaderboard: store.leaderboard(),
       });
     }
@@ -1613,6 +1675,8 @@ function pushTo(client, force = false) {
     session.followTable = seatedAt.id;
     session.roomId = seatedAt.id;
   }
+  // Сидит за столом, а сессия о нём не знает (например, после перезапуска сервера) — к столу.
+  if (seatedAt && !session.roomId) session.roomId = seatedAt.id;
 
   if (session.roomId) {
     const table = tables.get(session.roomId);

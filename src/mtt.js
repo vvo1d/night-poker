@@ -215,7 +215,9 @@ class Mtt {
   // Вылетевшие за раздачу на одном столе: места по стеку на начало раздачи.
   bust(table, busted) {
     if (this.status !== 'running') return;
-    const ordered = [...busted].sort((a, b) => b.handStartStack - a.handStartStack);
+    // Места раздаются снизу: первым худшее место получает сдавшийся, затем тот,
+    // кто пришёл в раздачу с меньшим стеком.
+    const ordered = [...busted].sort((a, b) => (!!b.forfeit - !!a.forfeit) || a.handStartStack - b.handStartStack);
     let place = this.alive;
     for (const p of ordered) {
       this.award(table, p, place);

@@ -192,6 +192,19 @@ class Table {
     return { ok: true };
   }
 
+  // Посадка из снимка после перезапуска: стек как был, без проверки закупки.
+  restoreSeat(user, seat, stack, sittingOut = false) {
+    if (seat < 0 || seat >= this.maxSeats || this.seats[seat] || this.byUser(user.id)) return { error: 'Место занято' };
+    const p = new Player({ userId: user.id, name: user.name, isBot: !!user.isBot, stack, seat });
+    p.sittingOut = sittingOut || (stack === 0 && !this.tour);
+    this.seats[seat] = p;
+    this.byUserId.set(p.userId, p);
+    this.emptyAt = 0;
+    this.onSeat(p, this);
+    this.touch();
+    return { ok: true };
+  }
+
   // Человек и боты встретились за столом — кто-нибудь из ботов здоровается.
   botGreet(newcomer, rand = Math.random) {
     const now = Date.now();
@@ -205,13 +218,52 @@ class Table {
   addChips(userId, amount) {
     const p = this.byUser(userId);
     if (!p) return { error: 'Вас нет за столом' };
-    if (p.inHand && this.phase !== 'idle') return { error: 'Докупить можно между раздачами' };
-    if (p.stack + amount > this.maxBuyIn) return { error: `Максимум за столом — ${this.maxBuyIn} фишек` };
+    if (p.stack + (p.topUp || 0) + amount > this.maxBuyIn) return { error: `Максимум за столом — ${this.maxBuyIn} фишек` };
+    // Посреди своей раздачи стек менять нельзя — докупка встанет в стек со следующей.
+    if (p.inHand && this.phase !== 'idle') {
+      p.topUp = (p.topUp || 0) + amount;
+      this.note(`${p.name} докупает ${amount} — со следующей раздачи`, 'seat');
+      this.touch();
+      return { ok: true, pending: true };
+    }
     p.stack += amount;
     if (p.sittingOut && !p.leaving) p.sittingOut = false;
     this.note(`${p.name} докупает ${amount}`, 'seat');
     this.touch();
     this.maybeStartHand();
+    return { ok: true };
+  }
+
+  // Сдаться в идущем турнире: карты в пас, место — ниже всех, кто ещё играет,
+  // турнирные фишки сгорают. Приз за занятое место (если оно призовое) — выплачивается.
+  forfeit(userId) {
+    const p = this.byUser(userId);
+    if (!p) return { error: 'Вас нет за столом' };
+    if (!this.tour || this.tour.status !== 'running') return this.leave(userId);
+    p.forfeit = true;
+    p.sittingOut = true;
+    this.note(`${p.name} покидает турнир`, 'seat');
+    // Место присуждаем сразу — последнее из неразыгранных; в турнире по расписанию
+    // места считает сам турнир, там игрок выбывает по концу раздачи.
+    const now = !this.mttId && this.phase !== 'idle';
+    if (now) {
+      const place = this.players().filter((x) => !x.forfeitPlaced).length;
+      p.forfeitPlaced = true;
+      this.tour.award(this, p, place);
+      this.onUnseat(p, this);   // игрок свободен: может сразу записаться в новый турнир
+    }
+    if (p.inHand && !p.folded && this.phase !== 'idle') {
+      if (this.actingSeat === p.seat) this.applyAction(p, 'fold');
+      else { p.folded = true; p.lastAction = 'fold'; this.afterFoldCheck(); }
+    }
+    // Вне раздачи — выбывает сразу; иначе место за столом освободится, когда раздача доиграется.
+    if (this.phase === 'idle' && this.byUser(userId)) {
+      if (p.forfeitPlaced) this.removePlayer(p);
+      else this.tour.bust(this, [p]);
+      if (this.players().length <= 1) this.tour.bust(this, []);
+      this.maybeStartHand();
+    }
+    this.touch();
     return { ok: true };
   }
 
@@ -242,7 +294,8 @@ class Table {
   }
 
   removePlayer(p) {
-    const chips = p.stack;
+    const chips = p.stack + (p.topUp || 0);
+    p.topUp = 0;
     this.seats[p.seat] = null;
     this.byUserId.delete(p.userId);
     this.onUnseat(p, this);
@@ -810,6 +863,7 @@ class Table {
     if (this.pendingWinners.length) { this.reveal = null; this.awardPots(); }
     this.reportHand();
     const busted = [];
+    const ghosts = [];
     for (const p of this.players()) {
       p.inHand = false;
       p.cards = [];
@@ -817,10 +871,15 @@ class Table {
       p.mucked = false;
       p.bestCards = null;
       p.lastAction = null;
-      if (this.tour && p.stack === 0) { busted.push(p); continue; }
+      // Сдавшийся с уже присуждённым местом просто освобождает стул.
+      if (p.forfeitPlaced) { ghosts.push(p); continue; }
+      // Сдавшийся в турнире выбывает вместе с вылетевшими — местом ниже их.
+      if (this.tour && (p.stack === 0 || p.forfeit)) { busted.push(p); continue; }
       if (p.leaving) { this.removePlayer(p); continue; }
+      if (p.topUp) { p.stack += p.topUp; p.topUp = 0; }
       if (p.stack === 0) { p.sittingOut = true; p.busted = true; }
     }
+    for (const p of ghosts) this.removePlayer(p);
     if (this.tour) this.tour.bust(this, busted);
     this.board = [];
     this.pots = [];
@@ -992,6 +1051,8 @@ class Table {
     return {
       seat: p.seat,
       stack: p.stack,
+      topUp: p.topUp || 0,            // докупка, которая встанет в стек со следующей раздачи
+      forfeit: !!p.forfeit,           // сдался в турнире — выбудет, когда доиграется раздача
       inHand: p.inHand && this.phase !== 'idle',
       cards: p.cards,
       sittingOut: p.sittingOut,
@@ -1017,7 +1078,8 @@ class Table {
   // Собирается один раз на версию: у стола зрителей может быть сколько угодно.
   frameFor(p, withStrength = true) {
     this.buildFrames();
-    if (!p) return this.frameNoYou;
+    // Сдавшийся в турнире — уже зритель, хотя его сброшенная рука ещё доигрывается.
+    if (!p || p.forfeitPlaced) return this.frameNoYou;
     const key = `${p.seat}:${withStrength ? 1 : 0}`;
     let frame = this.privJson.get(key);
     if (frame === undefined) {

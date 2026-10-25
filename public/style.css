@@ -1064,6 +1064,8 @@ body:has(.actions.is-raising) .react { display: none; }
   max-width: 150px; padding: 5px 11px; border-radius: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-size: 13px; font-weight: 500; color: #1a1305; background: var(--bone);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); pointer-events: none;
+  /* Облачко лежит в плашке игрока, а у её текста тень — для читаемости на сукне. Здесь она лишняя. */
+  text-shadow: none; font-family: "IBM Plex Sans", sans-serif; line-height: 1.3;
 }
 .seat__bubble::after {
   content: ''; position: absolute; left: 50%; top: 100%; transform: translateX(-50%);
@@ -1074,6 +1076,14 @@ body:has(.actions.is-raising) .react { display: none; }
 @keyframes bubbleIn {
   from { opacity: 0; transform: translate(-50%, 8px) scale(0.6); }
   to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+/* На аватаре: по центру квадрата, без хвостика. */
+.seat__avatar .seat__bubble { bottom: auto; top: 50%; transform: translate(-50%, -50%); z-index: 7; }
+.seat__avatar .seat__bubble::after { display: none; }
+.seat__avatar .seat__bubble.is-new { animation-name: bubbleInCenter; }
+@keyframes bubbleInCenter {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 .turnbar { height: 3px; background: transparent; }
 .turnbar i { display: block; height: 100%; width: 0; background: var(--brass); transition: width 200ms linear, background 300ms ease; }
@@ -1267,11 +1277,19 @@ body:has(.actions.is-raising) .react { display: none; }
 .shop__frame .seat__face { width: 46px; height: 46px; font-size: 20px; border-radius: 10px; cursor: default; }
 .shop__frame[data-frame]::before { inset: -4px; border-radius: 13px; }
 
+/* Вкладка «Задания» */
+.quests__head { font-size: 17px; margin: 18px 0 10px; }
+.quests .today { margin-top: 0; }
+.quests .weekly { margin-top: 10px; }
+@media (max-width: 620px) {
+  /* На своей вкладке карточки не листаются вбок, а идут столбиком. */
+  .quests .today { display: grid; grid-template-columns: 1fr; overflow: visible; margin: 0; padding: 0; }
+  .quests .today__card { flex: none; }
+}
 /* Уровень и задания недели */
 .today__levelhead { display: flex; align-items: baseline; gap: 10px; }
 .today__level .today__amount { font-size: 30px; }
 .weekly { grid-column: 1 / -1; min-width: 0; }   /* иначе лента карточек на телефоне распирает страницу */
-.weekly h3 { font-size: 17px; margin: 4px 0 10px; }
 .weekly__left { font-family: "IBM Plex Sans", sans-serif; font-size: 13px; color: var(--muted); }
 .today--week { grid-template-columns: repeat(5, 1fr); margin-top: 0; }
 .today__chest { border-style: dashed; }
@@ -1287,6 +1305,13 @@ body:has(.actions.is-raising) .react { display: none; }
   background: var(--brass); border-radius: 999px; padding: 2px 9px; margin-left: 10px; vertical-align: 4px;
 }
 @media (max-width: 980px) { .today--week { grid-template-columns: repeat(3, 1fr); } }
+
+/* Блайнды и взнос своего стола: крупное значение и ползунок по круглым ступеням */
+.field__hint { font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 6px; }
+.stepper { display: grid; gap: 6px; }
+.stepper__value { font: 500 24px/1.1 Fraunces, Georgia, serif; color: var(--brass); font-variant-numeric: tabular-nums; }
+/* Общий стиль полей формы (рамка, отступы, фон) ползунку не нужен — он его сжимал. */
+.stepper input[type="range"] { width: 100%; padding: 0; margin: 4px 0 0; border: 0; background: none; box-shadow: none; accent-color: var(--brass); }
 
 /* Итог турнира */
 .result { text-align: center; }
@@ -1499,7 +1524,9 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   .topbar:not(.topbar--table) { flex-wrap: wrap; row-gap: 8px; justify-content: flex-end; }
   .topbar:not(.topbar--table) .brand { display: none; }
   .pages { order: 3; width: 100%; margin: 0; justify-content: space-between; }
-  .pages__tab { flex: 1; padding: 6px 8px; }
+  /* Четыре вкладки в строку: счётчик — рядом со словом, без переноса. */
+  .pages__tab { flex: 1; padding: 6px 4px; white-space: nowrap; font-size: 14px; }
+  .pages__tab .pages__badge { margin-left: 4px; }
   .filters { overflow-x: auto; scrollbar-width: none; }
   .filter { white-space: nowrap; }
   .page { padding: 22px 14px 40px; }

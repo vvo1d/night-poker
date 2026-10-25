@@ -77,6 +77,7 @@
     <a class="brand" href="/" title="На главную">THPoker</a>
     <nav class="pages" id="pages" role="tablist" aria-label="Разделы">
       <button class="pages__tab is-active" data-page="tables" role="tab">Столы</button>
+      <button class="pages__tab" data-page="quests" role="tab">Задания<span class="pages__badge" id="quests-badge" title="Можно забрать награду" hidden>0</span></button>
       <button class="pages__tab" data-page="rating" role="tab">Рейтинг</button>
       <button class="pages__tab" data-page="profile" role="tab">Кабинет<span class="pages__badge" id="requests-badge" title="Заявки в друзья" hidden>0</span></button>
     </nav>
@@ -104,13 +105,6 @@
         <button class="btn" id="create-open">Создать стол</button>
       </div>
     </div>
-    <!-- Бонус за вход и задания дня -->
-    <section class="today" id="today" aria-label="Сегодня" hidden></section>
-    <!-- Задания недели и сундук -->
-    <section class="weekly" id="weekly" aria-label="Задания недели" hidden>
-      <h3>Задания недели <span class="weekly__left" id="weekly-left"></span></h3>
-      <div class="today today--week" id="weekly-list"></div>
-    </section>
 
     <!-- Турниры по расписанию -->
     <section class="mtts" id="mtts" hidden>
@@ -142,6 +136,20 @@
   </main>
 
   <!-- Рейтинг -->
+  <!-- Задания: бонус за вход, уровень, задания дня и недели, приглашение друга -->
+  <main class="page quests" id="page-quests" hidden>
+    <div class="page__head">
+      <h2>Задания</h2>
+      <p>Бонус за вход, уровень, задания дня и недели — всё, за что дают фишки.</p>
+    </div>
+    <h3 class="quests__head">Сегодня</h3>
+    <section class="today" id="today" aria-label="Сегодня" hidden></section>
+    <section class="weekly" id="weekly" aria-label="Задания недели" hidden>
+      <h3 class="quests__head">Задания недели <span class="weekly__left" id="weekly-left"></span></h3>
+      <div class="today today--week" id="weekly-list"></div>
+    </section>
+  </main>
+
   <main class="page" id="page-rating" hidden>
     <div class="page__head">
       <h2>Рейтинг игроков</h2>
@@ -303,8 +311,12 @@
 
     <div data-kind="cash">
       <div class="field">
-        <span>Блайнды</span>
-        <div class="seg seg--wrap" id="create-stakes" role="radiogroup" aria-label="Блайнды"></div>
+        <span>Блайнды <small class="field__hint">от 1/2 до 50 000/100 000</small></span>
+        <div class="stepper">
+          <output class="stepper__value" id="create-bb-value">5/10</output>
+          <input type="range" id="create-bb-range" min="0" step="1" aria-label="Блайнды">
+        </div>
+        <input type="hidden" name="bb" value="10">
       </div>
       <div class="field">
         <span>Мест за столом</span>
@@ -334,8 +346,12 @@
         </div>
       </div>
       <div class="field">
-        <span>Взнос из банка</span>
-        <div class="seg seg--wrap" id="create-buyins" role="radiogroup" aria-label="Взнос"></div>
+        <span>Взнос из банка <small class="field__hint">от 10 до 1 000 000</small></span>
+        <div class="stepper">
+          <output class="stepper__value" id="create-buyin-value">1 000</output>
+          <input type="range" id="create-buyin-range" min="0" step="1" aria-label="Взнос">
+        </div>
+        <input type="hidden" name="buyIn" value="1000">
       </div>
     </div>
 

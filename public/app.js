@@ -211,6 +211,15 @@ function setUser(user) {
     toast(`Уровень ${lv.level}! +${fmt(lv.chips)} фишек${lv.items.length ? ` и «${lv.items.join('», «')}» в магазине` : ''}`, { good: true });
   }
   state.levelSeen = Math.max(state.levelSeen || 0, lv ? lv.at : 0);
+
+  // Счётчик на вкладке «Задания»: сколько наград ждёт, чтобы их забрали.
+  const ready = (user.daily ? (user.daily.bonus.available ? 1 : 0)
+    + user.daily.quests.filter((q) => q.done && !q.claimed).length : 0)
+    + (user.weekly ? user.weekly.quests.filter((q) => q.done && !q.claimed).length
+      + (user.weekly.chest.ready && !user.weekly.chest.claimed ? 1 : 0) : 0);
+  const qb = $('#quests-badge');
+  qb.textContent = String(ready);
+  qb.hidden = !ready;
   // Карточка уровня живёт в полосе «Сегодня» — опыт меняется каждую раздачу.
   if (user.level && state.daily && state.levelXp !== user.level.xp) {
     state.levelXp = user.level.xp;
@@ -467,8 +476,8 @@ function renderLobby(data) {
   $('#lobby-totals').textContent = totals
     ? `${fmt(totals.tables)} ${plural(totals.tables, 'стол', 'стола', 'столов')} · ${fmt(totals.players)} за столами`
     : '';
-  if (data.stakes) state.stakes = data.stakes;
-  if (data.sngBuyIns) state.sngBuyIns = data.sngBuyIns;
+  if (data.blindSteps) state.blindSteps = data.blindSteps;
+  if (data.buyInSteps) state.buyInSteps = data.buyInSteps;
 
   // Объявление администратора — полосой над лобби.
   const note = $('#announce');
@@ -746,6 +755,7 @@ function showPage(page) {
   });
   $('#page-tables').hidden = page !== 'tables';
   $('#page-rating').hidden = page !== 'rating';
+  $('#page-quests').hidden = page !== 'quests';
   $('#page-profile').hidden = page !== 'profile';
   if (page === 'tables') { loadFriends(); loadMtts(); }
   if (page === 'rating') loadRating();
@@ -1464,6 +1474,29 @@ function sngPrizes(seats, buyIn) {
 const createDialog = $('#create-dialog');
 const createForm = $('#create-form');
 
+function createNumber(name) {
+  return Math.round(Number(createForm.elements.namedItem(name).value) || 0);
+}
+
+// Блайнды и взнос — только круглые ступени (с сервера: blindSteps, buyInSteps):
+// ползунок ходит по номеру ступени, само число лежит в скрытом поле формы.
+const BLIND_STEPS = [2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
+const BUY_IN_STEPS = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 25000,
+  50000, 100000, 200000, 250000, 500000, 1000000];
+const blindLabel = (bb) => `${fmt(Math.floor(bb / 2))}/${fmt(bb)}`;
+
+function setupPick(rangeId, field, steps) {
+  const range = $(rangeId);
+  range.max = String(steps.length - 1);
+  const current = createNumber(field);
+  const at = steps.indexOf(current);
+  range.value = String(at >= 0 ? at : 0);
+  range.oninput = () => {
+    createForm.elements.namedItem(field).value = String(steps[Number(range.value)]);
+    paintCreate();
+  };
+}
+
 function createChoice(name) {
   const picked = createForm.querySelector(`input[name="${name}"]:checked`);
   return picked ? picked.value : null;
@@ -1472,20 +1505,20 @@ function createChoice(name) {
 function paintCreate() {
   const kind = createChoice('kind');
   createForm.querySelectorAll('[data-kind]').forEach((node) => { node.hidden = node.dataset.kind !== kind; });
+  $('#create-bb-value').textContent = blindLabel(createNumber('bb'));
+  $('#create-buyin-value').textContent = fmt(createNumber('buyIn'));
   const note = $('#create-note');
   if (kind === 'sng') {
     const seats = Number(createChoice('sngSeats'));
-    const buyIn = Number(createChoice('buyIn')) || 0;
+    const buyIn = createNumber('buyIn');
     const prizes = sngPrizes(seats, buyIn);
     const places = prizes.map((p, i) => `${i + 1} место — ${fmt(p)}`).join(', ');
     note.textContent = `Взнос ${fmt(buyIn)} из банка, в турнире у каждого ${fmt(SNG_STACK)} фишек. `
       + `Игра на вылет, блайнды растут каждые 2 минуты. `
       + `Фонд ${fmt(seats * buyIn)}: ${places}. Турнир начнётся, когда займут все ${seats} мест.`;
   } else {
-    const stake = (state.stakes || [])[Number(createChoice('stake'))];
-    note.textContent = stake
-      ? `Закупка от ${fmt(stake[1] * 20)} до ${fmt(stake[1] * 100)} фишек. Пустой стол закрывается через 5 минут.`
-      : '';
+    const bb = createNumber('bb');
+    note.textContent = `Закупка от ${fmt(bb * 20)} до ${fmt(bb * 100)} фишек (20–100 больших блайндов). Пустой стол закрывается через 5 минут.`;
   }
 }
 
@@ -1497,39 +1530,15 @@ $('#quick-play').addEventListener('click', async () => {
 });
 
 $('#create-open').addEventListener('click', async () => {
-  // Блайнды и взносы приходят с лобби; если оно ещё не пришло — спросим сами.
-  if (!state.stakes || !state.sngBuyIns) {
-    const lobby = await getJson('/api/rooms');
-    if (lobby) { state.stakes = lobby.stakes; state.sngBuyIns = lobby.sngBuyIns; }
-  }
-  const stakes = state.stakes || [];
-  const box = $('#create-stakes');
-  if (!box.children.length) {
-    stakes.forEach(([sb, bb], i) => {
-      const label = el('label');
-      const input = document.createElement('input');
-      input.type = 'radio'; input.name = 'stake'; input.value = String(i);
-      if (i === 2) input.checked = true;
-      label.append(input, el('span', null, `${fmt(sb)}/${fmt(bb)}`));
-      box.append(label);
-    });
-  }
-  const buyIns = $('#create-buyins');
-  if (!buyIns.children.length) {
-    (state.sngBuyIns || []).forEach((value) => {
-      const label = el('label');
-      const input = document.createElement('input');
-      input.type = 'radio'; input.name = 'buyIn'; input.value = String(value);
-      if (value === 1000) input.checked = true;
-      label.append(input, el('span', null, fmt(value)));
-      buyIns.append(label);
-    });
-  }
+  // Ступени приходят с лобби; если оно ещё не пришло — берём встроенные (они те же).
+  setupPick('#create-bb-range', 'bb', state.blindSteps || BLIND_STEPS);
+  setupPick('#create-buyin-range', 'buyIn', state.buyInSteps || BUY_IN_STEPS);
   paintCreate();
   createDialog.showModal();
   Sound.play('click');
 });
 createForm.addEventListener('change', paintCreate);
+createForm.addEventListener('input', paintCreate);
 
 createForm.addEventListener('submit', async (e) => {
   if (!e.submitter || e.submitter.value !== 'ok') return;
@@ -1537,10 +1546,10 @@ createForm.addEventListener('submit', async (e) => {
   const name = createForm.elements.namedItem('name').value;
   const isPrivate = createForm.elements.namedItem('private').checked;
   const payload = kind === 'sng'
-    ? { cmd: 'createTable', kind, name, private: isPrivate, seats: Number(createChoice('sngSeats')), buyIn: Number(createChoice('buyIn')) }
+    ? { cmd: 'createTable', kind, name, private: isPrivate, seats: Number(createChoice('sngSeats')), buyIn: createNumber('buyIn') }
     : {
       cmd: 'createTable', kind, name, private: isPrivate,
-      stake: Number(createChoice('stake')),
+      bb: createNumber('bb'),
       seats: Number(createChoice('seats')),
       timeout: Number(createChoice('timeout')),
     };
@@ -1851,8 +1860,10 @@ function renderTable(t) {
     if (t.buttonSeat === i && t.phase !== 'idle') avatar.append(el('div', 'seat__badge', 'D'));
     if (seat.net > 0 && t.phase === 'showdown') node.append(el('div', 'seat__win', `+${fmt(seat.net)}`));
 
+    // Облачко — поверх своего аватара: над местом оно закрывало ставку,
+    // которая у нижних мест лежит как раз над ними.
     const bubble = reactionBubble(seat);
-    if (bubble) node.append(bubble);
+    if (bubble) (node.querySelector('.seat__avatar') || node).append(bubble);
 
     if (seat.isBot && t.you && (!tour || tour.status === 'registering')) {
       const kick = el('button', 'seat__kick');
@@ -1867,7 +1878,6 @@ function renderTable(t) {
     seatsBox.append(node);
   });
 
-  // Силомер рисуем до фишек: он занимает угол сукна, и фишки должны его обойти.
   renderMeter(t);
   renderBets(t, hero);
 
@@ -2303,24 +2313,14 @@ function labelAction(action) {
 
 // ——— силомер руки ———
 
-// На узком экране и за большим столом силомеру негде встать на сукне:
-// в углу он наезжает на плашки игроков, поэтому уходит полосой к кнопкам.
-const narrow = window.matchMedia('(max-width: 620px)');
-// На невысоком экране места за столом с аватарами доходят до угла сукна.
-const short = window.matchMedia('(max-height: 780px)');
+// Силомер живёт полосой во всю ширину над кнопками — и на телефоне, и на компьютере.
+// На сукне ему места нет: в углу он наезжал на плашки игроков.
 function placeMeter() {
   const meter = $('#meter');
-  const crowded = !!(state.table && state.table.maxSeats > 6);
-  const asBar = narrow.matches || short.matches || crowded;
-  meter.classList.toggle('meter--bar', asBar);
-  const target = asBar ? $('.actionbar') : $('#felt');
-  if (meter.parentElement !== target) {
-    if (asBar) target.insertBefore(meter, $('#actions'));
-    else target.append(meter);
-  }
+  meter.classList.add('meter--bar');
+  const target = $('.actionbar');
+  if (meter.parentElement !== target) target.insertBefore(meter, $('#actions'));
 }
-narrow.addEventListener('change', placeMeter);
-short.addEventListener('change', placeMeter);
 placeMeter();
 
 const CATEGORY_SHORT = ['Старшая карта', 'Пара', 'Две пары', 'Сет', 'Стрит', 'Флеш', 'Фулл-хаус', 'Каре', 'Стрит-флеш'];
@@ -2796,7 +2796,7 @@ function buildActions(t) {
   const pre = state.pre ? `${state.pre.action}:${state.pre.amount}` : '';
   const key = JSON.stringify([t.handId, t.phase, t.actingSeat, legal, you && you.stack, you && you.sittingOut,
     you && you.inHand, !!you, you && you.canReveal, t.reveal && t.reveal.seat, pre, callAmount(t),
-    mySeat && mySeat.folded, mySeat && mySeat.allIn, raiseOpen,
+    mySeat && mySeat.folded, mySeat && mySeat.allIn, raiseOpen, you && you.forfeit,
     t.seats.filter((x) => !x.empty).length, t.tour && t.tour.status, t.tour && t.tour.fillLeft > 0]);
   if (key === state.actionKey) return;
   state.actionKey = key;
@@ -2889,6 +2889,11 @@ function buildActions(t) {
     if (state.pre) state.pre = null;
     // В турнире отошедший сидит в раздачах, но ходов не делает: кнопки заблокированы,
     // а вернуться можно прямо отсюда.
+    if (you.forfeit) {
+      status.textContent = 'Вы покидаете турнир — выбудете, когда доиграется эта раздача';
+      main.append(deadButton('Фолд'), deadButton('Чек'), deadButton('Рейз'));
+      return;
+    }
     if (you.sittingOut && t.tour && t.tour.status === 'running') {
       status.textContent = 'Вы пропускаете раздачи: блайнды списываются, карты сбрасываются';
       const back = el('button', 'btn btn--sm actions__back', 'Вернуться в игру');
@@ -3062,14 +3067,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(
 function menuAction(id, run) {
   $(id).addEventListener('click', () => { closeMenu(); run(); });
 }
-menuAction('#menu-topup', () => {
-  const t = state.table;
-  const you = t && t.you;
-  if (!you) return;
-  const want = Math.min(t.maxBuyIn - you.stack, state.user.chips);
-  if (want <= 0) return toast('В банке нет свободных фишек');
-  cmd({ cmd: 'topUp', amount: want });
-});
+menuAction('#menu-topup', () => { if (state.table) openTopUp(state.table); });
 menuAction('#menu-sitout', () => {
   const you = state.table && state.table.you;
   if (you) cmd({ cmd: 'sitOut', value: !you.sittingOut });
@@ -3148,7 +3146,19 @@ async function joinInvite() {
   state.joinCode = null;
   await cmd({ cmd: 'join', code });
 }
-menuAction('#menu-stand', () => cmd({ cmd: 'standUp' }));
+menuAction('#menu-stand', () => {
+  const t = state.table;
+  const tour = t && t.tour;
+  if (!(tour && tour.status === 'running')) { cmd({ cmd: 'standUp' }); return; }
+  // Из идущего турнира можно уйти, только сдавшись: предупреждаем, что фишки сгорят.
+  // Сдавшийся занимает последнее из ещё не разыгранных мест.
+  const place = tour.kind === 'mtt' ? tour.alive : t.seats.filter((s) => !s.empty).length;
+  const prize = (tour.prizes || [])[place - 1] || 0;
+  const text = `Покинуть турнир? Турнирные фишки не вернутся, взнос — тоже: вы займёте ${place} место`
+    + `${prize ? ` и получите приз ${fmt(prize)}` : ''}. Если просто отойти, место сохранится, но блайнды будут списываться.`;
+  if (!confirm(text)) return;
+  cmd({ cmd: 'standUp', forfeit: true });
+});
 menuAction('#menu-close', () => { if (state.table) closeTable(state.table); });
 
 async function closeTable(t) {
@@ -3167,7 +3177,7 @@ function renderMenu(t) {
 
   const tour = t.tour;
   const topup = $('#menu-topup');
-  topup.hidden = !!tour || !(seated && !you.inHand && you.stack < t.maxBuyIn);
+  topup.hidden = !!tour || !(seated && you.stack + (you.topUp || 0) < t.maxBuyIn);
 
   const sitOut = $('#menu-sitout');
   sitOut.hidden = !seated;
@@ -3180,8 +3190,9 @@ function renderMenu(t) {
   bot.title = free ? '' : 'Свободных мест нет';
 
   const stand = $('#menu-stand');
-  stand.hidden = !seated || botClosed;
-  stand.textContent = tour ? 'Отменить регистрацию' : 'Встать из-за стола';
+  const running = !!(tour && tour.status === 'running');
+  stand.hidden = !seated || (botClosed && !running);
+  stand.textContent = running ? 'Покинуть турнир' : tour ? 'Отменить регистрацию' : 'Встать из-за стола';
 
   // Свой стол можно закрыть, пока за ним нет других людей (боты не в счёт).
   const me = state.user && state.user.name;
@@ -3305,6 +3316,32 @@ function raiseBox(t, legal) {
 const dialog = $('#buyin-dialog');
 let pendingSeat = null;
 
+// Докупка за кэш-столом: ползунок от большого блайнда до того, сколько ещё
+// помещается до максимума стола (100 больших блайндов), но не больше банка.
+function openTopUp(t) {
+  const you = t.you;
+  if (!you) return;
+  const room = t.maxBuyIn - you.stack - (you.topUp || 0);
+  const max = Math.min(room, state.user.chips);
+  if (room <= 0) return toast(`У вас уже максимум за этим столом — ${fmt(t.maxBuyIn)}`);
+  if (max <= 0) return toast('В банке нет свободных фишек');
+  pendingSeat = 'topup';
+  const range = $('#buyin-range');
+  range.hidden = false;
+  range.min = Math.min(t.bb, max);
+  range.max = max;
+  range.step = 1;
+  range.value = max;
+  $('#buyin-title').textContent = 'Докупить фишки';
+  $('#buyin-ok').textContent = 'Докупить';
+  $('#buyin-note').textContent = `Сейчас на столе ${fmt(you.stack)}${you.topUp ? ` (+${fmt(you.topUp)} уже заказано)` : ''}. `
+    + `Блайнды ${fmt(t.sb)}/${fmt(t.bb)}, максимум за столом — ${fmt(t.maxBuyIn)}. Добавить от ${fmt(range.min)} до ${fmt(max)}`
+    + `${you.inHand ? ' — фишки встанут в стек со следующей раздачи' : ''}.`;
+  $('#buyin-value').textContent = fmt(range.value);
+  dialog.showModal();
+  Sound.play('click');
+}
+
 function openBuyIn(seat, t) {
   pendingSeat = seat;
   const tour = t.tour;
@@ -3346,7 +3383,12 @@ $('#buyin-range').addEventListener('input', (e) => {
 });
 
 $('#buyin-form').addEventListener('submit', (e) => {
-  if (e.submitter && e.submitter.value === 'ok' && pendingSeat !== null) {
+  if (e.submitter && e.submitter.value === 'ok' && pendingSeat === 'topup') {
+    cmd({ cmd: 'topUp', amount: Number($('#buyin-range').value) }).then((res) => {
+      if (res.ok && res.pending) toast('Докупка встанет в стек со следующей раздачи', { info: true });
+    });
+    Sound.play('chips');
+  } else if (e.submitter && e.submitter.value === 'ok' && pendingSeat !== null) {
     cmd({ cmd: 'sit', seat: pendingSeat, buyIn: Number($('#buyin-range').value) })
       .then((res) => { if (res.ok) goal(state.table && state.table.tour ? 'sng_register' : 'sit'); });
     Sound.play('chips');

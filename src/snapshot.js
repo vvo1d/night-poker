@@ -30,6 +30,8 @@ function tableRecord(table) {
     maxBuyIn: table.maxBuyIn,
     timeout: table.timeout,
     house: table.house,
+    houseSng: table.houseSng || null,
+    fillMs: table.fillMs || 0,
     ownerId: table.ownerId,
     ownerName: table.ownerName,
     createdAt: table.createdAt,
@@ -42,12 +44,23 @@ function tableRecord(table) {
       status: tour.status,
       pool: tour.pool,
       paid: tour.places.reduce((sum, p) => sum + p.prize, 0),
+      // Чтобы продолжить турнир после перезапуска.
+      spin: !!tour.spin,
+      multiplier: tour.multiplier || 0,
+      level: tour.level,
+      elapsed: tour.startedAt ? Date.now() - tour.startedAt : 0,
+      places: tour.places,
+      prizes: tour.prizes,
+      humans: tour.humans || 0,
     } : null,
-    players: table.players().map((p) => ({
+    // Сдавшийся с присуждённым местом — уже не участник, хоть и сидит до конца раздачи.
+    players: table.players().filter((p) => !p.forfeitPlaced).map((p) => ({
       userId: p.userId,
       name: p.name,
       isBot: p.isBot,
-      chips: p.stack + (live ? p.contributed : 0),
+      seat: p.seat,
+      sittingOut: !!p.sittingOut,
+      chips: p.stack + (p.topUp || 0) + (live ? p.contributed : 0),
     })),
   };
 }
@@ -110,12 +123,13 @@ class Snapshot {
     }
   }
 
-  // Разбор снимка после запуска: фишки — в банки, столы игроков — обратно.
-  // credit(userId, amount) возвращает фишки, reopen(record) открывает стол.
-  restore({ credit, reopen }) {
+  // Разбор снимка после запуска. restore(record) поднимает стол вместе с игроками —
+  // тогда фишки остаются на столе. Иначе: фишки — в банки (credit), стол игрока
+  // открывается заново пустым (reopen).
+  restore({ credit, reopen, restore = null }) {
     const snap = this.read();
     if (!snap || !Array.isArray(snap.tables)) return null;
-    const sum = { players: 0, chips: 0, tables: 0 };
+    const sum = { players: 0, chips: 0, tables: 0, seated: 0 };
     const give = (userId, amount) => {
       if (amount <= 0) return;
       credit(userId, amount);
@@ -126,6 +140,11 @@ class Snapshot {
     for (const rec of snap.tables) {
       // Столы турниров по расписанию разбирает сам турнир (см. mttRefunds).
       if (rec.mttId) continue;
+      if (restore && restore(rec)) {
+        sum.tables += 1;
+        sum.seated += rec.players.filter((p) => !p.isBot).length;
+        continue;
+      }
       const sng = rec.sng;
       for (const r of refunds(rec)) give(r.userId, r.amount);
 

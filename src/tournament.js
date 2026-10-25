@@ -110,9 +110,12 @@ class Tournament {
   // Вылетевшие за одну раздачу делят места по стеку на её начало:
   // кто пришёл в раздачу с большим стеком, тот и выше.
   bust(table, busted) {
-    if (this.status !== 'running' || !busted.length) return;
+    if (this.status !== 'running') return;
+    // Никто не вылетел, но остался один — значит, остальные сдались: он победил.
+    if (!busted.length && table.players().length > 1) return;
     const left = table.players().length - busted.length;
-    const ordered = [...busted].sort((a, b) => b.handStartStack - a.handStartStack);
+    // Сдавшиеся — ниже вылетевших по-честному, среди остальных выше тот, кто пришёл с бо́льшим стеком.
+    const ordered = [...busted].sort((a, b) => (!!a.forfeit - !!b.forfeit) || b.handStartStack - a.handStartStack);
     ordered.forEach((p, i) => this.award(table, p, left + 1 + i));
     for (const p of busted) table.removePlayer(p);
 
