@@ -5,6 +5,8 @@ const { freshStats, unlockNew, tierTotal, TIER_NAMES, category } = require('./ac
 const daily = require('./daily');
 const seasons = require('./seasons');
 const shop = require('./shop');
+const weekly = require('./weekly');
+const levels = require('./levels');
 
 const START_CHIPS = 10000;
 const RELOAD_CHIPS = 2000; // бесплатное пополнение для игроков без фишек
@@ -65,6 +67,8 @@ class Store {
     this.news = new Map();       // id -> последняя открытая ачивка, для всплывашки
     this.refNews = new Map();    // id -> последняя награда за приглашение, для всплывашки
     this.onReferral = null;      // (пригласивший, новичок, награда) — сервер напишет в Telegram
+    this.levelNews = new Map();  // id -> последний взятый уровень, для всплывашки
+    this.onLevel = null;         // (игрок) — уровень сменился: сервер обновит значок на месте за столом
 
     this.load();
   }
@@ -273,7 +277,7 @@ class Store {
     const ref = o.meta.ref || (o.meta.ref = { count: 0, earned: 0 });
     ref.count += 1;
     const paid = ref.count <= REF_MAX ? REF_REWARD : 0;
-    if (paid) { ref.earned += paid; this.addChips(o.id, paid); }
+    if (paid) { ref.earned += paid; this.addChips(o.id, paid); this.addXp(o, levels.XP.friend); }
     this.refNews.set(o.id, { at: m.refPaid, name: u.name, amount: paid, invitee: false });
     this.touch(o);
     if (this.onReferral) this.onReferral(o, u, paid);
@@ -501,15 +505,16 @@ class Store {
     if (r.cash) s.cashNet += r.won - r.contributed;
 
     // Задания дня.
-    daily.progress(u, 'hand');
+    this.track(u, 'hand');
     if (gain > 0) {
-      daily.progress(u, 'win');
-      if (r.showdown) daily.progress(u, 'showdownWin');
-      if (r.allIn) daily.progress(u, 'allInWin');
-      if (r.bb && r.won >= r.bb * 20) daily.progress(u, 'bigPot');
+      this.addXp(u, levels.XP.win);
+      this.track(u, 'win');
+      if (r.showdown) this.track(u, 'showdownWin');
+      if (r.allIn) this.track(u, 'allInWin');
+      if (r.bb && r.won >= r.bb * 20) this.track(u, 'bigPot');
     }
-    if (r.result && category(r.result.value) >= 4) daily.progress(u, 'straightPlus');
-    if (r.withFriend) daily.progress(u, 'friendHand');
+    if (r.result && category(r.result.value) >= 4) this.track(u, 'straightPlus');
+    if (r.withFriend) this.track(u, 'friendHand');
 
     // Очки сезона: за раздачу и за банк, выигранный у человека.
     this.seasonPoints(u, 'hand');
@@ -524,8 +529,8 @@ class Store {
     const u = this.users.get(userId);
     if (!u) return;
     const s = u.stats;
-    if (start) { s.sngPlayed += 1; daily.progress(u, 'sngPlay'); }
-    if (prize > 0) { s.sngCashes += 1; s.sngPrizes += prize; daily.progress(u, 'sngCash'); }
+    if (start) { s.sngPlayed += 1; this.track(u, 'sngPlay'); this.addXp(u, levels.XP.tour); }
+    if (prize > 0) { s.sngCashes += 1; s.sngPrizes += prize; this.track(u, 'sngCash'); this.addXp(u, levels.XP.tourCash); }
     if (place === 1) s.sngWins += 1;
     if (place) this.seasonPoints(u, 'sng', seasons.sngPoints(place, humans, seats));
     this.checkAchievements(u);
@@ -540,6 +545,7 @@ class Store {
     const res = daily.claimBonus(u);
     if (res.error) return res;
     this.addChips(userId, res.reward);
+    this.addXp(u, levels.XP.bonus);
     return res;
   }
 
@@ -550,6 +556,8 @@ class Store {
     if (res.error) return res;
     this.addChips(userId, res.reward);
     this.seasonPoints(u, 'quest');
+    this.addXp(u, levels.XP.daily);
+    weekly.progress(u, 'dailyDone');   // задание недели «выполните 7 заданий дня»
     return res;
   }
 
@@ -560,14 +568,76 @@ class Store {
     const s = u.stats;
     if (start) {
       s.mttPlayed += 1;
-      daily.progress(u, 'sngPlay');
+      this.track(u, 'sngPlay');
+      this.addXp(u, levels.XP.tour);
       this.seasonPoints(u, 'mtt', 5);
     }
-    if (prize > 0) { s.mttCashes += 1; s.mttPrizes += prize; daily.progress(u, 'sngCash'); }
+    if (prize > 0) { s.mttCashes += 1; s.mttPrizes += prize; this.track(u, 'sngCash'); this.addXp(u, levels.XP.tourCash); }
     if (place === 1) s.mttWins += 1;
     if (place) this.seasonPoints(u, 'mtt', place === 1 ? 60 : prize > 0 ? 25 : 0);
     this.checkAchievements(u);
     this.touch(u);
+  }
+
+  // Игровое событие двигает задания дня и недели разом.
+  track(u, event) {
+    daily.progress(u, event);
+    weekly.progress(u, event);
+  }
+
+  // ——— уровень ———
+
+  // Опыт: за каждый взятый уровень — фишки, на особых уровнях — предмет из магазина.
+  addXp(u, amount) {
+    if (!u || amount <= 0) return;
+    const before = levels.levelOf(u.meta.xp || 0).level;
+    u.meta.xp = (u.meta.xp || 0) + amount;
+    const after = levels.levelOf(u.meta.xp).level;
+    if (after === before) { this.touch(u); return; }
+    let chips = 0;
+    const items = [];
+    for (let lvl = before + 1; lvl <= after; lvl++) {
+      const r = levels.reward(lvl);
+      chips += r.chips;
+      if (r.item && !shop.view(u).owned.includes(r.item)) {
+        const sh = u.meta.shop || (u.meta.shop = { owned: [], equip: {} });
+        sh.owned = [...(sh.owned || []), r.item];
+        items.push(shop.item(r.item).name);
+      }
+    }
+    this.addChips(u.id, chips);
+    this.levelNews.set(u.id, { at: Date.now(), level: after, chips, items });
+    this.touch(u);
+    if (this.onLevel) this.onLevel(u);
+  }
+
+  levelOf(u) { return levels.levelOf((u && u.meta.xp) || 0).level; }
+
+  levelView(u) {
+    const l = levels.levelOf(u.meta.xp || 0);
+    return { ...l, xp: u.meta.xp || 0, next: levels.reward(l.level + 1), news: this.levelNews.get(u.id) || null };
+  }
+
+  // ——— задания недели ———
+
+  claimWeekly(userId, questId) {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    const res = weekly.claimQuest(u, String(questId));
+    if (res.error) return res;
+    this.addChips(userId, res.reward);
+    this.addXp(u, levels.XP.weekly);
+    return res;
+  }
+
+  claimChest(userId) {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    const res = weekly.claimChest(u);
+    if (res.error) return res;
+    this.addChips(userId, res.reward);
+    this.addXp(u, levels.XP.chest);
+    return res;
   }
 
   // ——— сезоны ———
@@ -743,6 +813,7 @@ class Store {
     u.handsPlayed += 1;
     this.checkAchievements(u);
     this.checkReferral(u);
+    this.addXp(u, levels.XP.hand);
     this.touch(u);
   }
 
@@ -787,6 +858,8 @@ class Store {
       achievement: this.news.get(id) || null,   // последняя взятая ступень — клиент покажет всплывашку
       friendRequests: u.friendsIn.length,        // входящие заявки — значок на «Кабинете»
       daily: daily.view(u),                      // бонус за вход и задания дня
+      weekly: weekly.view(u),                    // задания недели и сундук
+      level: this.levelView(u),                  // уровень, опыт и награда за следующий
       season: seasons.view(u),                   // очки и лига текущего сезона
       telegram: u.tg ? (u.tg.username ? `@${u.tg.username}` : 'привязан') : null,
       referral: this.referralView(u),

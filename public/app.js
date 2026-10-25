@@ -187,7 +187,34 @@ function setUser(user) {
       }
     }
     state.daily = user.daily;
-    renderToday(user.daily, user.referral);
+    renderToday(user.daily, user.referral, user.level);
+  }
+
+  // Задания недели: выполненное — всплывашка; полоса перерисовывается при любом изменении.
+  if (user.weekly) {
+    const was = state.weekly;
+    if (was && was.week === user.weekly.week) {
+      for (const q of user.weekly.quests) {
+        const before = was.quests.find((x) => x.id === q.id);
+        if (q.done && !q.claimed && before && !before.done) {
+          toast(`Задание недели выполнено: ${q.title.toLowerCase()} — заберите +${fmt(q.reward)} в лобби`, { good: true });
+        }
+      }
+    }
+    if (JSON.stringify(was) !== JSON.stringify(user.weekly)) renderWeekly(user.weekly);
+    state.weekly = user.weekly;
+  }
+
+  // Новый уровень — всплывашка с наградой.
+  const lv = user.level && user.level.news;
+  if (lv && state.levelSeen !== undefined && lv.at > state.levelSeen) {
+    toast(`Уровень ${lv.level}! +${fmt(lv.chips)} фишек${lv.items.length ? ` и «${lv.items.join('», «')}» в магазине` : ''}`, { good: true });
+  }
+  state.levelSeen = Math.max(state.levelSeen || 0, lv ? lv.at : 0);
+  // Карточка уровня живёт в полосе «Сегодня» — опыт меняется каждую раздачу.
+  if (user.level && state.daily && state.levelXp !== user.level.xp) {
+    state.levelXp = user.level.xp;
+    renderToday(state.daily, user.referral, user.level);
   }
 
   // Награда за приглашение: всплывашка, если она пришла, пока страница открыта.
@@ -544,10 +571,11 @@ setInterval(() => {
 
 // ——— сегодня: бонус за вход и задания дня ———
 
-function renderToday(daily, referral) {
+function renderToday(daily, referral, level) {
   const box = $('#today');
   box.hidden = false;
   box.textContent = '';
+  if (level) box.append(levelCard(level));
 
   // Бонус: сумма, серия по дням и кнопка.
   const b = daily.bonus;
@@ -595,6 +623,73 @@ function renderToday(daily, referral) {
     box.append(card);
   }
   if (referral) box.append(referralCard(referral));
+}
+
+// Уровень: опыт до следующего и что за него дадут.
+function levelCard(l) {
+  const card = el('article', 'today__card today__quest today__level');
+  card.append(el('span', 'today__label', 'Ваш уровень'));
+  const head = el('div', 'today__levelhead');
+  head.append(el('b', 'today__amount', String(l.level)));
+  head.append(el('span', 'today__title', `до ${l.level + 1}-го: ${fmt(l.need - l.into)} опыта`));
+  card.append(head);
+  const bar = el('span', 'today__bar');
+  const fill = el('i');
+  fill.style.width = `${Math.round((l.into / l.need) * 100)}%`;
+  bar.append(fill);
+  card.append(bar);
+  const gift = l.next.item && state.config && state.config.shop
+    ? (state.config.shop.find((x) => x.id === l.next.item) || {}).name : null;
+  card.append(el('span', 'today__sub', `Награда: +${fmt(l.next.chips)}${gift ? ` и «${gift}»` : ''}`));
+  card.title = 'Опыт: раздача +1, выигранный банк +2, задание дня +15, задание недели +40, турнир +10, призовое место +20';
+  return card;
+}
+
+// Задания недели и сундук за все четыре.
+function renderWeekly(w) {
+  const sec = $('#weekly');
+  sec.hidden = false;
+  const days = Math.max(1, Math.ceil((w.endsAt - Date.now()) / 86_400_000));
+  $('#weekly-left').textContent = `· ещё ${days} ${plural(days, 'день', 'дня', 'дней')}`;
+  const box = $('#weekly-list');
+  box.textContent = '';
+  for (const q of w.quests) {
+    const card = el('article', `today__card today__quest${q.done ? ' is-done' : ''}${q.claimed ? ' is-claimed' : ''}`);
+    card.append(el('span', 'today__label', 'Задание недели'));
+    card.append(el('span', 'today__title', q.title));
+    const bar = el('span', 'today__bar');
+    const fill = el('i');
+    fill.style.width = `${Math.round((q.progress / q.goal) * 100)}%`;
+    bar.append(fill);
+    card.append(bar);
+    const foot = el('div', 'today__foot');
+    foot.append(el('span', 'today__sub', `${fmt(q.progress)} / ${fmt(q.goal)} · +${fmt(q.reward)}`));
+    if (q.done) {
+      const claim = el('button', `btn btn--sm ${q.claimed ? 'btn--ghost' : 'btn--primary'}`, q.claimed ? 'Получено ✓' : 'Забрать');
+      claim.disabled = q.claimed;
+      claim.addEventListener('click', async () => {
+        const res = await cmd({ cmd: 'claimWeekly', id: q.id });
+        if (res.ok) toast(`+${fmt(res.reward)} фишек за задание недели`, { good: true });
+      });
+      foot.append(claim);
+    }
+    card.append(foot);
+    box.append(card);
+  }
+  const c = w.chest;
+  const chest = el('article', `today__card today__chest${c.ready && !c.claimed ? ' is-ready' : ''}${c.claimed ? ' is-claimed' : ''}`);
+  chest.append(el('span', 'today__label', 'Сундук недели'));
+  chest.append(el('b', 'today__amount', c.claimed ? '✓' : `+${fmt(c.reward)}`));
+  chest.append(el('span', 'today__sub', c.claimed ? 'Открыт — новый в понедельник'
+    : c.ready ? 'Все задания выполнены!' : 'Откроется, когда заберёте все 4 задания'));
+  const open = el('button', `btn btn--sm ${c.ready && !c.claimed ? 'btn--primary' : 'btn--ghost'}`, c.claimed ? 'Открыт ✓' : 'Открыть');
+  open.disabled = !c.ready || c.claimed;
+  open.addEventListener('click', async () => {
+    const res = await cmd({ cmd: 'claimChest' });
+    if (res.ok) toast(`Сундук открыт: +${fmt(res.reward)} фишек`, { good: true });
+  });
+  chest.append(open);
+  box.append(chest);
 }
 
 // Приглашение друга: новичку — сколько раздач до подарка, остальным — позвать друга.
@@ -1174,7 +1269,9 @@ function renderProfile(box, data) {
   }
   head.append(face);
   const title = el('div', 'profile__title');
-  title.append(el('h2', null, data.name));
+  const h = el('h2', null, data.name);
+  if (data.level) h.append(el('span', 'profile__lvl', `ур. ${data.level}`));
+  title.append(h);
   const where = data.table ? ` · за столом «${data.table.name}»` : '';
   const sub = el('p', `profile__sub${data.online ? ' is-online' : ''}`,
     `${data.online ? 'онлайн' : 'не в сети'}${where} · в игре с ${DATE_FMT.format(new Date(data.createdAt))}`);
@@ -1702,6 +1799,11 @@ function renderTable(t) {
 
     const plate = el('div', 'seat__plate');
     const name = el('span', `seat__name${seat.isBot ? '' : ' is-link'}`, seat.name + (seat.isBot ? ' •' : ''));
+    if (seat.level) {
+      const lvl = el('span', 'seat__lvl', String(seat.level));
+      lvl.title = `Уровень ${seat.level}`;
+      name.prepend(lvl);
+    }
     // Квадрат с фото (или первой буквой) между именем и фишками; у людей — открывает профиль.
     const face = el(seat.isBot ? 'span' : 'button', `seat__face${seat.isBot ? ' seat__face--bot' : ''}`);
     if (seat.avatar) {

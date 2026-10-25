@@ -68,6 +68,8 @@ const store = new Store();
 store.onReferral = (inviter, friend, paid) => notify(inviter.id, paid
   ? `${friend.name} сыграл ${REF_HANDS} раздач по вашему приглашению — вам +${paid} фишек!`
   : `${friend.name} сыграл ${REF_HANDS} раздач по вашему приглашению.`);
+// Новый уровень — значок уровня на месте за столом обновляется сразу.
+store.onLevel = (u) => refreshSeatAvatar(u.id);
 
 // Столы живут, пока они нужны: свой стол игрок заводит сам, пустой закрывается.
 const CASH_IDLE_MS = 5 * 60_000;     // пустой кэш-стол ждёт столько, прежде чем закрыться
@@ -157,6 +159,7 @@ function createTable(cfg, {
       playerTable.set(player.userId, t);
       player.avatar = store.avatarUrl(store.user(player.userId));   // аватар — на месте за столом
       player.frame = store.frameOf(store.user(player.userId));       // и рамка из магазина
+      player.level = store.levelOf(store.user(player.userId));       // и уровень
     },
     // Пересаженного в турнире уже записали за новый стол — старый не должен его стереть.
     onUnseat: (player, t) => { if (!player.isBot && playerTable.get(player.userId) === t) playerTable.delete(player.userId); },
@@ -543,6 +546,7 @@ function refreshSeatAvatar(userId) {
   if (!p) return;
   p.avatar = store.avatarUrl(store.user(userId));
   p.frame = store.frameOf(store.user(userId));
+  p.level = store.levelOf(store.user(userId));
   table.touch();
 }
 
@@ -1000,6 +1004,7 @@ function profileOf(target, viewer) {
       sngPrizes: s.sngPrizes,
       peakChips: s.peakChips,
     },
+    level: store.levelOf(target),
     achievements: ACHIEVEMENTS.map((a) => achievementView(a, target)),
     tiers: { got: tierTotal(target), of: ACHIEVEMENTS.reduce((sum, a) => sum + a.tiers.length, 0) },
     friends: own ? friendsOf(target) : null,
@@ -1161,6 +1166,10 @@ async function handleCommand(ctx, body) {
       return store.claimBonus(user.id);
     case 'claimQuest':
       return store.claimQuest(user.id, body.id);
+    case 'claimWeekly':
+      return store.claimWeekly(user.id, body.id);
+    case 'claimChest':
+      return store.claimChest(user.id);
     case 'shopBuy':
     case 'shopEquip': {
       const res = cmd === 'shopBuy' ? store.buyItem(user.id, body.id) : store.equipItem(user.id, body.id);

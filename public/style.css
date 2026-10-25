@@ -1267,6 +1267,27 @@ body:has(.actions.is-raising) .react { display: none; }
 .shop__frame .seat__face { width: 46px; height: 46px; font-size: 20px; border-radius: 10px; cursor: default; }
 .shop__frame[data-frame]::before { inset: -4px; border-radius: 13px; }
 
+/* Уровень и задания недели */
+.today__levelhead { display: flex; align-items: baseline; gap: 10px; }
+.today__level .today__amount { font-size: 30px; }
+.weekly { grid-column: 1 / -1; min-width: 0; }   /* иначе лента карточек на телефоне распирает страницу */
+.weekly h3 { font-size: 17px; margin: 4px 0 10px; }
+.weekly__left { font-family: "IBM Plex Sans", sans-serif; font-size: 13px; color: var(--muted); }
+.today--week { grid-template-columns: repeat(5, 1fr); margin-top: 0; }
+.today__chest { border-style: dashed; }
+.today__chest.is-ready { border: 1px solid var(--brass); box-shadow: 0 0 22px rgba(201, 162, 74, 0.25); }
+.today__chest .btn { align-self: flex-start; margin-top: auto; }
+.seat__lvl {
+  display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin-right: 4px;
+  border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 1; vertical-align: 1px;
+  color: #1a1305; background: var(--brass); text-shadow: none;
+}
+.profile__lvl {
+  font-family: "IBM Plex Sans", sans-serif; font-size: 13px; font-weight: 600; color: #1a1305;
+  background: var(--brass); border-radius: 999px; padding: 2px 9px; margin-left: 10px; vertical-align: 4px;
+}
+@media (max-width: 980px) { .today--week { grid-template-columns: repeat(3, 1fr); } }
+
 /* Итог турнира */
 .result { text-align: center; }
 .result__place {

@@ -961,6 +961,7 @@ class Table {
           isBot: p.isBot,
           avatar: p.avatar || null,
           frame: p.frame || null,
+          level: p.isBot ? null : (p.level || 1),
           stack: p.stack,
           bet: p.bet,
           inHand: p.inHand,
