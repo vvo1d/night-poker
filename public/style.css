@@ -1106,7 +1106,10 @@ body:has(.actions.is-raising) .react { display: none; }
 .actions.is-your-turn .actions__status { color: var(--brass); }
 .actions__back { margin-left: 12px; color: var(--brass); border-color: var(--brass-dim); }
 
-.acts { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.acts { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; margin-left: auto; }
+/* Строка состояния — только когда есть что сказать (отошёл, место в турнире, регистрация):
+   пустая она не занимает места. */
+.actions__status:empty { display: none; }
 /* Выбор ставки всплывает над кнопками и не двигает стол. */
 .acts__size { position: absolute; right: 18px; bottom: calc(100% + 10px); z-index: 15; }
 .acts__size:empty { display: none; }
@@ -1327,7 +1330,7 @@ body:has(.actions.is-raising) .react { display: none; }
 .sitout-left { color: var(--brass); font-variant-numeric: tabular-nums; }
 
 /* ——— последние раздачи ——— */
-.dialog--hands { position: relative; width: min(640px, 94vw); max-height: 90vh; padding: 24px; scrollbar-width: thin; }
+.dialog--hands { position: fixed; width: min(640px, 94vw); max-height: 90vh; padding: 24px; scrollbar-width: thin; }
 .dialog--hands h3 { margin-bottom: 14px; }
 .hand-list { display: grid; gap: 8px; margin-bottom: 12px; }
 .hand-row {
@@ -1336,7 +1339,7 @@ body:has(.actions.is-raising) .react { display: none; }
   background: rgba(255, 255, 255, 0.025); border: 1px solid var(--line); border-radius: 10px;
 }
 .hand-row:hover { border-color: var(--brass-dim); }
-.hand-row__head { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.hand-row__head { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; min-width: 0; }   /* не хватает места — время под названием */
 .hand-row__head b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hand-row__head span { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .hand-row__cards { grid-column: 1; display: flex; gap: 3px; align-items: center; flex-wrap: wrap; }
@@ -1450,10 +1453,16 @@ body:has(.actions.is-raising) .react { display: none; }
 .my-table__actions { grid-column: 1; grid-row: 3; display: flex; gap: 6px; margin-top: 6px; }
 .my-table__close { color: #eab6ad; }
 .dialog--profile {
-  position: relative; width: min(820px, 94vw); max-height: 88vh; padding: 26px;
+  /* Модальное окно — всегда по центру экрана: «relative» ставило его в начало страницы. */
+  position: fixed; width: min(820px, 94vw); max-height: 88vh; padding: 26px;
   scrollbar-width: thin; scrollbar-color: #2c414a transparent;
 }
-.dialog__close { position: absolute; right: 14px; top: 14px; }
+/* Крестик «прилипает» к верху окна: при прокрутке длинного профиля он не уезжает.
+   Отрицательный нижний отступ — чтобы он не занимал строку над содержимым. */
+.dialog__close {
+  position: sticky; top: 4px; z-index: 5; margin: 0 0 -32px auto;   /* в ряд с заголовком, внутри рамки */
+  background: var(--ink-2);
+}
 .dialog--profile .profile__actions { margin-right: 30px; }
 .dialog--wide .field { margin-bottom: 16px; }
 .dialog--wide .dialog__note { margin: 4px 0 0; line-height: 1.45; }
@@ -1489,8 +1498,6 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 /* Подсказка в строке статуса над кнопками (например, «ставка изменилась»). */
-.actions .actions__status.is-notice { color: #f0a898; animation: noticeIn 260ms ease both; }
-@keyframes noticeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .toast--info { background: var(--ink-2); border-color: var(--line); color: var(--text); }
 
 /* счётчик непрочитанных сообщений на кнопке «Чат» */
@@ -1603,7 +1610,8 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   .topbar { padding: 10px 12px; }
   .actions {
     padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
-    flex-direction: column; align-items: stretch; gap: 8px; min-height: 96px;
+    /* Без запаса под строку состояния: обычно она пустая и скрыта — иначе под кнопками пустота. */
+    flex-direction: column; align-items: stretch; gap: 8px; min-height: 0;
   }
   .actions__status { text-align: center; white-space: normal; }
   .acts { width: 100%; align-items: stretch; }
@@ -1692,7 +1700,6 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   .loading__card, .loading__chips i { animation: none; opacity: 1; transform: translate(var(--to-x, 0px), 0) rotate(var(--rot, 0deg)); }
   .loading__chips i { transform: none; }
   .loading__text { animation: none; }
-  .actions .actions__status.is-notice { animation: none; }
   .card--deal, .card--flip .card__inner, .bet.is-new, .seat__win, .raise, .seat__bubble.is-new, .react__panel,
   .room.is-new, .auth, .auth__mark span, .dialog[open], .toast, .felt__msg.is-win { animation: none; }
   .card--win, .meter.is-up .meter__name, .pot.is-bump strong, .bank strong.is-bump,

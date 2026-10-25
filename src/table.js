@@ -15,6 +15,11 @@ const REVEAL_BOT = 500;    // бот решает быстро
 const RUNOUT_FIRST = 1500;  // от вскрытия карт до первой улицы
 const RUNOUT_STEP = 1700;   // между улицами и после ривера
 const ROUND_PAUSE = 800;    // круг торговли закрыт: столько последняя ставка лежит на столе, потом — в банк
+// Между раздачами: сколько висит итог и сколько ждём до новых карт. Длиннее —
+// и стол кажется подвисшим: боты ходят быстро, а паузы между раздачами тянутся.
+const SHOWDOWN_HOLD = 3500; // итог со вскрытием: карты и выигрыш на виду
+const FOLD_HOLD = 1500;     // все сбросили — показывать нечего, только кому ушёл банк
+const NEXT_HAND = 1000;     // от конца раздачи до раздачи новых карт
 
 // Реакции за столом: эмодзи и готовые фразы облачком над местом игрока.
 const REACTIONS = ['👍', '😂', '😮', '😡', '🔥', '👏', '🤔', '😎'];
@@ -339,7 +344,7 @@ class Table {
       if (this.tour.status === 'registering' && this.occupied() === this.maxSeats) this.tour.start(this);
       if (this.tour.status !== 'running') return;
     }
-    if (this.eligible().length >= 2) this.nextStepAt = Date.now() + 2000;
+    if (this.eligible().length >= 2) this.nextStepAt = Date.now() + NEXT_HAND;
   }
 
   startHand() {
@@ -822,7 +827,8 @@ class Table {
     const p = this.seats[r.order[r.index]];
     r.seat = p.seat;
     r.optional = !this.mustShow(p, r.index, alive);
-    r.deadline = now + (!r.optional ? REVEAL_STEP : p.isBot ? REVEAL_BOT : REVEAL_ASK);
+    // Отошедший не ответит, показывать ли карты, — ждём его не дольше бота.
+    r.deadline = now + (!r.optional ? REVEAL_STEP : p.isBot || this.isAway(p) ? REVEAL_BOT : REVEAL_ASK);
     this.touch();
   }
 
@@ -898,7 +904,7 @@ class Table {
     this.pendingWinners = [];
     this.pot = 0;
     this.potParts = [];
-    this.nextStepAt = Date.now() + (this.inHand().length > 1 ? 5000 : 2500);
+    this.nextStepAt = Date.now() + (this.inHand().length > 1 ? SHOWDOWN_HOLD : FOLD_HOLD);
     this.touch();
   }
 

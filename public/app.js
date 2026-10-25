@@ -733,6 +733,13 @@ function referralCard(r) {
 
 // ——— последние раздачи ———
 
+// Открыть окно без автофокуса на крестике: иначе вокруг него сразу горит рамка фокуса.
+function openModal(dialog) {
+  if (dialog.open) return;
+  dialog.showModal();
+  if (document.activeElement && dialog.contains(document.activeElement)) document.activeElement.blur();
+}
+
 const handsDialog = $('#hands-dialog');
 let handsReplay = null;
 $('#hands-close').addEventListener('click', () => handsDialog.close());
@@ -773,7 +780,7 @@ async function openHands() {
   const list = el('div', 'hand-list');
   list.append(el('p', 'hint', 'Загружаем…'));
   body.append(list);
-  if (!handsDialog.open) handsDialog.showModal();
+  openModal(handsDialog);
   Sound.play('click');
   const hands = await loadHands();
   list.textContent = '';
@@ -791,7 +798,7 @@ async function openHandReplay(id) {
   back.addEventListener('click', () => { if (handsReplay) handsReplay.stop(); openHands(); });
   const box = el('div');
   body.append(back, box);
-  if (!handsDialog.open) handsDialog.showModal();
+  openModal(handsDialog);
   handsReplay = HandReplay.mount(box, data.hand, { onShare: shareHand });
 }
 
@@ -1184,8 +1191,7 @@ async function openProfile(name) {
   const data = await getJson(`/api/profile?name=${encodeURIComponent(name)}`);
   if (!data) return;
   renderProfile($('#profile-body'), data);
-  const dialog = $('#profile-dialog');
-  if (!dialog.open) dialog.showModal();
+  openModal($('#profile-dialog'));
   Sound.play('click');
 }
 $('#profile-close').addEventListener('click', () => $('#profile-dialog').close());
@@ -2793,8 +2799,8 @@ function callAmount(t) {
   return Math.max(0, t.currentBet - (seat && !seat.empty ? seat.bet : 0));
 }
 
-// Заранее выбранное действие живёт до тех пор, пока не изменилась ставка:
-// если соперник повысил, решение принимается заново.
+// Заранее выбранное действие живёт до тех пор, пока не изменилась ставка и не открылась
+// новая улица; иначе тихо сбрасывается — кнопка гаснет, решение принимается заново.
 function checkPre(t) {
   const pre = state.pre;
   if (!pre) return;
@@ -2803,19 +2809,12 @@ function checkPre(t) {
   // Открылась новая улица — выбор сделан до неё, новую карту игрок ещё не учёл.
   if (t.phase !== pre.phase) {
     state.pre = null;
-    statusNotice('Новая улица — выберите ход заново');
     return;
   }
 
   const toCall = you.legal ? you.legal.toCall : callAmount(t);
-  if (pre.action === 'check' && toCall > 0) {
+  if ((pre.action === 'check' && toCall > 0) || (pre.action === 'call' && toCall !== pre.amount)) {
     state.pre = null;
-    statusNotice('Ставка изменилась — решайте заново');
-    return;
-  }
-  if (pre.action === 'call' && toCall !== pre.amount) {
-    state.pre = null;
-    statusNotice('Ставка изменилась — решайте заново');
     return;
   }
 
@@ -2874,36 +2873,7 @@ function sendRaise(t, amount) {
   state.raiseValue = 0;
 }
 
-// Подсказка в строке статуса над кнопками: видна, но ничего на столе не закрывает.
-const NOTICE_MS = 3000;
-function statusNotice(text) {
-  state.notice = { text, until: performance.now() + NOTICE_MS };
-  state.actionKey = '';                // перерисуем панель с подсказкой
-  if (state.table) renderActions(state.table);
-  Sound.play('error', { throttle: 400 });
-  clearTimeout(state.noticeTimer);
-  state.noticeTimer = setTimeout(() => {
-    state.notice = null;
-    state.actionKey = '';
-    if (state.table) renderActions(state.table);
-  }, NOTICE_MS);
-}
-
-function applyNotice() {
-  const status = document.querySelector('#actions .actions__status');
-  if (!status) return;
-  const n = state.notice;
-  const on = !!(n && performance.now() < n.until);
-  status.classList.toggle('is-notice', on);
-  if (on) status.textContent = n.text;
-}
-
 function renderActions(t) {
-  buildActions(t);
-  applyNotice();
-}
-
-function buildActions(t) {
   const box = $('#actions');
   const you = t.you;
   const legal = you && you.legal;
@@ -2957,7 +2927,6 @@ function buildActions(t) {
   }
 
   if (legal) {
-    status.textContent = 'Ваш ход';
 
     const fold = el('button', 'btn btn--danger btn--act', 'Фолд');
     fold.addEventListener('click', () => cmd({ cmd: 'act', action: 'fold' }));
@@ -2994,11 +2963,9 @@ function buildActions(t) {
     return;
   }
 
-  const acting = t.actingSeat >= 0 && t.seats[t.actingSeat] && !t.seats[t.actingSeat].empty
-    ? `Ход: ${t.seats[t.actingSeat].name}`
-    : t.phase === 'showdown' ? 'Вскрытие'
-      // Ход ничей посреди раздачи: ставки уходят в банк или раскладывается олл-ин.
-      : ['preflop', 'flop', 'turn', 'river'].includes(t.phase) ? 'Раздача идёт' : idleStatus(t);
+  // Кто ходит, что идёт вскрытие, что вы сбросили — всё это видно на столе;
+  // строкой пишем только то, чего на столе не видно (регистрация, итог турнира).
+  const acting = t.phase === 'idle' ? idleStatus(t) : '';
 
   // Заранее ходит только тот, кому ещё предстоит решать: пас и олл-ин
   // выбирать нечего.
@@ -3031,20 +2998,15 @@ function buildActions(t) {
       main.append(back);
       return;
     }
-    status.textContent = folded ? `${acting} · вы сбросили карты`
-      : allIn ? `${acting} · вы в олл-ине`
-        : acting;
+    status.textContent = acting;
     const bots = botsButton(t);
     if (bots) status.append(bots);
     main.append(deadButton('Фолд'), deadButton('Чек'), deadButton('Рейз'));
     return;
   }
 
+  // Выбранный заранее ход подсвечен на кнопке — подписывать его незачем.
   const toCall = callAmount(t);
-  const armed = state.pre
-    ? (state.pre.action === 'fold' ? 'фолд' : state.pre.action === 'check' ? 'чек' : `колл ${fmt(state.pre.amount)}`)
-    : '';
-  status.textContent = armed ? `${acting} · заранее выбрано: ${armed}` : `${acting} · можно выбрать ход заранее`;
 
   main.append(preButton('Фолд', 'fold', 0, 'Сбросить карты, как только дойдёт очередь'));
   main.append(toCall > 0
@@ -3062,7 +3024,7 @@ function idleStatus(t) {
     return `Регистрация: ${taken} из ${t.maxSeats}. Турнир начнётся, когда займут все места`;
   }
   if (tour && tour.status === 'finished') return 'Турнир завершён';
-  return 'Ждём начала раздачи';
+  return '';   // между раздачами говорить нечего — строка скрыта
 }
 
 // Сидите и ждёте соперников: боты зовутся прямо отсюда, а не из меню стола.
