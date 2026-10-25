@@ -1520,7 +1520,13 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   .acts__size { position: static; }
   .raise { width: 100%; padding: 8px 10px 10px; gap: 8px; box-shadow: none; }
   .raise__preset { padding: 6px 4px; }
-  .room { grid-template-columns: 1fr auto; }
+  /* Название и описание — на всю ширину, ниже строкой: статус слева, кнопка справа.
+     Иначе длинный статус турнира сжимал колонку с названием. */
+  .room { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "info info" "stats btn"; gap: 10px 14px; }
+  .room > :first-child { grid-area: info; min-width: 0; }
+  .room__stats { grid-area: stats; align-items: flex-start; min-width: 0; }
+  .room > .btn { grid-area: btn; min-width: 104px; }
+  .room__live { margin-top: 0; }
   .room__seats { display: none; }
   .lobby__head { flex-direction: column; align-items: stretch; }
   .lobby__actions .btn { flex: 1 1 0; }
