@@ -157,7 +157,7 @@ class Mtt {
       const seat = table.seats.findIndex((s) => s === null);
       table.sit({ id: entry.userId, name: entry.name, isBot: entry.isBot }, seat, STACK);
       const p = table.byUser(entry.userId);
-      // Кого нет онлайн — пропускает раздачи, но в турнире: блайнды платит, карты сбрасываются.
+      // Кого нет онлайн — «отошёл», но в турнире: блайнды платит, карты сбрасываются.
       if (p && !entry.isBot && !this.hooks.isOnline(entry.userId)) p.sittingOut = true;
       if (!entry.isBot) this.hooks.record(entry, { start: true, entrants: this.entrants });
     });

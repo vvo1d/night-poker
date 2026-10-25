@@ -61,6 +61,8 @@ function profilePage(user, origin, avatar = null) {
 <meta property="og:description" content="${escapeHtml(description)}">
 <meta property="og:image" content="${origin}/og.png">
 <meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-120.png" sizes="120x120" type="image/png">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">

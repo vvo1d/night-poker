@@ -350,6 +350,11 @@ function connectStream() {
     renderLobby(data);
     if (state.view === 'table') show('lobby');
   });
+  // Сообщения сервера лично игроку (например, «подняли из-за стола за долгий пропуск»).
+  stream.addEventListener('notice', (e) => {
+    const data = JSON.parse(e.data);
+    if (data.text) toast(data.text, { info: true });
+  });
   stream.addEventListener('table', (e) => {
     const data = JSON.parse(e.data);
     // Общий кадр приходит без чужих и своих карт — свои подставляем из личной части.
@@ -1782,6 +1787,7 @@ function renderTable(t) {
     }
 
     if (seat.folded) node.classList.add('seat--folded');
+    if (seat.sittingOut) node.classList.add('seat--away');   // отошёл — аватар бледный для всех
     if (seat.you) node.classList.add('seat--you');
     if (t.actingSeat === i) node.classList.add('seat--acting');
     if (seat.winner) node.classList.add('seat--winner');
@@ -1845,7 +1851,7 @@ function renderTable(t) {
     const note = seat.mucked ? 'карты в сброс'
       : seat.revealing && !seat.handName ? 'вскрывается…'
         : seat.allIn ? 'олл-ин'
-          : seat.sittingOut ? (seat.stack === 0 ? 'без фишек' : 'пропускает')
+          : seat.sittingOut ? (seat.stack === 0 ? 'без фишек' : 'отошёл')
             : seat.handName || labelAction(seat.lastAction);
     // Строка заметки стоит всегда, даже пустая: иначе плашка меняет высоту,
     // а вместе с ней прыгает и место под ставку.
@@ -1859,7 +1865,8 @@ function renderTable(t) {
 
     // Баттон — на нижнем углу аватара: не закрывает ни имя, ни стек, ни заметку.
     if (t.buttonSeat === i && t.phase !== 'idle') avatar.append(el('div', 'seat__badge', 'D'));
-    if (seat.net > 0 && t.phase === 'showdown') node.append(el('div', 'seat__win', `+${fmt(seat.net)}`));
+    // Выигрыш — на нижней части своего аватара: под местом подпись налезала на карты соседа.
+    if (seat.net > 0 && t.phase === 'showdown') (node.querySelector('.seat__avatar') || node).append(el('div', 'seat__win', `+${fmt(seat.net)}`));
 
     // Облачко — поверх своего аватара: над местом оно закрывало ставку,
     // которая у нижних мест лежит как раз над ними.
@@ -1883,6 +1890,8 @@ function renderTable(t) {
   renderBets(t, hero);
 
   state.cardValues = state.nextValues;
+  // Сколько ещё можно быть «отошедшим», пока не поднимут из-за кэш-стола.
+  state.sitOutDeadline = t.you && t.you.sitOutLeft ? performance.now() + t.you.sitOutLeft : 0;
   state.deadline = t.timeLeft ? performance.now() + t.timeLeft : 0;
   state.timeout = t.timeout || 25000;
   // Длина хода — от первого кадра этого хода: бот думает пару секунд, а не все 25,
@@ -2625,7 +2634,15 @@ function playEffects(t, prev, positions) {
 
 const REVEAL_WINDOW = 3000;   // столько же, сколько REVEAL_ASK на сервере
 
+// Минуты и секунды: 4:07.
+function mmss(ms) {
+  const s = Math.ceil(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 function tickTimer() {
+  const sitOut = document.querySelector('.sitout-left');
+  if (sitOut && state.sitOutDeadline) sitOut.textContent = mmss(Math.max(0, state.sitOutDeadline - performance.now()));
   const reveal = state.revealDeadline > 0;
   const until = reveal ? state.revealDeadline : state.deadline;
   const span = reveal ? REVEAL_WINDOW : (state.turnSpan || state.timeout);
@@ -2647,9 +2664,8 @@ function tickTimer() {
 
   if (state.levelDeadline) {
     const ms = Math.max(0, state.levelDeadline - performance.now());
-    const sec = Math.ceil(ms / 1000);
     const next = state.levelNext ? ` → ${fmt(state.levelNext.sb)}/${fmt(state.levelNext.bb)}` : '';
-    const text = ms > 0 ? `рост через ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}${next}`
+    const text = ms > 0 ? `рост через ${mmss(ms)}${next}`
       : `со следующей раздачи${next}`;
     const clock = $('#tour-clock');
     if (clock.textContent !== text) clock.textContent = text;
@@ -2877,7 +2893,9 @@ function buildActions(t) {
 
   const acting = t.actingSeat >= 0 && t.seats[t.actingSeat] && !t.seats[t.actingSeat].empty
     ? `Ход: ${t.seats[t.actingSeat].name}`
-    : t.phase === 'showdown' ? 'Вскрытие' : idleStatus(t);
+    : t.phase === 'showdown' ? 'Вскрытие'
+      // Ход ничей посреди раздачи: ставки уходят в банк или раскладывается олл-ин.
+      : ['preflop', 'flop', 'turn', 'river'].includes(t.phase) ? 'Раздача идёт' : idleStatus(t);
 
   // Заранее ходит только тот, кому ещё предстоит решать: пас и олл-ин
   // выбирать нечего.
@@ -2895,12 +2913,19 @@ function buildActions(t) {
       main.append(deadButton('Фолд'), deadButton('Чек'), deadButton('Рейз'));
       return;
     }
-    if (you.sittingOut && t.tour && t.tour.status === 'running') {
-      status.textContent = 'Вы пропускаете раздачи: блайнды списываются, карты сбрасываются';
-      const back = el('button', 'btn btn--sm actions__back', 'Вернуться в игру');
-      back.addEventListener('click', () => cmd({ cmd: 'sitOut', value: false }));
-      status.append(back);
-      main.append(deadButton('Фолд'), deadButton('Чек'), deadButton('Рейз'));
+    // Отошли — вместо неактивных кнопок хода одна крупная «Вернуться в игру».
+    // За кэш-столом рядом обратный отсчёт: через 5 минут пропуска поднимем из-за стола.
+    if (you.sittingOut && (!t.tour || t.tour.status === 'running')) {
+      const broke = !t.tour && you.stack === 0;
+      status.textContent = t.tour ? 'Вы отошли: блайнды списываются, карты сбрасываются'
+        : broke ? 'Фишки на столе кончились' : 'Вы отошли';
+      if (!t.tour && you.sitOutLeft) {
+        status.append(document.createTextNode(' · встанете из-за стола через '));
+        status.append(el('b', 'sitout-left', mmss(you.sitOutLeft)));
+      }
+      const back = el('button', 'btn btn--primary btn--act actions__return', broke ? 'Докупить фишки' : 'Вернуться в игру');
+      back.addEventListener('click', () => (broke ? openTopUp(t) : cmd({ cmd: 'sitOut', value: false })));
+      main.append(back);
       return;
     }
     status.textContent = folded ? `${acting} · вы сбросили карты`
@@ -3224,7 +3249,7 @@ function renderMenu(t) {
 
   const sitOut = $('#menu-sitout');
   sitOut.hidden = !seated;
-  sitOut.textContent = seated && you.sittingOut ? 'Вернуться в игру' : 'Пропустить раздачи';
+  sitOut.textContent = seated && you.sittingOut ? 'Вернуться в игру' : 'Отойти';
 
   const bot = $('#menu-bot');
   const botClosed = !!(tour && tour.status !== 'registering');
@@ -3493,7 +3518,7 @@ document.querySelectorAll('.side__tab').forEach((b) => b.addEventListener('click
 }));
 
 function seatStatus(t, s) {
-  if (s.sittingOut) return s.stack === 0 ? 'без фишек' : 'пропускает';
+  if (s.sittingOut) return s.stack === 0 ? 'без фишек' : 'отошёл';
   if (t.phase === 'idle' || !s.inHand) return 'ждёт раздачу';
   if (s.folded) return 'сбросил';
   if (s.allIn) return 'олл-ин';

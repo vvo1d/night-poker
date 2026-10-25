@@ -10,7 +10,7 @@ const crypto = require('node:crypto');
 
 const { Store, REF_HANDS } = require('./src/store');
 const { CATALOG: SHOP_CATALOG } = require('./src/shop');
-const { Table, setEvalBudget, REACTIONS, PHRASES } = require('./src/table');
+const { Table, setEvalBudget, REACTIONS, PHRASES, SIT_OUT_MS } = require('./src/table');
 const { BOT_NAMES } = require('./src/bot');
 const { Tournament, SNG_STACK, SNG_TIMEOUT, SNG_BUY_INS, SPIN_STACK, SPIN_TIMEOUT } = require('./src/tournament');
 const { ACHIEVEMENTS, achievementView, tierTotal } = require('./src/achievements');
@@ -470,7 +470,7 @@ function restoreTable(rec) {
   }
   for (const p of rec.players) {
     table.restoreSeat({ id: p.userId, name: p.name, isBot: p.isBot }, p.seat, p.chips, !!p.sittingOut);
-    // Не вернувшийся после перезапуска уйдёт в «пропуск раздач», а с кэш-стола — встанет (см. maintain).
+    // Не вернувшийся после перезапуска станет «отошедшим», а с кэш-стола — встанет (см. maintain).
     if (!p.isBot && !presence.has(p.userId)) presence.set(p.userId, { conns: 0, lastSeen: Date.now() });
   }
   table.note('Сервер перезапускался — стол восстановлен, недоигранная раздача отменена', 'result');
@@ -954,6 +954,8 @@ function invitePage(req, res, code) {
 <meta property="og:image" content="${origin}/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta http-equiv="refresh" content="0; url=${escapeHtml(go)}">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon-120.png" sizes="120x120" type="image/png">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0d1317;color:#dfe7e6;font:16px system-ui,sans-serif}a{color:#c9a24a}</style>
 </head><body><p><a href="${escapeHtml(go)}">Открыть стол в THPoker</a></p>
@@ -1746,6 +1748,13 @@ function updateAudience() {
   }
 }
 
+// Подняли из-за стола за долгий пропуск — игроку всплывашка, если он смотрит.
+function notifyLeft(p) {
+  for (const client of clients) {
+    if (client.ctx.user.id === p.userId) emit(client, 'notice', { text: 'Вы долго были «отошедшим» — мы подняли вас из-за стола, фишки вернулись в банк' });
+  }
+}
+
 function maintain(now) {
   updateAudience();
   for (const table of tables.values()) {
@@ -1761,10 +1770,21 @@ function maintain(now) {
       }
     }
 
-    // Игроки без соединения: сначала пропуск раздач, затем выход из-за стола.
+    // Игроки без соединения: сначала «отошёл», затем выход из-за стола.
     if (table.humans()) {
       for (const p of table.players()) {
         if (p.isBot) continue;
+        // Кэш-стол: отошедший встаёт через SIT_OUT_MS. Вернулся в игру — отсчёт
+        // сбрасывается, снова ушёл в пропуск — начинается заново.
+        if (!table.tour) {
+          if (!p.sittingOut) p.sitOutAt = 0;
+          else if (!p.sitOutAt) { p.sitOutAt = now; table.touch(); }
+          else if (now - p.sitOutAt >= SIT_OUT_MS && !p.leaving) {
+            table.leave(p.userId);
+            notifyLeft(p);
+            continue;
+          }
+        }
         const rec = presence.get(p.userId);
         if (!rec || rec.conns > 0) continue;
         if (now - rec.lastSeen > 45_000 && !p.sittingOut) table.setSittingOut(p.userId, true);

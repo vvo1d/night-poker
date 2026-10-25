@@ -14,12 +14,14 @@ const REVEAL_BOT = 500;    // бот решает быстро
 // Олл-ин: карты открываются сразу, а борд выходит по улице — с паузой, чтобы было видно.
 const RUNOUT_FIRST = 1500;  // от вскрытия карт до первой улицы
 const RUNOUT_STEP = 1700;   // между улицами и после ривера
+const ROUND_PAUSE = 800;    // круг торговли закрыт: столько последняя ставка лежит на столе, потом — в банк
 
 // Реакции за столом: эмодзи и готовые фразы облачком над местом игрока.
 const REACTIONS = ['👍', '😂', '😮', '😡', '🔥', '👏', '🤔', '😎'];
 const PHRASES = ['Хорошо сыграно', 'Удачи всем', 'Повезло!', 'Ну ты даёшь', 'Спасибо', 'Думаю…', 'Блеф?', 'Ещё раздачу!'];
 const REACTION_MS = 3500;  // сколько облачко висит над местом
 const REACTION_GAP = 2000; // не чаще раза в две секунды — иначе это спам
+const SIT_OUT_MS = 5 * 60_000;   // за кэш-столом отошедший встаёт через 5 минут
 const BANTER_GAP = 15_000; // боты отзываются за столом не чаще раза в 15 секунд
 
 let handCounter = 0;
@@ -71,6 +73,7 @@ class Table {
     this.buttonSeat = -1;
     this.deadline = 0;      // дедлайн хода текущего игрока
     this.nextStepAt = 0;    // отложенный переход (старт раздачи, конец вскрытия)
+    this.closeAt = 0;       // круг торговли закрыт — когда собрать ставки в банк (см. closeRound)
     this.handId = 0;
     this.log = [];
     this.logSeq = 0;
@@ -311,6 +314,10 @@ class Table {
     const p = this.byUser(userId);
     if (!p) return { error: 'Вас нет за столом' };
     p.sittingOut = value;
+    // Нажал в свой ход: «пропустить» — ход делается сразу (чек или пас); «вернуться» — снова полное время.
+    if (this.actingSeat === p.seat && !p.isBot) {
+      this.deadline = value ? Date.now() : Date.now() + this.timeout * 1000;
+    }
     this.touch();
     if (!value) this.maybeStartHand();
     return { ok: true };
@@ -335,6 +342,7 @@ class Table {
   }
 
   startHand() {
+    this.closeAt = 0;
     const ready = this.eligible();
     if (ready.length < 2) { this.phase = 'idle'; this.touch(); return; }
 
@@ -417,17 +425,18 @@ class Table {
     p.lastAction = label;
   }
 
-  // Пропускающий раздачи в турнире всё равно в них участвует: платит блайнды,
-  // а карты за него сбрасывает стол.
-  awayInTour(p) {
-    return !!(this.tour && p.sittingOut && !p.isBot);
+  // За отошедшего ходит сам стол: чек, если можно, иначе пас.
+  // В турнире он так играет каждую раздачу (блайнды платит), за кэш-столом —
+  // только ту, в которой нажал «Отойти»: в следующие ему не сдают.
+  isAway(p) {
+    return !!(p && p.sittingOut && !p.isBot);
   }
 
   setActor(seat) {
     this.actingSeat = seat;
     if (seat >= 0) {
       const p = this.seats[seat];
-      const away = this.awayInTour(p);
+      const away = this.isAway(p);
       this.deadline = Date.now() + (p.isBot ? botThinkingTime() : away ? SNG_AWAY_MS : this.timeout * 1000);
     } else {
       this.deadline = 0;
@@ -456,7 +465,7 @@ class Table {
     const p = this.byUser(userId);
     if (!p) return { error: 'Вас нет за столом' };
     if (this.actingSeat !== p.seat) return { error: 'Сейчас не ваш ход' };
-    if (this.awayInTour(p)) return { error: 'Вы пропускаете раздачи — сначала вернитесь в игру' };
+    if (this.isAway(p)) return { error: 'Вы отошли — сначала вернитесь в игру' };
     const legal = this.legalActions(p);
     if (action === 'check' && !legal.check) return { error: 'Нельзя чекнуть, есть ставка' };
     if (action === 'call' && legal.toCall === 0) action = 'check';
@@ -531,7 +540,17 @@ class Table {
     const next = this.nextOccupied(this.actingSeat, (p) => p.inHand && !p.folded && !p.allIn && !p.hasActed);
     if (next >= 0) { this.setActor(next); return; }
 
-    // Круг торговли закончен.
+    // Круг торговли закончен. Сразу в банк не собираем: последний колл или чек
+    // должен успеть лечь на стол — иначе фишки последнего хода не видны вовсе.
+    this.actingSeat = -1;
+    this.deadline = 0;
+    this.closeAt = Date.now() + ROUND_PAUSE;
+    this.touch();
+  }
+
+  // Пауза после круга торговли вышла: ставки — в банк, дальше улица, олл-ин или вскрытие.
+  closeRound() {
+    this.closeAt = 0;
     this.collectBets();
     if (this.canAct().length <= 1) { this.runOut(); return; }
 
@@ -674,7 +693,7 @@ class Table {
     this.stepReveal();
   }
 
-  endHand() { this.showdown(); }
+  endHand() { this.closeAt = 0; this.showdown(); }
 
   // Кто выигрывает какой банк. Фишки не двигаем: сперва игроки вскрываются.
   computeWinners(pots, alive) {
@@ -922,6 +941,10 @@ class Table {
   // ——— часы стола ———
 
   tick(now = Date.now()) {
+    if (this.closeAt && now >= this.closeAt) {
+      this.closeRound();
+      return;
+    }
     if (this.runoutAt && now >= this.runoutAt) {
       this.runoutStep(now);
       return;
@@ -944,7 +967,8 @@ class Table {
         this.applyAction(p, action, amount);
       } else {
         const legal = this.legalActions(p);
-        this.note(`${p.name}: время вышло`, 'action');
+        // Отошедший ходит без «время вышло»: он сам попросил ходить за него.
+        if (!p.sittingOut) this.note(`${p.name}: время вышло`, 'action');
         this.applyAction(p, legal.check ? 'check' : 'fold');
         if (!p.isBot) { p.sittingOut = true; this.touch(); } // отсутствующего игрока снимаем с раздач
       }
@@ -1053,6 +1077,8 @@ class Table {
       stack: p.stack,
       topUp: p.topUp || 0,            // докупка, которая встанет в стек со следующей раздачи
       forfeit: !!p.forfeit,           // сдался в турнире — выбудет, когда доиграется раздача
+      // Сколько ещё можно быть «отошедшим» за кэш-столом, прежде чем вас поднимут.
+      sitOutLeft: !this.tour && p.sittingOut && p.sitOutAt ? Math.max(0, p.sitOutAt + SIT_OUT_MS - Date.now()) : 0,
       inHand: p.inHand && this.phase !== 'idle',
       cards: p.cards,
       sittingOut: p.sittingOut,
@@ -1060,7 +1086,7 @@ class Table {
       hand: this.handInfoFor(p, withStrength),
       canReveal: !!(this.reveal && this.reveal.optional && this.reveal.seat === p.seat),
       // Отошедшему в турнире ходить нечем: стол сам сбросит его карты.
-      legal: this.actingSeat === p.seat && !this.awayInTour(p) ? this.legalActions(p) : null,
+      legal: this.actingSeat === p.seat && !this.isAway(p) ? this.legalActions(p) : null,
     };
   }
 
@@ -1126,4 +1152,4 @@ class Table {
   }
 }
 
-module.exports = { Table, setEvalBudget, REACTIONS, PHRASES, REACTION_MS };
+module.exports = { Table, setEvalBudget, REACTIONS, PHRASES, REACTION_MS, SIT_OUT_MS };

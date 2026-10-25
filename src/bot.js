@@ -6,7 +6,7 @@ const BOT_NAMES = [
   'Игнат', 'Клим', 'Лада', 'Марта', 'Ника', 'Осип', 'Пётр', 'Рита',
 ];
 
-function botThinkingTime() { return 900 + Math.random() * 1800; }
+function botThinkingTime() { return 300 + Math.random() * 1200; }   // от 0,3 до 1,5 секунды
 
 const CATEGORY_STRENGTH = [0.14, 0.34, 0.55, 0.68, 0.76, 0.82, 0.9, 0.96, 0.99];
 
