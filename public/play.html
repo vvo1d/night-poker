@@ -379,6 +379,8 @@
       <input id="invite-link" readonly aria-label="Ссылка-приглашение">
       <button class="btn btn--sm" type="button" id="invite-copy">Копировать</button>
     </div>
+    <!-- Друзья: позвать прямо из игры (в сети — приглашение, нет — сообщение в Telegram) -->
+    <div class="invite-friends" id="invite-friends" hidden></div>
     <!-- QR-код той же ссылки: друг рядом наводит камеру телефона на экран -->
     <figure class="invite-qr">
       <div class="invite-qr__code" id="invite-qr" role="img" aria-label="QR-код ссылки-приглашения"></div>
@@ -412,6 +414,15 @@
     </div>
   </form>
 </dialog>
+
+<!-- Друг зовёт за свой стол -->
+<div class="call" id="call" role="alert" hidden>
+  <span class="call__text" id="call-text"></span>
+  <div class="call__row">
+    <button class="btn btn--primary btn--sm" type="button" id="call-go">К столу</button>
+    <button class="btn btn--ghost btn--sm" type="button" id="call-later">Позже</button>
+  </div>
+</div>
 
 <div class="toast" id="toast" hidden></div>
 

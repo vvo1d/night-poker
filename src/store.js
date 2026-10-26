@@ -271,13 +271,13 @@ class Store {
     if (!m.invitedBy || m.refPaid || u.handsPlayed < REF_HANDS) return;
     m.refPaid = Date.now();
     const o = this.users.get(m.invitedBy);
-    this.addChips(u.id, REF_REWARD);
+    this.addChips(u.id, REF_REWARD, 'Подарок за приглашение');
     this.refNews.set(u.id, { at: m.refPaid, name: o ? o.name : '', amount: REF_REWARD, invitee: true });
     if (!o) return;
     const ref = o.meta.ref || (o.meta.ref = { count: 0, earned: 0 });
     ref.count += 1;
     const paid = ref.count <= REF_MAX ? REF_REWARD : 0;
-    if (paid) { ref.earned += paid; this.addChips(o.id, paid); this.addXp(o, levels.XP.friend); }
+    if (paid) { ref.earned += paid; this.addChips(o.id, paid, `Приглашённый друг ${u.name}`); this.addXp(o, levels.XP.friend); }
     this.refNews.set(o.id, { at: m.refPaid, name: u.name, amount: paid, invitee: false });
     this.touch(o);
     if (this.onReferral) this.onReferral(o, u, paid);
@@ -312,7 +312,7 @@ class Store {
     amount = Math.round(Number(amount) || 0);
     if (!amount) return { error: 'Укажите сумму' };
     if (u.chips + amount < 0) return { error: `В банке только ${u.chips}` };
-    this.addChips(userId, amount);
+    this.addChips(userId, amount, `Администратор${reason ? `: ${reason}` : ''}`);
     this.adminNote(u, by, `${amount > 0 ? '+' : ''}${amount} фишек${reason ? ` (${reason})` : ''}`);
     return { ok: true, chips: u.chips };
   }
@@ -471,10 +471,14 @@ class Store {
 
   user(id) { return this.users.get(id) || null; }
 
-  addChips(userId, amount) {
+  // Любое изменение банка — с причиной: она попадает в «Историю фишек» игрока.
+  addChips(userId, amount, reason = 'Прочее') {
     const u = this.users.get(userId);
     if (!u) return;
     u.chips += amount;
+    if (amount) {
+      try { this.backend.logChips(userId, Date.now(), Math.round(amount), Math.round(u.chips), String(reason).slice(0, 80)); } catch { /* история не важнее игры */ }
+    }
     if (u.chips > u.stats.peakChips) { u.stats.peakChips = u.chips; this.checkAchievements(u); }
     this.touch(u);
   }
@@ -544,7 +548,7 @@ class Store {
     if (!u) return { error: 'Игрок не найден' };
     const res = daily.claimBonus(u);
     if (res.error) return res;
-    this.addChips(userId, res.reward);
+    this.addChips(userId, res.reward, `Бонус за вход, ${res.streak}-й день`);
     this.addXp(u, levels.XP.bonus);
     return res;
   }
@@ -554,7 +558,7 @@ class Store {
     if (!u) return { error: 'Игрок не найден' };
     const res = daily.claimQuest(u, String(questId));
     if (res.error) return res;
-    this.addChips(userId, res.reward);
+    this.addChips(userId, res.reward, 'Задание дня');
     this.seasonPoints(u, 'quest');
     this.addXp(u, levels.XP.daily);
     weekly.progress(u, 'dailyDone');   // задание недели «выполните 7 заданий дня»
@@ -681,7 +685,7 @@ class Store {
         items.push(shop.item(r.item).name);
       }
     }
-    this.addChips(u.id, chips);
+    this.addChips(u.id, chips, `Уровень ${after}`);
     this.levelNews.set(u.id, { at: Date.now(), level: after, chips, items });
     this.touch(u);
     if (this.onLevel) this.onLevel(u);
@@ -701,7 +705,7 @@ class Store {
     if (!u) return { error: 'Игрок не найден' };
     const res = weekly.claimQuest(u, String(questId));
     if (res.error) return res;
-    this.addChips(userId, res.reward);
+    this.addChips(userId, res.reward, 'Задание недели');
     this.addXp(u, levels.XP.weekly);
     return res;
   }
@@ -711,7 +715,7 @@ class Store {
     if (!u) return { error: 'Игрок не найден' };
     const res = weekly.claimChest(u);
     if (res.error) return res;
-    this.addChips(userId, res.reward);
+    this.addChips(userId, res.reward, 'Сундук недели');
     this.addXp(u, levels.XP.chest);
     return res;
   }
@@ -726,7 +730,7 @@ class Store {
   }
 
   seasonReward(u, result) {
-    if (result.reward > 0) this.addChips(u.id, result.reward);
+    if (result.reward > 0) this.addChips(u.id, result.reward, 'Награда за сезон');
     const league = seasons.LEAGUES.find((l) => l.id === result.league);
     this.news.set(u.id, {
       id: `season-${result.key}`, icon: '🏆', title: `Сезон «${result.name}» — ${league.name}`,
@@ -897,8 +901,7 @@ class Store {
     const u = this.users.get(userId);
     if (!u) return { error: 'Игрок не найден' };
     if (u.chips >= 200) return { error: 'Пополнение доступно, когда в банке меньше 200 фишек' };
-    u.chips += RELOAD_CHIPS;
-    this.touch(u);
+    this.addChips(userId, RELOAD_CHIPS, 'Бесплатное пополнение');
     return { ok: true, chips: u.chips };
   }
 
@@ -956,7 +959,7 @@ class Store {
     const s = u.meta.shop || (u.meta.shop = { owned: [], equip: {} });
     s.owned = [...(s.owned || []), it.id];
     s.equip = { ...(s.equip || {}), [it.kind]: it.id };   // купленное сразу надеваем
-    this.addChips(userId, -it.price);
+    this.addChips(userId, -it.price, `Магазин: ${it.name}`);
     this.touch(u);
     return { ok: true, item: it };
   }
@@ -992,6 +995,11 @@ class Store {
       earned: ref.earned,
       news: this.refNews.get(u.id) || null,
     };
+  }
+
+  // История фишек игрока: свежие сверху.
+  chipLog(userId, limit) {
+    try { return this.backend.chipLog(userId, limit); } catch { return []; }
   }
 
   // Готовое событие для потока: строка собирается один раз до следующего изменения.

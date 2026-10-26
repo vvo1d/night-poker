@@ -126,7 +126,7 @@ function createTable(cfg, {
   const n = ++tableSeq;
   // Стол турнира по расписанию получает «переходник» от турнира, sit-n-go — свой Tournament.
   const tour = mttTour || (sng ? new Tournament(sng, {
-    pay: (player, amount) => { if (!player.isBot) store.addChips(player.userId, amount); },
+    pay: (player, amount, place) => { if (!player.isBot) store.addChips(player.userId, amount, `Приз за ${place} место: ${cfg.name}`); },
     onStart: (players) => {
       for (const p of players) {
         if (p.isBot) continue;
@@ -143,8 +143,8 @@ function createTable(cfg, {
     onChipsReturn: (player, chips) => {
       if (player.isBot) return;
       // Турнирные фишки в банк не уходят. До старта уход из-за стола — отмена регистрации.
-      if (tour) { if (tour.status === 'registering') store.addChips(player.userId, tour.buyIn); return; }
-      if (chips > 0) store.addChips(player.userId, chips);
+      if (tour) { if (tour.status === 'registering') store.addChips(player.userId, tour.buyIn, `Возврат взноса: ${cfg.name}`); return; }
+      if (chips > 0) store.addChips(player.userId, chips, `Со стола «${cfg.name}»`);
     },
     onHandStart: (players) => {
       handsByDay.set(dayKey(), (handsByDay.get(dayKey()) || 0) + 1);
@@ -254,9 +254,9 @@ function seatUser(user, table, buyIn, seat) {
   if (pay > fresh.chips) return { error: 'В банке недостаточно фишек' };
   if (!Number.isInteger(seat) || seat < 0) seat = table.seats.findIndex((x) => x === null);
   if (seat < 0) return { error: 'Свободных мест нет' };
-  store.addChips(user.id, -pay);
+  store.addChips(user.id, -pay, tour ? `Взнос: ${table.name}` : `За стол «${table.name}»`);
   const res = table.sit({ id: user.id, name: user.name }, seat, stack);
-  if (res.error) { store.addChips(user.id, pay); return res; }
+  if (res.error) { store.addChips(user.id, pay, 'Посадка не удалась — возврат'); return res; }
   store.markSit(user);
   // Sit-n-go заведения: таймер добора ботов идёт с первой записи — сразу, а не со следующего обхода.
   if (table.houseSng && tour.status === 'registering' && !tour.fillAt) { tour.fillAt = Date.now() + table.fillMs; table.touch(); }
@@ -286,22 +286,36 @@ function quickPlay(user, session) {
 
 // «Ещё sit-n-go»: записаться в свободный турнир заведения — с тем же взносом
 // или самым близким, который по карману.
-function quickSng(user, session, buyIn, spin = false) {
+// «Ещё sit-n-go»: такой же турнир, как сыгранный, — тот же взнос, столько же мест,
+// спин или нет. Сначала среди турниров заведения, потом среди открытых турниров
+// игроков; нет такого — открываем новый с теми же условиями: места через полминуты
+// после записи займут боты, как в турнирах заведения.
+function quickSng(user, session, { buyIn, spin = false, seats = 0, name = '' }) {
   const seated = tableOfUser(user.id);
   if (seated) {
     if (!seated.tour) return { error: 'Сначала встаньте из-за кэш-стола' };
     if (seated.tour.status === 'running') return { error: 'Вы ещё играете в турнире' };
     seated.leave(user.id);   // запись на другой турнир отменяется, взнос — в банк
   }
-  const chips = store.user(user.id).chips;
-  const open = [...tables.values()].filter((t) => t.houseSng && t.tour.status === 'registering'
-    && t.tour.spin === spin && t.occupied() < t.maxSeats && t.tour.buyIn <= chips);
-  if (!open.length) return { error: 'В банке не хватает на взнос' };
-  open.sort((a, b) => Math.abs(a.tour.buyIn - buyIn) - Math.abs(b.tour.buyIn - buyIn));
-  const res = seatUser(user, open[0]);
+  if (store.user(user.id).chips < buyIn) return { error: 'В банке не хватает на взнос' };
+  const same = (t) => t.tour && !t.mttId && !t.private && t.tour.status === 'registering'
+    && t.tour.buyIn === buyIn && !!t.tour.spin === spin && (!seats || t.maxSeats === seats)
+    && t.occupied() < t.maxSeats;
+  const open = [...tables.values()].filter(same).sort((a, b) => !!b.houseSng - !!a.houseSng);
+  let table = open[0];
+  if (!table) {
+    const okSeats = spin ? seats === 3 : SNG_SEATS.includes(seats);
+    const okBuyIn = BUY_IN_STEPS.includes(buyIn) || HOUSE_SNGS.some((tpl) => tpl.buyIn === buyIn);
+    if (!okSeats || !okBuyIn) return { error: 'Такого турнира сейчас нет — выберите в лобби' };
+    if (tables.size >= TABLES_MAX) return { error: 'Свободных столов нет, попробуйте позже' };
+    table = createSngTable(String(name || `Sit-n-go на ${seats}`).slice(0, 24), seats, buyIn, { spin });
+    table.houseSng = 'custom';
+    table.fillMs = HOUSE_SNG_FILL_MS;
+  }
+  const res = seatUser(user, table);
   if (res.error) return res;
-  session.roomId = open[0].id;
-  return { ok: true, roomId: open[0].id };
+  session.roomId = table.id;
+  return { ok: true, roomId: table.id };
 }
 
 // Sit-n-go заведения: у каждого шаблона всегда есть турнир с открытой записью.
@@ -309,13 +323,14 @@ function quickSng(user, session, buyIn, spin = false) {
 // и турнир стартует. Ушли все люди — таймер сбрасывается.
 function maintainHouseSngs(now) {
   for (const tpl of HOUSE_SNGS) {
-    const open = [...tables.values()].find((t) => t.houseSng === tpl.key && t.tour.status === 'registering');
-    if (!open) {
-      const table = createSngTable(tpl.name, tpl.seats, tpl.buyIn, { spin: !!tpl.spin });
-      table.houseSng = tpl.key;
-      table.fillMs = tpl.fillMs || HOUSE_SNG_FILL_MS;
-      continue;
-    }
+    if ([...tables.values()].some((t) => t.houseSng === tpl.key && t.tour.status === 'registering')) continue;
+    const table = createSngTable(tpl.name, tpl.seats, tpl.buyIn, { spin: !!tpl.spin });
+    table.houseSng = tpl.key;
+    table.fillMs = tpl.fillMs || HOUSE_SNG_FILL_MS;
+  }
+  // Добор ботами — во всех турнирах заведения с открытой записью, и в открытых по «Ещё sit-n-go».
+  for (const open of tables.values()) {
+    if (!open.houseSng || open.tour.status !== 'registering') continue;
     const tour = open.tour;
     // Кадр стола собирается заново только после touch — иначе таймер не дойдёт до игроков.
     if (!open.humans()) { if (tour.fillAt) { tour.fillAt = 0; open.touch(); } continue; }
@@ -349,7 +364,9 @@ function dropLonelyBots(now) {
 function dropIdleTables(now) {
   for (const table of tables.values()) {
     if ((table.house && !table.houseSng) || table.mttId || table.occupied()) continue;
-    if (table.houseSng && table.tour.status === 'registering') continue;
+    // Турнир шаблона заведения с открытой записью стоит всегда; открытый по «Ещё sit-n-go»
+    // закрывается, как обычный, если все ушли до старта.
+    if (table.houseSng && table.houseSng !== 'custom' && table.tour.status === 'registering') continue;
     const tour = table.tour;
     const idle = tour
       ? (tour.status === 'finished' ? now - tour.finishedAt > SNG_DONE_MS
@@ -366,8 +383,8 @@ for (const cfg of ROOM_CONFIGS) createTable(cfg);
 const mtts = new MttManager({
   createTable: (cfg, tour, mtt) => createTable(cfg, { mttTour: tour, mttId: mtt.id }),
   dropTable: (table) => dropTable(table),
-  pay: (entry, amount) => store.addChips(entry.userId, amount),
-  refund: (entry, amount) => store.addChips(entry.userId, amount),
+  pay: (entry, amount) => store.addChips(entry.userId, amount, 'Приз в турнире по расписанию'),
+  refund: (entry, amount) => store.addChips(entry.userId, amount, 'Возврат: турнир по расписанию'),
   record: (entry, info) => store.recordMtt(entry.userId, info),
   notify: (userId, text) => notify(userId, text),
   isOnline: (userId) => isOnline(userId),
@@ -482,7 +499,7 @@ function restoreTable(rec) {
 
 {
   const restored = snapshot.restore({
-    credit: (userId, amount) => store.addChips(userId, amount),
+    credit: (userId, amount) => store.addChips(userId, amount, 'Возврат после перезапуска сервера'),
     reopen: reopenTable,
     restore: restoreTable,
   });
@@ -495,7 +512,7 @@ function restoreTable(rec) {
     // Регистрации на турниры — как были; оборвавшиеся турниры — фонд по стекам.
     mtts.restore(restored.snap.mtts || []);
     for (const r of mttRefunds(restored.snap)) {
-      store.addChips(r.userId, r.amount);
+      store.addChips(r.userId, r.amount, 'Турнир по расписанию прерван перезапуском');
       restored.players += 1;
       restored.chips += r.amount;
     }
@@ -645,6 +662,7 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.woff2': 'font/woff2',
   '.wav': 'audio/wav',
+  '.webp': 'image/webp',
   '.xml': 'application/xml; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
@@ -656,7 +674,7 @@ const PAGES = { '/': 'index.html', '/play': 'play.html', '/play/': 'play.html', 
 // Старые и служебные адреса страниц ведут на основные, чтобы у поиска не было дублей.
 const PAGE_ALIASES = { '/index.html': '/', '/play.html': '/play' };
 // Картинки меняются редко — браузер может не переспрашивать о них сутки.
-const LONG_CACHE = new Set(['.png', '.jpg', '.svg', '.ico', '.woff2', '.wav']);
+const LONG_CACHE = new Set(['.png', '.jpg', '.svg', '.ico', '.woff2', '.wav', '.webp']);
 
 // Статика читается с диска один раз и дальше отдаётся из памяти.
 // Файлы клиента маленькие, а запросов при большом онлайне много.
@@ -995,7 +1013,7 @@ function closeBlock(table, user) {
 function closeOwnTable(table, user) {
   const why = closeBlock(table, user);
   if (why) return { error: why };
-  for (const r of refunds(tableRecord(table))) store.addChips(r.userId, r.amount);
+  for (const r of refunds(tableRecord(table))) store.addChips(r.userId, r.amount, `Стол «${table.name}» закрыт`);
   for (const p of table.players()) {
     table.seats[p.seat] = null;
     table.byUserId.delete(p.userId);
@@ -1110,7 +1128,9 @@ async function handleCommand(ctx, body) {
     case 'quickPlay':
       return quickPlay(user, session);
     case 'quickSng':
-      return quickSng(user, session, Number(body.buyIn) || 0, !!body.spin);
+      return quickSng(user, session, {
+        buyIn: Number(body.buyIn) || 0, spin: !!body.spin, seats: Number(body.seats) || 0, name: body.name,
+      });
     case 'createTable': {
       const seated = tableOfUser(user.id);
       if (seated) return { error: 'Сначала встаньте из-за текущего стола' };
@@ -1176,7 +1196,7 @@ async function handleCommand(ctx, body) {
       if (amount <= 0) return { error: 'В банке нет фишек' };
       const res = table.addChips(user.id, amount);
       if (res.error) return res;
-      store.addChips(user.id, -amount);
+      store.addChips(user.id, -amount, `Докупка за стол «${table.name}»`);
       return { ok: true, pending: !!res.pending };
     }
     case 'addBot': {
@@ -1212,7 +1232,7 @@ async function handleCommand(ctx, body) {
       const mtt = mtts.get(String(body.id));
       if (!mtt) return { error: 'Турнир не найден' };
       const res = mtt.register({ userId: user.id, name: user.name }, store.user(user.id).chips);
-      if (res.pay) store.addChips(user.id, -res.pay);
+      if (res.pay) store.addChips(user.id, -res.pay, `Взнос: ${mtt.name}`);
       return res.error ? res : { ok: true };
     }
     case 'mttUnregister': {
@@ -1232,6 +1252,8 @@ async function handleCommand(ctx, body) {
       return store.claimBonus(user.id);
     case 'claimQuest':
       return store.claimQuest(user.id, body.id);
+    case 'callFriend':
+      return callFriend(user, body.name);
     case 'shareHand':
       return store.shareHand(user.id, body.id);
     case 'claimWeekly':
@@ -1423,6 +1445,14 @@ const server = http.createServer(async (req, res) => {
         rssMb: Math.round(mem.rss / 1048576),
         heapMb: Math.round(mem.heapUsed / 1048576),
       });
+    }
+
+    // История фишек: за что начислялось и списывалось, свежие сверху.
+    if (route === '/api/chips-log' && req.method === 'GET') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 50));
+      return send(res, 200, { entries: store.chipLog(ctx.user.id, limit) });
     }
 
     // История раздач: список своих последних, одна своя целиком, чужая — по коду ссылки.
@@ -1778,11 +1808,37 @@ function updateAudience() {
   }
 }
 
+// Событие лично игроку — во все его открытые вкладки. Возвращает, был ли он на связи.
+function emitToUser(userId, event, data) {
+  let sent = false;
+  for (const client of clients) {
+    if (client.ctx.user.id === userId) { emit(client, event, data); sent = true; }
+  }
+  return sent;
+}
+
 // Подняли из-за стола за долгий пропуск — игроку всплывашка, если он смотрит.
 function notifyLeft(p) {
-  for (const client of clients) {
-    if (client.ctx.user.id === p.userId) emit(client, 'notice', { text: 'Вы долго были «отошедшим» — мы подняли вас из-за стола, фишки вернулись в банк' });
-  }
+  emitToUser(p.userId, 'notice', { text: 'Вы долго были «отошедшим» — мы подняли вас из-за стола, фишки вернулись в банк' });
+}
+
+// «Позвать друга» за свой стол: в сети — приглашение прямо в игре с кнопкой «К столу»,
+// не в сети — сообщение от бота в Telegram (если привязан). Одного друга — не чаще раза в 30 с.
+const CALL_GAP_MS = 30_000;
+const lastCall = new Map();   // «кто:кого» -> когда звал
+function callFriend(user, name) {
+  const table = tableOfUser(user.id);
+  if (!table) return { error: 'Сначала сядьте за стол' };
+  const friend = store.byNameLower(String(name || ''));
+  if (!friend || !user.friends.includes(friend.id)) return { error: 'Позвать можно только друга' };
+  if (tableOfUser(friend.id) === table) return { error: `${friend.name} уже за этим столом` };
+  const key = `${user.id}:${friend.id}`;
+  const now = Date.now();
+  if (now - (lastCall.get(key) || 0) < CALL_GAP_MS) return { error: 'Вы только что звали — подождите немного' };
+  lastCall.set(key, now);
+  const online = emitToUser(friend.id, 'invite', { from: user.name, table: table.name, code: table.invite });
+  if (!online) notify(friend.id, `${user.name} зовёт вас за стол «${table.name}» в THPoker: ${APP_URL}/t/${table.invite}`);
+  return { ok: true, online };
 }
 
 // Страница общей раздачи: заголовок и превью из итога, повтор рисует hand.js.
@@ -1810,7 +1866,11 @@ let handsPrunedAt = 0;
 const HANDS_KEEP_MS = 7 * 24 * 3600_000;   // обычная раздача хранится неделю; общая — без срока
 
 function maintain(now) {
-  if (now - handsPrunedAt > 3600_000) { handsPrunedAt = now; store.pruneHands(now - HANDS_KEEP_MS); }
+  if (now - handsPrunedAt > 3600_000) {
+    handsPrunedAt = now;
+    store.pruneHands(now - HANDS_KEEP_MS);
+    for (const [key, at] of lastCall) if (now - at > CALL_GAP_MS) lastCall.delete(key);
+  }
   updateAudience();
   for (const table of tables.values()) {
     if (table.phase === 'idle' && !table.tour) {

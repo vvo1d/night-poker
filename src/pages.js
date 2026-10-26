@@ -101,7 +101,7 @@ function profilePage(user, origin, avatar = null) {
   <section class="pp-block">
     <h2>Ачивки${tiers ? ` · ${tiers} ступ.` : ''}</h2>
     ${achievements.length ? `<ul class="pp-ach">${achievements.map((a) => `
-      <li class="pp-ach__item tier-${a.tier}"><span class="pp-ach__icon">${escapeHtml(a.icon)}</span>
+      <li class="pp-ach__item tier-${a.tier}"><span class="pp-ach__icon"><img src="/achievements/${escapeHtml(a.id)}.webp" alt="" loading="lazy"></span>
       <span><b>${escapeHtml(a.title)}</b> · ${escapeHtml(a.tierName)}<small>${escapeHtml(a.done)}</small></span></li>`).join('')}</ul>`
     : '<p class="pp-empty">Пока ни одной — всё впереди.</p>'}
   </section>

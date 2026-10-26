@@ -351,6 +351,7 @@ function connectStream() {
     if (state.view === 'table') show('lobby');
   });
   // Сообщения сервера лично игроку (например, «подняли из-за стола за долгий пропуск»).
+  stream.addEventListener('invite', (e) => showCall(JSON.parse(e.data)));
   stream.addEventListener('notice', (e) => {
     const data = JSON.parse(e.data);
     if (data.text) toast(data.text, { info: true });
@@ -731,6 +732,63 @@ function referralCard(r) {
   return card;
 }
 
+// ——— позвать друга за стол ———
+
+// Друзья в окне приглашения: кто в сети — сверху; «Позвать» шлёт приглашение в игру
+// или, если друг не в сети, сообщение от бота в Telegram.
+async function fillInviteFriends(t) {
+  const box = $('#invite-friends');
+  box.textContent = '';
+  box.hidden = !t.you;
+  if (!t.you) return;
+  const data = await getJson('/api/friends');
+  const friends = (data && data.friends) || [];
+  box.append(el('h4', 'invite-friends__head', 'Ваши друзья'));
+  if (!friends.length) {
+    box.append(el('p', 'hint', 'Друзей пока нет — отправьте ссылку или добавьте игроков в друзья из рейтинга и за столом.'));
+    return;
+  }
+  const list = el('ul', 'invite-friends__list');
+  for (const f of friends) {
+    const li = el('li', `invite-friend${f.online ? ' is-online' : ''}`);
+    const who = el('span', 'invite-friend__who');
+    who.append(avatarEl(f.name, f.avatar), el('span', null, f.name));
+    const here = f.table && f.table.id === t.id;
+    const status = el('span', 'invite-friend__status', here ? 'за этим столом' : f.online ? 'в сети' : 'не в сети');
+    const btn = el('button', 'btn btn--sm', here ? 'Уже здесь' : 'Позвать');
+    btn.type = 'button';
+    btn.disabled = here;
+    btn.addEventListener('click', async () => {
+      const res = await cmd({ cmd: 'callFriend', name: f.name });
+      if (!res.ok) return;
+      btn.textContent = 'Позвали ✓';
+      btn.disabled = true;
+      toast(res.online ? `${f.name} получил приглашение` : `${f.name} не в сети — напомнили в Telegram, если он его привязал`, { info: true });
+    });
+    li.append(who, status, btn);
+    list.append(li);
+  }
+  box.append(list);
+}
+
+// Вас зовут за стол: плашка с «К столу» висит 25 секунд.
+let callTimer = null;
+function showCall(data) {
+  const box = $('#call');
+  $('#call-text').textContent = `${data.from} зовёт вас за стол «${data.table}»`;
+  box.hidden = false;
+  retrigger(box, 'is-in');
+  Sound.play('turn');
+  $('#call-go').onclick = async () => {
+    box.hidden = true;
+    const res = await cmd({ cmd: 'join', code: data.code });
+    if (res.ok) Sound.play('chips');
+  };
+  clearTimeout(callTimer);
+  callTimer = setTimeout(() => { box.hidden = true; }, 25_000);
+}
+$('#call-later').addEventListener('click', () => { $('#call').hidden = true; });
+
 // ——— последние раздачи ———
 
 // Открыть окно без автофокуса на крестике: иначе вокруг него сразу горит рамка фокуса.
@@ -810,6 +868,7 @@ async function shareHand(hand) {
   const top = hand.players.reduce((a, b) => (b.won > a.won ? b : a), hand.players[0]);
   const text = `Смотри, какая раздача в THPoker${top && top.hand ? ` — ${top.hand}` : ''}`;
   $('#invite-title').textContent = 'Поделиться раздачей';
+  $('#invite-friends').hidden = true;
   $('#invite-link').value = url;
   $('#invite-tg').href = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
   const share = $('#invite-share');
@@ -829,6 +888,7 @@ function openFriendInvite() {
   const r = state.user.referral || { hands: 20, reward: 2000 };
   const text = 'Сыграем в покер? THPoker — бесплатно, на фишки, прямо в браузере';
   $('#invite-title').textContent = 'Пригласить друга';
+  $('#invite-friends').hidden = true;
   // В поле — читаемая ссылка с именем кириллицей: браузеры и мессенджеры её понимают.
   try { $('#invite-link').value = decodeURI(url); } catch { $('#invite-link').value = url; }
   showQr(url);
@@ -1206,6 +1266,61 @@ async function refreshProfile(data, box) {
 
 const DATE_FMT = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 
+// Карточка статистики в своём кабинете, которая открывает подробности.
+function linkCard(card, title, open) {
+  const btn = el('button', 'stat stat--link');
+  btn.type = 'button';
+  btn.title = title;
+  btn.append(...card.childNodes, el('span', 'stat__more', 'история ›'));
+  btn.addEventListener('click', open);
+  return btn;
+}
+
+// Фишки — история фишек; раздачи — последние раздачи с повтором.
+function chipsCard(data, s) {
+  const card = statCard(fmt(data.chips), 'фишек', `максимум ${fmt(s.peakChips)}`);
+  return data.own ? linkCard(card, 'История фишек: за что начислялись и списывались', openChipLog) : card;
+}
+
+function handsCard(data, s) {
+  const card = statCard(fmt(s.handsPlayed), 'раздач сыграно');
+  return data.own ? linkCard(card, 'Последние раздачи: повтор по улицам и ссылка, чтобы поделиться', openHands) : card;
+}
+
+// История фишек — в окне: причина, время, сумма и остаток в банке.
+async function openChipLog() {
+  const body = $('#hands-body');
+  body.textContent = '';
+  body.append(el('h3', null, 'История фишек'));
+  const list = el('ul', 'chip-log');
+  list.append(el('li', 'hint', 'Загружаем…'));
+  const more = el('button', 'btn btn--sm', 'Показать всю историю');
+  more.type = 'button';
+  more.hidden = true;
+  body.append(list, more);
+  openModal(handsDialog);
+  Sound.play('click');
+  const fill = async (limit) => {
+    const res = await getJson(`/api/chips-log?limit=${limit}`);
+    const entries = (res && res.entries) || [];
+    list.textContent = '';
+    if (!entries.length) list.append(el('li', 'hint', 'Здесь появится, за что вам начислялись и списывались фишки.'));
+    for (const e of entries) {
+      const li = el('li', `chip-log__row${e.amount > 0 ? ' is-plus' : ' is-minus'}`);
+      li.append(
+        el('span', 'chip-log__when', HAND_TIME.format(new Date(e.at))),
+        el('span', 'chip-log__why', e.reason),
+        el('b', 'chip-log__amount', `${e.amount > 0 ? '+' : '−'}${fmt(Math.abs(e.amount))}`),
+        el('span', 'chip-log__left', `банк ${fmt(e.balance)}`),
+      );
+      list.append(li);
+    }
+    more.hidden = limit >= 200 || entries.length < limit;
+  };
+  more.addEventListener('click', () => { fill(200); Sound.play('click'); });
+  fill(50);
+}
+
 function statCard(value, label, note = '') {
   const card = el('div', 'stat');
   card.append(el('b', 'stat__value', value), el('span', 'stat__label', label));
@@ -1326,7 +1441,15 @@ function friendButtons(data, box) {
 // Ачивка: медаль цвета ступени, точки взятых ступеней и полоска до следующей.
 function achievementItem(a) {
   const li = el('li', `ach__item${a.tier ? ` is-open tier-${a.tier}` : ''}`);
-  li.append(el('span', 'ach__icon', a.icon));
+  // Медальон ачивки — картинка из public/achievements; не взятая — бесцветная.
+  const icon = el('span', 'ach__icon');
+  const img = document.createElement('img');
+  img.src = `/achievements/${a.id}.webp`;
+  img.alt = '';
+  img.loading = 'lazy';
+  img.onerror = () => { icon.textContent = a.icon; };   // нет картинки — прежний значок
+  icon.append(img);
+  li.append(icon);
   const text = el('div', 'ach__text');
   const title = el('b', null, a.title);
   if (a.tierName) title.append(el('span', 'ach__tier', a.tierName));
@@ -1440,8 +1563,8 @@ function renderProfile(box, data) {
   const grid = el('div', 'stats');
   const rate = s.handsPlayed ? Math.round((s.handsWon / s.handsPlayed) * 100) : 0;
   grid.append(
-    statCard(fmt(data.chips), 'фишек', `максимум ${fmt(s.peakChips)}`),
-    statCard(fmt(s.handsPlayed), 'раздач сыграно'),
+    chipsCard(data, s),
+    handsCard(data, s),
     statCard(fmt(s.handsWon), 'раздач выиграно', `${rate}% от сыгранных`),
     statCard(fmt(s.handsLost), 'раздач проиграно', 'вложил фишки и не забрал банк'),
     statCard(`${fmt(s.showdownsWon)} из ${fmt(s.showdowns)}`, 'вскрытий выиграно'),
@@ -1477,25 +1600,6 @@ function renderProfile(box, data) {
   for (const a of data.achievements) achList.append(achievementItem(a));
   achSec.append(achList);
   root.append(achSec);
-
-  // Последние раздачи — в своём кабинете: пять свежих и кнопка ко всем.
-  if (data.own) {
-    const sec = profileSection('Последние раздачи');
-    const list = el('div', 'hand-list');
-    sec.append(list);
-    const all = el('button', 'btn btn--sm', 'Все раздачи');
-    all.type = 'button';
-    all.addEventListener('click', openHands);
-    sec.append(all);
-    root.append(sec);
-    loadHands().then((hands) => {
-      if (!hands.length) list.append(el('p', 'hint', 'Здесь появятся ваши последние раздачи — с повтором по улицам и ссылкой, чтобы поделиться.'));
-      for (const h of hands.slice(0, 5)) {
-        list.append(handRow(h, (id) => { openHandReplay(id); }));
-      }
-      all.hidden = hands.length <= 5;
-    });
-  }
 
   // Магазин оформления — в своём кабинете.
   if (data.own) {
@@ -1882,8 +1986,15 @@ function renderTable(t) {
       // Сесть сюда нельзя (вы уже за столом или турнир идёт) — вместо плашки
       // только неприметная точка: на тесном столе плашки загромождали сукно.
       if (t.you || closed) {
-        const dot = el('span', 'seat__vacant');
-        dot.title = `Место ${i + 1} свободно`;
+        // Вы за столом — пустое место зовёт друга: ссылка, QR и друзья с кнопкой «Позвать».
+        const dot = el(closed ? 'span' : 'button', `seat__vacant${closed ? '' : ' seat__vacant--call'}`);
+        dot.title = closed ? `Место ${i + 1} свободно` : 'Позвать друга на это место';
+        if (!closed) {
+          dot.type = 'button';
+          dot.setAttribute('aria-label', 'Позвать друга');
+          dot.append(el('span', null, '+'));
+          dot.addEventListener('click', () => openInvite(t));
+        }
         node.append(dot);
         seatsBox.append(node);
         return;
@@ -2106,7 +2217,8 @@ function showResult(t) {
   again.hidden = mtt;
   again.textContent = `${tour.spin ? 'Ещё спин' : 'Ещё sit-n-go'} · взнос ${fmt(tour.buyIn)}`;
   again.onclick = async () => {
-    const res = await cmd({ cmd: 'quickSng', buyIn: tour.buyIn, spin: !!tour.spin });
+    // Такой же турнир: тот же взнос, столько же мест, спин или нет.
+    const res = await cmd({ cmd: 'quickSng', buyIn: tour.buyIn, spin: !!tour.spin, seats: t.maxSeats, name: t.name });
     if (res.ok) { dialog.close(); Sound.play('chips'); }
   };
   $('#result-lobby').onclick = () => { dialog.close(); $('#back-to-lobby').click(); };
@@ -3220,9 +3332,10 @@ function openInvite(t) {
   const text = t.kind === 'sng'
     ? `Залетай на sit-n-go «${t.name}» в THPoker — покер без денег`
     : `Садись ко мне за стол «${t.name}» в THPoker — покер без денег`;
-  $('#invite-title').textContent = 'Пригласить за стол';
+  $('#invite-title').textContent = 'Позвать друга';
   $('#invite-link').value = url;
   showQr(url);
+  fillInviteFriends(t);
   $('#invite-tg').href = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
   const share = $('#invite-share');
   share.hidden = !navigator.share;

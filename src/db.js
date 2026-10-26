@@ -82,7 +82,21 @@ const MIGRATIONS = [
     );
     CREATE UNIQUE INDEX hand_shares_owner ON hand_shares (hand_id, user_id);
   `),
+  // История фишек: каждое изменение банка — сколько, за что и сколько стало.
+  (db) => db.exec(`
+    CREATE TABLE chip_log (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      at      INTEGER NOT NULL,
+      amount  INTEGER NOT NULL,
+      balance INTEGER NOT NULL,
+      reason  TEXT NOT NULL
+    );
+    CREATE INDEX chip_log_user ON chip_log (user_id, id DESC);
+  `),
 ];
+
+const CHIP_LOG_PER_USER = 200;
 
 const HANDS_PER_USER = 20;
 
@@ -161,6 +175,10 @@ function sqliteBackend(file = DEFAULT_DB) {
     addShare: db.prepare('INSERT INTO hand_shares (code, hand_id, seat, user_id, at) VALUES (?, ?, ?, ?, ?)'),
     getShare: db.prepare('SELECT hand_id, seat FROM hand_shares WHERE code = ?'),
     pruneHands: db.prepare('DELETE FROM hands WHERE at < ? AND keep = 0'),
+    addChipLog: db.prepare('INSERT INTO chip_log (user_id, at, amount, balance, reason) VALUES (?, ?, ?, ?, ?)'),
+    trimChipLog: db.prepare(`DELETE FROM chip_log WHERE user_id = ? AND id <=
+      (SELECT id FROM chip_log WHERE user_id = ? ORDER BY id DESC LIMIT 1 OFFSET ${CHIP_LOG_PER_USER})`),
+    chipLog: db.prepare('SELECT at, amount, balance, reason FROM chip_log WHERE user_id = ? ORDER BY id DESC LIMIT ?'),
     pruneLinks: db.prepare('DELETE FROM user_hands WHERE at < ?'),
   };
 
@@ -259,6 +277,15 @@ function sqliteBackend(file = DEFAULT_DB) {
       sql.pruneLinks.run(before);
     },
 
+    // ——— история фишек: у каждого игрока — последние CHIP_LOG_PER_USER записей ———
+    logChips(userId, at, amount, balance, reason) {
+      sql.addChipLog.run(userId, at, amount, balance, reason);
+      sql.trimChipLog.run(userId, userId);
+    },
+    chipLog(userId, limit = CHIP_LOG_PER_USER) {
+      return sql.chipLog.all(userId, limit).map((r) => ({ at: r.at, amount: r.amount, balance: r.balance, reason: r.reason }));
+    },
+
     close() { db.close(); },
   };
 }
@@ -336,12 +363,13 @@ function fileBackend(dir = DATA_DIR) {
   let known = new Map();   // что лежит в файлах — нужно для снимка
 
   const handsFile = path.join(dir, 'hands.json');
-  const hands = { byId: new Map(), byUser: new Map(), shares: new Map() };
+  const hands = { byId: new Map(), byUser: new Map(), shares: new Map(), chips: new Map() };
   try {
     const raw = JSON.parse(fs.readFileSync(handsFile, 'utf8'));
     hands.byId = new Map(raw.byId || []);
     hands.byUser = new Map(raw.byUser || []);
     hands.shares = new Map(raw.shares || []);
+    hands.chips = new Map(raw.chips || []);
   } catch { /* истории ещё нет */ }
   let handsTimer = null;
   const writeHands = () => {
@@ -350,7 +378,7 @@ function fileBackend(dir = DATA_DIR) {
     try {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(`${handsFile}.tmp`, JSON.stringify({
-        byId: [...hands.byId], byUser: [...hands.byUser], shares: [...hands.shares],
+        byId: [...hands.byId], byUser: [...hands.byUser], shares: [...hands.shares], chips: [...hands.chips],
       }));
       fs.renameSync(`${handsFile}.tmp`, handsFile);
     } catch (err) { console.error('Не удалось сохранить историю раздач:', err.message); }
@@ -449,6 +477,17 @@ function fileBackend(dir = DATA_DIR) {
       for (const [id, h] of hands.byId) if (h.at < before && !h.keep) hands.byId.delete(id);
       for (const [uid, list] of hands.byUser) hands.byUser.set(uid, list.filter((id) => hands.byId.has(id)));
       saveHandsSoon();
+    },
+
+    // История фишек — в том же файле, что и история раздач.
+    logChips(userId, at, amount, balance, reason) {
+      const list = hands.chips.get(userId) || [];
+      list.unshift({ at, amount, balance, reason });
+      hands.chips.set(userId, list.slice(0, CHIP_LOG_PER_USER));
+      saveHandsSoon();
+    },
+    chipLog(userId, limit = CHIP_LOG_PER_USER) {
+      return (hands.chips.get(userId) || []).slice(0, limit);
     },
 
     async close() { await snapshot(); writeHands(); },

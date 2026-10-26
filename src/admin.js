@@ -71,7 +71,7 @@ function createAdmin(deps) {
   function closeTable(table, by) {
     const rec = tableRecord(table);
     for (const r of refunds(rec)) {
-      store.addChips(r.userId, r.amount);
+      store.addChips(r.userId, r.amount, `Стол «${table.name}» закрыт администратором`);
       const u = store.user(r.userId);
       if (u) store.adminNote(u, by, `стол «${table.name}» закрыт администратором, возвращено ${r.amount}`);
     }

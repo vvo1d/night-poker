@@ -347,7 +347,8 @@ a { color: var(--brass); }
 .pp-ach__item.tier-2 { --medal: #9aa6aa; --medal-hi: #e4ecee; }
 .pp-ach__item.tier-3 { --medal: #c9a24a; --medal-hi: #f0d68f; }
 .pp-ach__item.tier-4 { --medal: #7fb7c9; --medal-hi: #e3f6fb; }
-.pp-ach__icon { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: #1a1305; background: radial-gradient(circle at 35% 30%, var(--medal-hi), var(--medal) 70%); }
+.pp-ach__icon { flex: 0 0 auto; width: 52px; height: 52px; border-radius: 50%; overflow: hidden; background: var(--ink-3, #1b262b); box-shadow: 0 0 0 2px var(--medal); }
+.pp-ach__icon img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .pp-ach__item b { color: var(--bone); font-weight: 600; }
 .pp-ach__item small { display: block; font-size: 12px; color: var(--muted); }
 .pp-empty { color: var(--muted); }
