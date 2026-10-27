@@ -427,3 +427,45 @@ body { background: none; }
 .friends--mini .friend.is-online .friend__dot { box-shadow: 0 0 0 2px #121b20, 0 0 8px rgba(79, 157, 106, 0.8); }
 .friends--mini .friend__name { font-weight: 600; color: var(--bone); }
 .friends--mini .friend__status { padding-left: 44px; margin-top: -10px; }
+
+@media (max-width: 620px) {
+  /* Шапка лобби: логотип прижат влево и не сдвигается, когда фишек становится больше —
+     сжимается правая часть (кнопка «Выйти» становится значком). */
+  #screen-lobby .topbar { justify-content: space-between; gap: 8px; }
+  #screen-lobby .topbar .brand { flex: none; margin-right: 0; }
+  #screen-lobby .topbar__right { flex: 0 1 auto; min-width: 0; gap: 6px; }
+  #screen-lobby .bank { min-width: 0; }
+  #screen-lobby .bank strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* Профиль: длинное имя — многоточием, значок уровня справа не пропадает. */
+.profile__name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.profile__name span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile__name .profile__lvl { flex: none; margin-left: 0; }
+/* В окне чужого профиля крестик закрытия стоит в углу — шапке нужен отступ под него. */
+.dialog--profile .profile__head { padding-right: 52px; }
+
+/* Выход — такой же круглый значок, как кнопка звука рядом: золотая иконка в тонком кольце. */
+@media (max-width: 620px) {
+  #logout {
+    position: relative; width: 36px; height: 36px; padding: 0; font-size: 0; line-height: 0;
+    border-radius: 50%; color: var(--gold-2); background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(201, 162, 74, 0.35); box-shadow: none;
+  }
+  #logout:hover { border-color: var(--gold-2); filter: none; }
+  #logout::before {   /* значок «выход» — Lucide log-out (ISC) */
+    /* По центру абсолютно: текст «Выйти» (скрытый) иначе становится вторым рядом сетки и тянет значок вверх. */
+    content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-45%, -50%);
+    width: 17px; height: 17px; background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'/%3E%3Cpolyline points='16 17 21 12 16 7'/%3E%3Cline x1='21' x2='9' y1='12' y2='12'/%3E%3C/svg%3E") center / contain no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'/%3E%3Cpolyline points='16 17 21 12 16 7'/%3E%3Cline x1='21' x2='9' y1='12' y2='12'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+  #screen-lobby [data-sound-toggle] { width: 36px; height: 36px; background: rgba(0, 0, 0, 0.35); border-color: rgba(201, 162, 74, 0.35); }
+}
+@media (max-width: 620px) {
+  /* На телефоне шапка профиля компактнее — длинному имени остаётся больше места. */
+  .profile__head { padding: 16px; gap: 12px; }
+  .profile__head .avatar { width: 62px; height: 62px; font-size: 26px; }
+  .profile__title h2 { font-size: 21px; }
+  .dialog--profile .profile__head { padding-right: 44px; }
+}

@@ -1153,7 +1153,8 @@ body:has(.actions.is-raising) .react { display: none; }
 .arc.is-drag .arc__fill { transition: none; }
 .arc.is-allin .arc__fill { stroke: #e2604b; filter: drop-shadow(0 0 8px rgba(226, 96, 75, 0.8)); }
 .arc.is-min .arc__fill { stroke: transparent; }
-.arc__hit { fill: none; stroke: transparent; stroke-width: 64; stroke-linecap: round; pointer-events: stroke; cursor: grab; touch-action: none; }
+.arc__hit { fill: none; stroke: transparent; stroke-width: 130;   /* палец ловится далеко от дуги */
+  stroke-linecap: round; pointer-events: stroke; cursor: grab; touch-action: none; }
 .arc.is-drag .arc__hit { cursor: grabbing; }
 
 /* Кружки на концах дуги и отметки быстрых ставок. */
@@ -1847,3 +1848,11 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
 /* Силомер между раздачами держит место пустым — стол не прыгает, когда он появляется. */
 .meter.is-empty > * { visibility: hidden; }
 
+
+/* За столом страница не прокручивается и не «пружинит»: свайп по дуге ставки и
+   случайные жесты не двигают стол. */
+html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
+  overflow: hidden; overscroll-behavior: none; height: 100%;
+}
+#screen-table { overscroll-behavior: none; }
+.arc { touch-action: none; }

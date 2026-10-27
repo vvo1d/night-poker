@@ -1496,7 +1496,9 @@ function renderProfile(box, data) {
   }
   head.append(face);
   const title = el('div', 'profile__title');
-  const h = el('h2', null, data.name);
+  // Имя обрезается многоточием, значок уровня — всегда виден целиком.
+  const h = el('h2', 'profile__name');
+  h.append(el('span', null, data.name));
   if (data.level) h.append(el('span', 'profile__lvl', `ур. ${data.level}`));
   title.append(h);
   const where = data.table ? ` · за столом «${data.table.name}»` : '';
