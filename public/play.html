@@ -458,6 +458,16 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<!-- Подтверждение действия — вместо системного confirm() браузера -->
+<dialog id="ask-dialog" class="dialog ask">
+  <h3 id="ask-title"></h3>
+  <p class="dialog__note" id="ask-text"></p>
+  <div class="dialog__row">
+    <button class="btn btn--ghost" type="button" id="ask-no">Отмена</button>
+    <button class="btn btn--primary" type="button" id="ask-yes">Да</button>
+  </div>
+</dialog>
+
 <!-- Выбор аватара: готовые портреты или своё фото -->
 <dialog id="avatar-dialog" class="dialog dialog--avatar">
   <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="avatar-close" title="Закрыть" aria-label="Закрыть"></button>

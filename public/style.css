@@ -1226,6 +1226,7 @@ body:has(.actions.is-raising) .react { display: none; }
   color: var(--brass); background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(201, 162, 74, 0.35);
   font-variant-numeric: tabular-nums; text-align: right;
 }
+.rbox__input::selection { background: transparent; color: inherit; }   /* сумма выделена для замены, но без синей заливки */
 .rbox__input:focus { outline: none; border-color: var(--brass); box-shadow: 0 0 0 3px rgba(201, 162, 74, 0.18); }
 .rbox.is-allin .rbox__input { color: #ff8a70; }
 .rbox__hint { flex: 1; font-size: 12px; color: var(--muted); }
@@ -1289,6 +1290,19 @@ body:has(.actions.is-raising) .react { display: none; }
 .dialog input[type="range"] { width: 100%; accent-color: var(--brass); }
 .dialog__row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
 .dialog--wide { width: min(440px, 94vw); }
+
+/* Подтверждение действия */
+.ask { width: min(400px, 92vw); padding: 24px 24px 20px; }
+.ask h3 { font-size: 19px; line-height: 1.3; margin-bottom: 8px; }
+.ask .dialog__note { font-size: 14px; line-height: 1.5; margin: 0; }
+.ask .dialog__row { margin-top: 22px; }
+.ask .btn { min-width: 110px; }
+.btn--danger-solid { background: #8a2f26; border-color: #a53b30; color: #fff3ef; }
+.btn--danger-solid:hover:not(:disabled) { background: #a3372c; }
+@media (max-width: 520px) {
+  .ask .dialog__row { flex-direction: column-reverse; }
+  .ask .btn { width: 100%; }
+}
 
 /* приглашения */
 .check { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted); margin: 4px 0 14px; cursor: pointer; }
@@ -1808,6 +1822,14 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
 
 /* Низкий экран (ноутбук 720p и подобные): сукну нужно больше места,
    иначе блок игрока упирается в центр стола и ставке некуда лечь. */
+/* Боковые места на широком экране: карты сбоку от аватара, со стороны центра стола,
+   — место становится ниже и не наезжает на соседа сверху. */
+@media (min-width: 621px) {
+  .seat__avatar > .seat__cards { position: absolute; top: 50%; transform: translateY(-50%); z-index: 1; align-items: center; text-shadow: none; }
+  .seat--side-l .seat__avatar > .seat__cards { left: calc(100% + 8px); }
+  .seat--side-r .seat__avatar > .seat__cards { right: calc(100% + 8px); }
+}
+
 @media (max-height: 780px) and (min-width: 621px) {
   .felt { margin: 14px; }
   .felt__inner { gap: 8px; }
@@ -1914,17 +1936,18 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
 }
 @keyframes sheetUp { from { transform: translateY(100%); } to { transform: none; } }
 
-/* Системные строки чата — в тон «пузырям»: итог раздачи — карточка по центру
-   с пометкой-фишкой, служебное (сел, вышел, блайнды) — мелкая подпись по центру. */
+/* Системные строки чата — в тон «пузырям»: итог раздачи — карточка слева, как сообщение
+   стола, служебное (сел, вышел, блайнды) — мелкая подпись по центру. */
 .log__line:not(.log__line--chat):not(.log__line--hand) {
   align-self: center; max-width: 92%; text-align: center; font-size: 12px; color: var(--muted);
 }
 .log__line--result {
-  display: grid; justify-items: center; gap: 5px; padding: 8px 12px 9px; border-radius: 14px;
+  align-self: flex-start !important; text-align: left !important; max-width: 86% !important;
+  display: grid; justify-items: start; gap: 5px; padding: 8px 12px 9px; border-radius: 4px 14px 14px 14px;
   background: rgba(201, 162, 74, 0.06); border: 1px dashed rgba(201, 162, 74, 0.25);
   color: rgba(223, 231, 230, 0.8) !important;
 }
-.log__line--result .log__cards { justify-content: center; margin-top: 0; }
+.log__line--result .log__cards { justify-content: flex-start; margin-top: 0; }
 
 /* Ушли из идущего турнира в лобби — плашка «вернуться к столу» */
 .away-bar {

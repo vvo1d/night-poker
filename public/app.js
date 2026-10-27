@@ -552,7 +552,7 @@ function renderMtts() {
     if (m.status === 'registering') {
       const btn = el('button', `btn btn--sm ${m.me ? 'btn--ghost' : 'btn--primary'}`, m.me ? 'Отменить запись' : 'Записаться');
       btn.addEventListener('click', async () => {
-        if (!m.me && m.buyIn && !confirm(`Взнос ${fmt(m.buyIn)} спишется из банка. Если передумаете до старта — вернётся. Записаться?`)) return;
+        if (!m.me && m.buyIn && !(await ask(`Записаться на «${m.name}»?`, { text: `Взнос ${fmt(m.buyIn)} спишется из банка. Если передумаете до старта — вернётся.`, yes: 'Записаться' }))) return;
         const res = await cmd({ cmd: m.me ? 'mttUnregister' : 'mttRegister', id: m.id });
         if (res.ok) {
           if (!m.me) { goal('mtt_register'); toast(`Вы записаны на «${m.name}» — к старту игра сама посадит вас за стол`, { good: true }); }
@@ -795,6 +795,30 @@ function openModal(dialog) {
   if (dialog.open) return;
   dialog.showModal();
   if (document.activeElement && dialog.contains(document.activeElement)) document.activeElement.blur();
+}
+
+// Своё окно подтверждения вместо confirm(): заголовок, пояснение, две кнопки.
+// Возвращает true, если нажали главную кнопку; Esc, «Отмена» и клик мимо — false.
+const askDialog = $('#ask-dialog');
+function ask(title, { text = '', yes = 'Да', no = 'Отмена', danger = false } = {}) {
+  return new Promise((resolve) => {
+    $('#ask-title').textContent = title;
+    $('#ask-text').textContent = text;
+    $('#ask-text').hidden = !text;
+    const ok = $('#ask-yes');
+    const cancel = $('#ask-no');
+    ok.textContent = yes;
+    cancel.textContent = no;
+    ok.className = `btn ${danger ? 'btn--danger-solid' : 'btn--primary'}`;
+    let answer = false;
+    const finish = (v) => { answer = v; askDialog.close(); };
+    ok.onclick = () => finish(true);
+    cancel.onclick = () => finish(false);
+    askDialog.onclick = (e) => { if (e.target === askDialog) finish(false); };
+    askDialog.addEventListener('close', () => resolve(answer), { once: true });
+    openModal(askDialog);
+    ok.focus();
+  });
 }
 
 const handsDialog = $('#hands-dialog');
@@ -1469,7 +1493,7 @@ function shopSection(box, data) {
         on ? 'Надето ✓' : owned ? 'Надеть' : `${fmt(it.price)} фишек`);
       btn.disabled = on;
       btn.addEventListener('click', async () => {
-        if (!owned && !confirm(`Купить «${it.name}» за ${fmt(it.price)} фишек?`)) return;
+        if (!owned && !(await ask(`Купить «${it.name}»?`, { text: `Спишется ${fmt(it.price)} фишек из банка.`, yes: 'Купить' }))) return;
         const res = await cmd({ cmd: owned ? 'shopEquip' : 'shopBuy', id: it.id });
         if (!res.ok) return;
         if (res.user) setUser(res.user);
@@ -1498,7 +1522,7 @@ function friendButtons(data, box) {
   const act = (label, cls, command, after) => {
     const b = el('button', `btn btn--sm ${cls}`, label);
     b.addEventListener('click', async () => {
-      if (command === 'removeFriend' && !confirm(`Убрать ${data.name} из друзей?`)) return;
+      if (command === 'removeFriend' && !(await ask(`Убрать ${data.name} из друзей?`, { yes: 'Убрать', danger: true }))) return;
       const res = await cmd({ cmd: command, name: data.name });
       if (!res.ok) return;
       if (after) toast(after, { good: true });
@@ -1735,7 +1759,7 @@ function renderProfile(box, data) {
       const list = el('ul', 'friends');
       renderFriends(list, friends, {
         onRemove: async (name) => {
-          if (!confirm(`Убрать ${name} из друзей? Вы пропадёте и из его списка.`)) return;
+          if (!(await ask(`Убрать ${name} из друзей?`, { text: 'Вы пропадёте и из его списка.', yes: 'Убрать', danger: true }))) return;
           const res = await cmd({ cmd: 'removeFriend', name });
           if (res.ok) again();
         },
@@ -1897,10 +1921,10 @@ $('#back-to-lobby').addEventListener('click', async () => {
   const seated = table && table.you;
   const tour = table && table.tour;
   const question = !seated ? null
-    : !tour ? 'Выйти из-за стола? Фишки вернутся в банк.'
-      : tour.status === 'registering' ? 'Отменить регистрацию? Взнос вернётся в банк.'
-        : 'Турнир идёт. Выйти в лобби? Место сохранится, но раздачи будут пропускаться, а блайнды — списываться.';
-  if (question && !confirm(question)) return;
+    : !tour ? ['Выйти из-за стола?', 'Фишки со стола вернутся в банк.', 'Выйти']
+      : tour.status === 'registering' ? ['Отменить регистрацию?', 'Взнос вернётся в банк.', 'Отменить']
+        : ['Турнир идёт. Выйти в лобби?', 'Место сохранится, но раздачи будут пропускаться, а блайнды — списываться.', 'Выйти в лобби'];
+  if (question && !(await ask(question[0], { text: question[1], yes: question[2], no: 'Остаться' }))) return;
   const res = await cmd({ cmd: 'leaveRoom' });
   // Ушли из идущего турнира — в лобби плашка «вернуться к столу».
   state.awayTable = res && res.away ? res.away : null;
@@ -1991,6 +2015,8 @@ function cardEl(card, { small = false, dim = false, key = '', mark = '', deal = 
   }
   return node;
 }
+
+const wideSeats = window.matchMedia('(min-width: 621px)');
 
 function seatPositions(n, hero) {
   const out = [];
@@ -2098,6 +2124,12 @@ function renderTable(t) {
     node.dataset.seat = i;
     node.style.setProperty('--x', `${positions[i].x}%`);
     node.style.setProperty('--y', `${positions[i].y}%`);
+    // Места у левого и правого края и вверху: карты — сбоку от аватара, к центру стола.
+    // Над ником они доставали до стека соседа выше (на 9 мест места стоят тесно),
+    // а у верхних мест вылезали за край стола.
+    const { x, y } = positions[i];
+    if (x < 22 || (y < 30 && x <= 50)) node.classList.add('seat--side-l');
+    else if (x > 78 || (y < 30 && x > 50)) node.classList.add('seat--side-r');
 
     if (seat.empty) {
       // В идущий турнир не садятся: свободные места — это вылетевшие.
@@ -2197,6 +2229,11 @@ function renderTable(t) {
     avatar.append(face);
     if (t.actingSeat === i) avatar.append(timerRing());
     plate.append(name, avatar);
+    // Боковые места на широком экране: карты — в блоке аватара, по центру его высоты.
+    if (wideSeats.matches && (node.classList.contains('seat--side-l') || node.classList.contains('seat--side-r'))) {
+      const cards = node.querySelector(':scope > .seat__cards');
+      if (cards) avatar.append(cards);
+    }
     plate.append(el('span', 'seat__stack', fmt(seat.stack)));
     if (seat.mucked) node.classList.add('seat--mucked');
     if (seat.revealing) node.classList.add('seat--revealing');
@@ -3533,7 +3570,7 @@ async function joinInvite() {
   state.joinCode = null;
   await cmd({ cmd: 'join', code });
 }
-menuAction('#menu-stand', () => {
+menuAction('#menu-stand', async () => {
   const t = state.table;
   const tour = t && t.tour;
   if (!(tour && tour.status === 'running')) { cmd({ cmd: 'standUp' }); return; }
@@ -3541,16 +3578,16 @@ menuAction('#menu-stand', () => {
   // Сдавшийся занимает последнее из ещё не разыгранных мест.
   const place = tour.kind === 'mtt' ? tour.alive : t.seats.filter((s) => !s.empty).length;
   const prize = (tour.prizes || [])[place - 1] || 0;
-  const text = `Покинуть турнир? Турнирные фишки не вернутся, взнос — тоже: вы займёте ${place} место`
+  const text = `Турнирные фишки не вернутся, взнос — тоже: вы займёте ${place} место`
     + `${prize ? ` и получите приз ${fmt(prize)}` : ''}. Если просто отойти, место сохранится, но блайнды будут списываться.`;
-  if (!confirm(text)) return;
+  if (!(await ask('Покинуть турнир?', { text, yes: 'Покинуть', no: 'Остаться', danger: true }))) return;
   cmd({ cmd: 'standUp', forfeit: true });
 });
 menuAction('#menu-close', () => { if (state.table) closeTable(state.table); });
 
 async function closeTable(t) {
   const sng = t.kind === 'sng';
-  if (!confirm(`Закрыть стол «${t.name}»? ${sng ? 'Ваш взнос вернётся в банк.' : 'Ваши фишки со стола вернутся в банк.'}`)) return;
+  if (!(await ask(`Закрыть стол «${t.name}»?`, { text: sng ? 'Ваш взнос вернётся в банк.' : 'Ваши фишки со стола вернутся в банк.', yes: 'Закрыть', danger: true }))) return;
   const res = await cmd({ cmd: 'closeTable', id: t.id });
   if (!res.ok) return;
   toast(`Стол «${t.name}» закрыт`, { info: true });
@@ -4059,11 +4096,13 @@ function toggleLog(open) {
 $('#toggle-log').addEventListener('click', () => toggleLog());
 $('#chat-fab').addEventListener('click', () => { Sound.play('click'); toggleLog(); });
 
-// Клик мимо чата закрывает его: на телефоне — любое касание вне шторки,
-// на компьютере — клик по столу (кнопки хода и шапка чат не трогают).
+// Клик мимо чата закрывает его, только когда чат лежит поверх стола (до 900 px):
+// на телефоне — любое касание вне шторки, на планшете — клик по столу.
+// На широком экране чат — отдельная колонка рядом со столом и сам не прячется.
+const chatOverlay = window.matchMedia('(max-width: 900px)');
 document.addEventListener('pointerdown', (e) => {
   const side = $('#side');
-  if (side.hidden || state.view !== 'table') return;
+  if (side.hidden || state.view !== 'table' || !chatOverlay.matches) return;
   if (e.target.closest('#side, #chat-fab, #toggle-log, dialog')) return;
   const phone = window.matchMedia('(max-width: 620px)').matches;
   if (!phone && !e.target.closest('.table-wrap')) return;
