@@ -1,0 +1,429 @@
+/* ————————————————————————————————————————————————————————————————
+   Игровое оформление THPoker. Лежит поверх style.css и только
+   перекрашивает: разметка и логика те же. Убрать подключение
+   game.css из play.html — вернётся прежний вид.
+   ———————————————————————————————————————————————————————————————— */
+
+:root {
+  --gold-1: #f6dc8c;
+  --gold-2: #c9a24a;
+  --gold-3: #8a6a26;
+  --night: #080b0d;
+  --glass: rgba(10, 15, 18, 0.82);
+  --glass-line: rgba(201, 162, 74, 0.28);
+  --display: "Exo 2", "IBM Plex Sans", sans-serif;
+}
+
+/* Фон — прежний, но на всю страницу: на body он обрывался на высоте экрана. */
+html {
+  background:
+    radial-gradient(900px 600px at 50% -10%, #16272c 0%, transparent 70%) fixed no-repeat,
+    radial-gradient(600px 400px at 100% 100%, #131f24 0%, transparent 70%) fixed no-repeat,
+    var(--ink);
+}
+body { background: none; }
+
+/* ——— кнопки: объёмные, с «ступенькой» снизу, как в мобильных играх ——— */
+.btn {
+  border-radius: 12px;
+  background: linear-gradient(180deg, #223238 0%, #152126 100%);
+  border: 1px solid #2d434b;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 3px 0 #070c0e, 0 6px 14px rgba(0, 0, 0, 0.35);
+  transition: transform 90ms ease, box-shadow 90ms ease, filter 120ms ease, background 120ms ease;
+}
+.btn:hover:not(:disabled) { filter: brightness(1.12); background: linear-gradient(180deg, #273a41 0%, #18262c 100%); }
+.btn:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 0 #070c0e, 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.btn--primary {
+  color: #2a1a02; border-color: #e9c46a; text-shadow: 0 1px 0 rgba(255, 240, 200, 0.4);
+  background: linear-gradient(180deg, var(--gold-1) 0%, var(--gold-2) 55%, #a8822f 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 3px 0 #5e4517, 0 6px 18px rgba(201, 162, 74, 0.28);
+}
+.btn--primary:hover:not(:disabled) {
+  border-color: #f3d27a;
+  background: linear-gradient(180deg, #fbe7a3 0%, #d6b05a 55%, #b48c34 100%);
+}
+.btn--primary:active:not(:disabled) { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 1px 0 #5e4517, 0 2px 8px rgba(201, 162, 74, 0.25); }
+.btn--ghost { background: rgba(255, 255, 255, 0.03); box-shadow: none; border-color: rgba(255, 255, 255, 0.1); }
+.btn--ghost:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); }
+.btn:disabled { box-shadow: none; }
+
+/* Кнопки хода — крупные, цветные: красный фолд, зелёный колл, золотой рейз. */
+.btn--act {
+  min-height: 52px; font-family: var(--display); font-size: 14px; font-weight: 600;
+  letter-spacing: 0.02em; text-transform: uppercase;
+}
+.btn--act.btn--danger {
+  color: #fff1ec; border-color: #c2503f;
+  background: linear-gradient(180deg, #c9503e 0%, #8e2b20 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 3px 0 #4a1610, 0 6px 16px rgba(160, 50, 35, 0.3);
+}
+.btn--act.btn--call {
+  color: #effff4; border-color: #4caf78;
+  background: linear-gradient(180deg, #3c9e68 0%, #1f6a42 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 3px 0 #0f3622, 0 6px 16px rgba(40, 140, 85, 0.3);
+}
+.btn--act.btn--danger:hover:not(:disabled) { background: linear-gradient(180deg, #d85b48 0%, #9c3125 100%); }
+.btn--act.btn--call:hover:not(:disabled) { background: linear-gradient(180deg, #45ad74 0%, #237549 100%); }
+.btn--act:disabled { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.07); color: rgba(223, 231, 230, 0.35); }
+.btn--pre { box-shadow: none; background: rgba(255, 255, 255, 0.02); }
+.btn--pre.is-armed { box-shadow: 0 0 0 1px var(--gold-2), 0 0 18px rgba(201, 162, 74, 0.35); }
+.btn__key { border-radius: 5px; font-family: "IBM Plex Sans", sans-serif; text-transform: none; }
+
+/* ——— шапки: тёмное стекло и золотая нить по нижнему краю ——— */
+.topbar {
+  position: relative;
+  /* Без backdrop-filter: он делает шапку «рамкой» для fixed-потомков, и нижняя панель вкладок на телефоне вставала наверх. */
+  background: linear-gradient(180deg, rgba(14, 20, 23, 0.97), rgba(10, 14, 16, 0.92));
+  border-bottom: 1px solid transparent;
+}
+.topbar::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(201, 162, 74, 0.55) 30%, rgba(201, 162, 74, 0.55) 70%, transparent);
+}
+.brand { font-family: var(--display); font-weight: 700; font-size: 18px; letter-spacing: 0.01em; display: inline-flex; align-items: center; gap: 9px; }
+.brand::before {
+  content: '♠'; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  font-size: 15px; color: #2a1a02;
+  background: radial-gradient(circle at 35% 30%, var(--gold-1), var(--gold-2) 60%, var(--gold-3));
+  box-shadow: 0 0 14px rgba(201, 162, 74, 0.45);
+}
+.table-title strong { font-family: var(--display); font-weight: 600; font-size: 15px; }
+
+/* Банк — «фишечный» счётчик с монетой, как валюта в игре. */
+.bank {
+  align-items: center; gap: 8px; padding: 4px 6px 4px 4px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45); border: 1px solid var(--glass-line);
+}
+.bank::before {
+  content: ''; width: 24px; height: 24px; border-radius: 50%; flex: none;
+  background:
+    radial-gradient(circle, var(--gold-1) 0 34%, transparent 35%),
+    repeating-conic-gradient(var(--gold-2) 0 22deg, #6b1d17 22deg 45deg);
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.35), 0 0 10px rgba(201, 162, 74, 0.4);
+}
+.bank__label { display: none; }
+.bank strong, #table-chips { font-family: var(--display); font-weight: 600; font-size: 15px; color: var(--gold-1); padding-right: 6px; }
+
+/* ——— лобби ——— */
+.lobby__head { display: none; }   /* кнопки «Играть сейчас» и «Создать стол» живут в плитках режимов */
+.modes { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.mode {
+  position: relative; overflow: hidden; display: grid; justify-items: start; align-content: end; gap: 2px;
+  min-height: 190px; padding: 16px; padding-top: 104px;   /* картинка сверху слева, текст под ней */ text-align: left; cursor: pointer; font: inherit; color: var(--bone);
+  border-radius: 18px; border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(160deg, var(--tile-a), var(--tile-b));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 4px 0 rgba(0, 0, 0, 0.55), 0 14px 30px rgba(0, 0, 0, 0.4);
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+.mode::before {   /* световое пятно за картинкой */
+  content: ''; position: absolute; left: -40px; top: -50px; width: 190px; height: 190px; border-radius: 50%;
+  background: radial-gradient(circle, var(--tile-glow), transparent 68%); pointer-events: none;
+}
+.mode img {
+  position: absolute; left: 14px; top: 14px; width: 78px; height: 78px; border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(201, 162, 74, 0.55), 0 8px 22px rgba(0, 0, 0, 0.55);
+  transition: transform 220ms ease;
+}
+.mode b { position: relative; font-family: var(--display); font-weight: 700; font-size: 18px; line-height: 1.15; }
+.mode span { position: relative; font-size: 12.5px; color: rgba(241, 235, 221, 0.72); line-height: 1.35; max-width: 22ch; }
+.mode:hover { transform: translateY(-3px); border-color: rgba(201, 162, 74, 0.5); }
+.mode:hover img { transform: scale(1.06) rotate(-4deg); }
+.mode:active { transform: translateY(1px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 0 rgba(0, 0, 0, 0.55); }
+.mode:focus-visible { outline: 2px solid var(--gold-2); outline-offset: 3px; }
+.mode--quick { --tile-a: #1f5a43; --tile-b: #0b2219; --tile-glow: rgba(90, 220, 150, 0.32); border-color: rgba(201, 162, 74, 0.45); }
+.mode--spin { --tile-a: #6a1d1c; --tile-b: #22090b; --tile-glow: rgba(255, 90, 70, 0.32); }
+.mode--sng { --tile-a: #213a6b; --tile-b: #0b1324; --tile-glow: rgba(110, 150, 255, 0.3); }
+.mode--own { --tile-a: #5a4318; --tile-b: #1d1407; --tile-glow: rgba(240, 200, 110, 0.3); }
+.mode--quick::after {   /* главная кнопка — «Играть» в углу плитки */
+  content: 'Играть ›'; position: absolute; right: 14px; top: 18px; padding: 6px 14px; border-radius: 999px;
+  font-family: var(--display); font-weight: 600; font-size: 11px; color: #2a1a02;
+  background: linear-gradient(180deg, var(--gold-1), var(--gold-2));
+  box-shadow: 0 3px 0 #5e4517, 0 0 18px rgba(201, 162, 74, 0.45);
+}
+
+/* Списки, карточки и разделы — тёмное стекло. */
+.room {
+  margin: 0 0 8px; padding: 16px; border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 14px;
+  background: linear-gradient(180deg, rgba(22, 32, 37, 0.85), rgba(13, 19, 22, 0.85));
+}
+.room:hover { background: linear-gradient(180deg, rgba(28, 40, 46, 0.9), rgba(16, 23, 27, 0.9)); border-color: var(--glass-line); }
+.room__name, .page__head h2, .lobby h3, .mtts h3, .quests__head, .profile__section h3, .dialog h3 {
+  font-family: var(--display); font-weight: 600; letter-spacing: -0.01em;
+}
+.room__name { font-size: 16px; }
+.room__tag { font-family: var(--display); font-size: 9px; }
+.filters { border-bottom-color: rgba(255, 255, 255, 0.06); }
+.filter.is-active { color: var(--gold-1); border-bottom-color: var(--gold-2); }
+.mtt, .today__card, .stat, .ach__item, .shop__item, .hand-row, .result__sum div {
+  border-color: rgba(255, 255, 255, 0.07);
+  background: linear-gradient(180deg, rgba(22, 32, 37, 0.9), rgba(13, 19, 22, 0.9));
+}
+.today__amount, .stat__value, .result__place, .pick__value, .stepper__value { font-family: var(--display); font-weight: 600; }
+.pages__tab.is-active { color: var(--gold-1); border-color: var(--glass-line); background: rgba(201, 162, 74, 0.08); }
+.dialog { border-color: var(--glass-line); background: linear-gradient(180deg, #141e23, #0d1417); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7); }
+
+/* ——— стол ——— */
+
+/* Мягкий свет над столом, края зала темнее. */
+.table-wrap { background: radial-gradient(75% 65% at 50% 45%, rgba(255, 225, 160, 0.05), transparent 72%); }
+
+/* Стол: тёмный кожаный бортик со строчкой, латунная дорожка, сукно прежнего цвета
+   с бликом от лампы. */
+.felt {
+  border: 18px solid transparent;
+  background:
+    /* Светлее в центре — от цвета самого сукна, поэтому подходит к любому сукну из магазина. */
+    radial-gradient(115% 100% at 50% 42%, color-mix(in srgb, var(--felt) 82%, #fff 18%) 0%, var(--felt) 45%, var(--felt-deep) 88%) padding-box,
+    linear-gradient(180deg, #3d2c1f 0%, #24180f 50%, #140c06 100%) border-box;
+  box-shadow:
+    inset 0 0 0 3px #8a6a2c,
+    inset 0 0 0 4px rgba(0, 0, 0, 0.55),
+    inset 0 14px 40px rgba(0, 0, 0, 0.4),
+    inset 0 0 70px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 220, 150, 0.14),
+    0 26px 60px rgba(0, 0, 0, 0.6);
+}
+.felt::after {   /* строчка по коже бортика */
+  content: ''; position: absolute; inset: -10px; border-radius: inherit; pointer-events: none;
+  border: 1px dashed rgba(201, 162, 74, 0.32);
+}
+.felt.is-win {
+  box-shadow:
+    inset 0 0 0 3px var(--gold-1), inset 0 0 0 4px rgba(0, 0, 0, 0.5),
+    inset 0 0 70px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 220, 150, 0.3), 0 0 60px rgba(201, 162, 74, 0.35), 0 26px 60px rgba(0, 0, 0, 0.6);
+}
+.pot strong, .pots__caption b { font-family: var(--display); font-weight: 700; color: var(--gold-1); }
+.felt__msg { font-family: var(--display); font-weight: 600; }
+
+/* Игроки — как раньше, без подложек; только стек — золотыми цифрами. */
+.seat__stack { font-family: var(--display); font-weight: 700; color: var(--gold-1); }
+.seat__face { box-shadow: 0 0 0 2px rgba(201, 162, 74, 0.3), 0 6px 16px rgba(0, 0, 0, 0.55); }
+.seat__face--bot { box-shadow: 0 0 0 1px rgba(143, 169, 160, 0.25), 0 6px 16px rgba(0, 0, 0, 0.55); }
+.bet__value { font-family: var(--display); font-weight: 700; }
+
+/* Полоса действий — тёмная панель с золотой нитью сверху. */
+.actionbar {
+  border-top: 0; position: relative;
+  background: linear-gradient(180deg, #11191d 0%, #0a0f12 100%);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.45);
+}
+.actionbar::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px; z-index: 1;
+  background: linear-gradient(90deg, transparent, rgba(201, 162, 74, 0.5) 30%, rgba(201, 162, 74, 0.5) 70%, transparent);
+}
+.meter--bar { background: rgba(0, 0, 0, 0.35); border-top-color: rgba(255, 255, 255, 0.05); }
+.meter__name, .meter__pct { font-family: var(--display); font-weight: 600; }
+.meter--bar .meter__name { font-size: 13px; }
+.meter--bar .meter__pct { font-size: 16px; }
+
+/* ——— телефон ——— */
+@media (max-width: 980px) {
+  .modes { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 620px) {
+  .modes { gap: 10px; }
+  .mode { min-height: 150px; padding: 12px; padding-top: 80px; border-radius: 16px; }
+  .mode img { width: 58px; height: 58px; left: 12px; top: 12px; }
+  .mode--quick::after { right: 10px; top: 16px; padding: 5px 10px; font-size: 10px; }
+  .mode b { font-size: 15px; }
+  .mode span { font-size: 11.5px; }
+  .btn--act { min-height: 48px; font-size: 12.5px; }
+  .felt { border-width: 12px; }
+  .felt::after { inset: -7px; }
+
+  /* Вкладки лобби — нижней панелью, как в мобильных играх. */
+  #screen-lobby { padding-bottom: calc(66px + env(safe-area-inset-bottom)); }
+  #screen-lobby .pages {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; margin: 0; width: auto;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(16, 23, 27, 0.97), rgba(8, 11, 13, 0.99));
+    border-top: 1px solid var(--glass-line); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.5);
+  }
+  #screen-lobby .pages__tab {
+    display: grid; justify-items: center; gap: 2px; padding: 6px 2px 4px; border: 0; border-radius: 12px;
+    font-size: 11px; position: relative;
+  }
+  #screen-lobby .pages__ico { display: block; }
+  #screen-lobby .pages__tab .pages__badge { position: absolute; top: 2px; left: calc(50% + 8px); margin: 0; }
+  #screen-lobby .pages__tab.is-active { background: rgba(201, 162, 74, 0.1); }
+}
+@media (max-width: 620px) {
+  /* Вкладки ушли вниз — в шапке снова логотип слева, банк справа. */
+  #screen-lobby .topbar { flex-wrap: nowrap; }
+  #screen-lobby .topbar .brand { display: inline-flex; margin-right: auto; font-size: 15px; }
+  #screen-lobby .topbar .brand::before { width: 24px; height: 24px; font-size: 13px; }
+}
+@media (max-width: 620px) {
+  /* В шапке стола тесно: счётчик фишек компактнее, название стола не обрезается раньше времени. */
+  .topbar--table .bank { padding: 2px 4px 2px 2px; gap: 5px; }
+  .topbar--table .bank::before { width: 18px; height: 18px; }
+  .topbar--table #table-chips { font-size: 12.5px; padding-right: 3px; }
+  .table-title strong { font-size: 13px; }
+}
+/* Свободное место для зрителя — золотая пунктирная «фишка-место». */
+.seat__empty {
+  border: 1px dashed rgba(201, 162, 74, 0.45); border-radius: 999px; color: rgba(246, 220, 140, 0.8);
+  background: rgba(6, 10, 12, 0.6); font-family: var(--display); font-size: 11px; font-weight: 500;
+}
+.seat__empty:hover:not(:disabled) { background: rgba(201, 162, 74, 0.12); border-color: var(--gold-2); color: var(--gold-1); }
+
+/* ————————————————————————————————————————————————————————————————
+   Страницы лобби: задания, рейтинг, кабинет — игровые панели
+   ———————————————————————————————————————————————————————————————— */
+
+/* Панель: тёмное стекло, светлая кромка сверху, мягкая тень. */
+.today__card, .season, .stat, .ach__item, .shop__item, .mtt, .rating, .friends--mini {
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(27, 39, 45, 0.92) 0%, rgba(14, 21, 25, 0.92) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 10px 26px rgba(0, 0, 0, 0.35);
+}
+
+/* Заголовки разделов — золотая планка слева. */
+.page__head h2, .profile__section h3, .quests__head, .lobby h3, .mtts h3 {
+  font-family: var(--display); font-weight: 800; letter-spacing: 0.01em;
+}
+.page__head h2 { font-size: 30px; }
+.profile__section h3, .quests__head { display: flex; align-items: center; gap: 10px; font-size: 19px; }
+.profile__section h3::before, .quests__head::before {
+  content: ''; width: 4px; height: 18px; border-radius: 2px; flex: none;
+  background: linear-gradient(180deg, var(--gold-1), var(--gold-3));
+  box-shadow: 0 0 10px rgba(201, 162, 74, 0.5);
+}
+
+/* Полоски прогресса — толще, с золотой заливкой и бликом. */
+.today__bar, .ach__bar, .season__bar {
+  height: 9px; border-radius: 999px; background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.today__bar i, .ach__bar i, .season__bar i {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.35), transparent 55%),
+    linear-gradient(90deg, var(--gold-3), var(--gold-2) 60%, var(--gold-1));
+  box-shadow: 0 0 10px rgba(201, 162, 74, 0.45);
+}
+.today__quest.is-done .today__bar i {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), transparent 55%), linear-gradient(90deg, #1f6a42, #4caf78);
+  box-shadow: 0 0 10px rgba(76, 175, 120, 0.5);
+}
+
+/* Задания: ярлык-«плашка», крупные награды, готовое — светится. */
+.today__label {
+  justify-self: start; width: max-content; padding: 3px 9px; border-radius: 999px;
+  font-family: var(--display); font-weight: 700; font-size: 10px; letter-spacing: 0.08em;
+  color: rgba(246, 220, 140, 0.9); background: rgba(201, 162, 74, 0.1); border: 1px solid rgba(201, 162, 74, 0.25);
+}
+.today__title { font-weight: 600; color: var(--bone); }
+.today__amount { font-family: var(--display); font-weight: 800; color: var(--gold-1); text-shadow: 0 0 18px rgba(201, 162, 74, 0.35); }
+.today__bonus.is-ready, .today__quest.is-done:not(.is-claimed), .today__chest.is-ready {
+  border-color: rgba(246, 220, 140, 0.6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(201, 162, 74, 0.25), 0 0 28px rgba(201, 162, 74, 0.25), 0 10px 26px rgba(0, 0, 0, 0.35);
+}
+.today__quest.is-done:not(.is-claimed) { border-color: rgba(76, 175, 120, 0.6); box-shadow: 0 0 24px rgba(76, 175, 120, 0.2), 0 10px 26px rgba(0, 0, 0, 0.35); }
+.today__quest.is-claimed { opacity: 0.6; }
+/* Уровень — номер в золотой медали. */
+.today__level .today__amount {
+  display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; font-size: 24px; color: #2a1a02;
+  text-shadow: 0 1px 0 rgba(255, 240, 200, 0.5);
+  background: radial-gradient(circle at 35% 30%, var(--gold-1), var(--gold-2) 60%, var(--gold-3));
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.4), 0 0 18px rgba(201, 162, 74, 0.5);
+}
+.today__levelhead { align-items: center; }
+/* Сундук недели — с картинкой сундука в углу. */
+.today__chest { position: relative; overflow: hidden; border-style: solid; }
+.today__chest::after {
+  content: ''; position: absolute; right: -22px; top: -22px; width: 96px; height: 96px; border-radius: 50%;
+  background: url(/achievements/pot.webp) center / cover; opacity: 0.35; pointer-events: none;
+}
+.today__chest > * { position: relative; z-index: 1; }
+.today__chest.is-ready::after { opacity: 0.7; }
+.today__chest:not(.is-ready)::after { filter: grayscale(0.8) brightness(0.6); }
+
+/* Рейтинг: строки-карточки, тройка лидеров — в цвете медалей. */
+.rating { padding: 6px; }
+.rating__row { border-bottom: 0; border-radius: 12px; margin-bottom: 4px; padding: 11px 10px; }
+.rating__row:not(.rating__row--head) { background: rgba(255, 255, 255, 0.02); }
+.rating__row:not(.rating__row--head):hover { background: rgba(201, 162, 74, 0.07); }
+.rating__row--head { background: none; font-family: var(--display); font-weight: 700; }
+.rating__place { font-family: var(--display); font-weight: 800; }
+.rating__row.is-top .rating__place {
+  width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; margin: 0 auto; color: #1a1305;
+  box-shadow: inset 0 -2px 4px rgba(0, 0, 0, 0.3), 0 0 14px var(--medal-glow, transparent);
+}
+.rating__row.is-top-1 { --medal-glow: rgba(246, 220, 140, 0.6); background: linear-gradient(90deg, rgba(201, 162, 74, 0.2), rgba(201, 162, 74, 0.02)) !important; }
+.rating__row.is-top-2 { --medal-glow: rgba(220, 230, 235, 0.45); background: linear-gradient(90deg, rgba(185, 194, 196, 0.15), rgba(185, 194, 196, 0.02)) !important; }
+.rating__row.is-top-3 { --medal-glow: rgba(224, 173, 125, 0.45); background: linear-gradient(90deg, rgba(176, 122, 75, 0.17), rgba(176, 122, 75, 0.02)) !important; }
+.rating__row.is-top-1 .rating__place { background: radial-gradient(circle at 35% 30%, var(--gold-1), var(--gold-2) 60%, var(--gold-3)); }
+.rating__row.is-top-2 .rating__place { background: radial-gradient(circle at 35% 30%, #f4f7f8, #b9c2c4 60%, #7d868e); }
+.rating__row.is-top-3 .rating__place { background: radial-gradient(circle at 35% 30%, #f0c49a, #b07a4b 60%, #7a4f2c); }
+.rating__row.is-top .rating__name { font-weight: 600; color: var(--bone); }
+.rating__value { font-family: var(--display); font-weight: 700; color: var(--gold-1); }
+.rating__row.is-you { box-shadow: inset 0 0 0 1px rgba(246, 220, 140, 0.5); }
+
+/* Кабинет: шапка — «карточка игрока» с подсветкой и крупным аватаром. */
+.profile__head {
+  position: relative; overflow: hidden; padding: 20px; border-radius: 20px; margin-bottom: 6px;
+  border: 1px solid rgba(201, 162, 74, 0.3);
+  background:
+    radial-gradient(420px 220px at 0% 0%, rgba(201, 162, 74, 0.22), transparent 70%),
+    radial-gradient(380px 200px at 100% 100%, rgba(31, 106, 66, 0.25), transparent 70%),
+    linear-gradient(180deg, #1b272d, #0f171b);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 14px 34px rgba(0, 0, 0, 0.45);
+}
+.profile__head .avatar {
+  width: 84px; height: 84px; font-size: 36px;
+  box-shadow: 0 0 0 3px #0f171b, 0 0 0 5px var(--gold-2), 0 0 26px rgba(201, 162, 74, 0.45);
+}
+.profile__title h2 { font-family: var(--display); font-weight: 800; font-size: 28px; }
+.profile__lvl { font-family: var(--display); font-weight: 800; box-shadow: 0 0 12px rgba(201, 162, 74, 0.45); }
+/* Сезон — с отсветом цвета лиги. */
+.season { background: radial-gradient(360px 160px at 0% 0%, color-mix(in srgb, var(--lg, #c9a24a) 22%, transparent), transparent 70%), linear-gradient(180deg, rgba(27, 39, 45, 0.92), rgba(14, 21, 25, 0.92)); }
+.season__points { font-family: var(--display); font-weight: 800; color: var(--gold-1); }
+.league { font-family: var(--display); font-weight: 700; }
+/* Статистика — крупные цифры. */
+.stat { padding: 14px 16px; }
+.stat__value { font-family: var(--display); font-weight: 800; font-size: 24px; color: var(--bone); }
+.stat__label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.stat--link .stat__value { color: var(--gold-1); }
+.stat--link:hover { border-color: rgba(201, 162, 74, 0.5); }
+/* Ачивки и магазин — карточки с подсветкой взятого. */
+.ach__item.is-open { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 22px color-mix(in srgb, var(--medal) 25%, transparent), 0 10px 26px rgba(0, 0, 0, 0.35); }
+.ach__text b { font-family: var(--display); font-weight: 700; }
+.shop__item.is-on { border-color: rgba(246, 220, 140, 0.6); box-shadow: 0 0 22px rgba(201, 162, 74, 0.2); }
+.shop__name { font-family: var(--display); font-weight: 700; }
+
+/* Значки вкладок — только в нижней панели на телефоне. */
+.pages__ico {
+  display: none; width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.pages__tab.is-active .pages__ico { filter: drop-shadow(0 0 6px rgba(246, 220, 140, 0.55)); }
+
+/* Друзья в окне «Позвать друга»: аватар без колец — не вылезает из строки. */
+.invite-friend__who .avatar { box-shadow: 0 0 0 1px rgba(201, 162, 74, 0.5); }
+.invite-friend { padding: 6px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+
+/* Блок «Друзья»: аватар с точкой «в сети» на его углу, имя и статус — столбиком справа. */
+.friends--mini { padding: 6px; list-style: none; }
+.friends--mini .friend {
+  grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; row-gap: 0;
+  padding: 8px; border: 0; border-radius: 12px;
+}
+.friends--mini .friend:hover { background: rgba(255, 255, 255, 0.03); }
+.friends--mini .friend + .friend { margin-top: 2px; }
+.friends--mini .friend__who { position: relative; gap: 10px; }
+.friends--mini .friend__who .avatar {
+  order: 0; width: 34px; height: 34px; margin: 0; font-size: 15px; vertical-align: 0;
+  box-shadow: 0 0 0 1px rgba(201, 162, 74, 0.45);
+}
+.friends--mini .friend__dot {   /* точка на правом нижнем углу аватара */
+  position: absolute; left: 25px; top: 25px; z-index: 1; width: 11px; height: 11px; box-shadow: 0 0 0 2px #121b20;
+}
+.friends--mini .friend.is-online .friend__dot { box-shadow: 0 0 0 2px #121b20, 0 0 8px rgba(79, 157, 106, 0.8); }
+.friends--mini .friend__name { font-weight: 600; color: var(--bone); }
+.friends--mini .friend__status { padding-left: 44px; margin-top: -10px; }

@@ -15,8 +15,10 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=Exo+2:wght@600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
+<!-- Игровое оформление поверх базовых стилей: убрать эту строку — вернётся прежний вид -->
+<link rel="stylesheet" href="/game.css">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" href="/favicon-120.png" sizes="120x120" type="image/png">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -25,7 +27,7 @@
 <body>
 
 <!-- Экран входа -->
-<!-- Заставка, пока выясняем, вошёл ли игрок: иначе на миг мелькал экран входа -->
+<!-- Заставка -->
 <section id="screen-loading" class="screen loading" aria-live="polite">
   <div class="loading__table" aria-hidden="true">
     <span class="loading__card loading__card--1">A<i>♠</i></span>
@@ -77,11 +79,12 @@
 <section id="screen-lobby" class="screen" hidden>
   <header class="topbar">
     <a class="brand" href="/" title="На главную">THPoker</a>
+    <!-- Значки вкладок — Lucide (lucide.dev, лицензия ISC) -->
     <nav class="pages" id="pages" role="tablist" aria-label="Разделы">
-      <button class="pages__tab is-active" data-page="tables" role="tab">Столы</button>
-      <button class="pages__tab" data-page="quests" role="tab">Задания<span class="pages__badge" id="quests-badge" title="Можно забрать награду" hidden>0</span></button>
-      <button class="pages__tab" data-page="rating" role="tab">Рейтинг</button>
-      <button class="pages__tab" data-page="profile" role="tab">Кабинет<span class="pages__badge" id="requests-badge" title="Заявки в друзья" hidden>0</span></button>
+      <button class="pages__tab is-active" data-page="tables" role="tab"><svg class="pages__ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9c-1.5 1.5-3 3.2-3 5.5A5.5 5.5 0 0 0 7.5 20c1.8 0 3-.5 4.5-2 1.5 1.5 2.7 2 4.5 2a5.5 5.5 0 0 0 5.5-5.5c0-2.3-1.5-4-3-5.5l-7-7-7 7Z"/><path d="M12 18v4"/></svg>Столы</button>
+      <button class="pages__tab" data-page="quests" role="tab"><svg class="pages__ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>Задания<span class="pages__badge" id="quests-badge" title="Можно забрать награду" hidden>0</span></button>
+      <button class="pages__tab" data-page="rating" role="tab"><svg class="pages__ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>Рейтинг</button>
+      <button class="pages__tab" data-page="profile" role="tab"><svg class="pages__ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>Кабинет<span class="pages__badge" id="requests-badge" title="Заявки в друзья" hidden>0</span></button>
     </nav>
     <div class="topbar__right">
       <div class="bank">
@@ -107,6 +110,26 @@
         <button class="btn" id="create-open">Создать стол</button>
       </div>
     </div>
+
+    <!-- Режимы игры — крупными плитками, как в игре -->
+    <section class="modes" aria-label="Режимы игры">
+      <button class="mode mode--quick" type="button" data-mode="quick">
+        <img src="/achievements/wins.webp" alt="">
+        <b>Быстрая игра</b><span>Стол по вашему банку — раздача сразу</span>
+      </button>
+      <button class="mode mode--spin" type="button" data-mode="spin">
+        <img src="/achievements/allins.webp" alt="">
+        <b>Спин ×100</b><span>Турнир на троих, приз до ×100</span>
+      </button>
+      <button class="mode mode--sng" type="button" data-mode="sng">
+        <img src="/achievements/sng.webp" alt="">
+        <b>Sit-n-go</b><span>Турниры на 6 и 9 мест</span>
+      </button>
+      <button class="mode mode--own" type="button" data-mode="own">
+        <img src="/achievements/hands.webp" alt="">
+        <b>Свой стол</b><span>Свои блайнды, позовите друзей</span>
+      </button>
+    </section>
 
     <!-- Турниры по расписанию -->
     <section class="mtts" id="mtts" hidden>

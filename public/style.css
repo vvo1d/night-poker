@@ -1113,7 +1113,7 @@ body:has(.actions.is-raising) .react { display: none; }
    пустая она не занимает места. */
 .actions__status:empty { display: none; }
 /* Выбор ставки всплывает над кнопками и не двигает стол. */
-.acts__size { position: absolute; right: 18px; bottom: calc(100% + 10px); z-index: 15; }
+.acts__size { position: absolute; right: 18px; bottom: calc(100% + 10px); z-index: 15; pointer-events: none; }
 .acts__size:empty { display: none; }
 .acts__main { display: flex; gap: 8px; }
 
@@ -1134,72 +1134,146 @@ body:has(.actions.is-raising) .react { display: none; }
 }
 .btn--pre.is-armed::after { content: '✓'; margin-left: 8px; font-size: 12px; opacity: 0.9; }
 
-/* размер ставки */
-.raise {
-  width: 340px; display: flex; flex-direction: column; align-items: stretch; gap: 10px;
-  padding: 10px 14px 14px; border-radius: 14px;
-  background: rgba(13, 21, 25, 0.97); border: 1px solid var(--brass-dim);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
-  animation: rise 160ms ease-out both;
+/* размер ставки — дуга под большой палец правой руки над кнопками хода */
+.arc {
+  position: relative; width: var(--w); height: var(--h);
+  pointer-events: none;   /* кликабельны только дуга и кнопки — стол под пультом живой */
+  animation: arcIn 220ms cubic-bezier(0.2, 1.3, 0.4, 1) both; transform-origin: 100% 100%;
 }
-.raise__head { display: flex; align-items: center; justify-content: space-between; }
-.raise__title { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
-.raise__close {
-  position: relative; width: 24px; height: 24px; padding: 0; cursor: pointer; border-radius: 50%;
-  color: var(--muted); background: transparent; border: 1px solid var(--line);
+@keyframes arcIn { from { opacity: 0; transform: scale(0.82) rotate(6deg); } to { opacity: 1; transform: none; } }
+.arc > * { pointer-events: auto; }
+.arc__svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; outline: none; pointer-events: none; }
+.arc__svg:focus-visible .arc__groove { stroke: rgba(201, 162, 74, 0.45); }
+.arc__rail { fill: none; stroke: rgba(74, 82, 88, 0.95); stroke-width: 46; stroke-linecap: round; filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.6)); }
+.arc__groove { fill: none; stroke: rgba(20, 25, 28, 0.95); stroke-width: 24; stroke-linecap: round; }
+.arc__fill {
+  fill: none; stroke: #c9a24a; stroke-width: 12; stroke-linecap: round;
+  filter: drop-shadow(0 0 6px rgba(201, 162, 74, 0.7)); transition: stroke-dashoffset 90ms ease-out, stroke 160ms ease;
 }
-.raise__close:hover { color: var(--text); border-color: var(--brass-dim); }
-.raise__close::before, .raise__close::after {
-  content: ''; position: absolute; left: 50%; top: 50%;
-  width: 10px; height: 1.5px; border-radius: 1px; background: currentColor;
-}
-.raise__close::before { transform: translate(-50%, -50%) rotate(45deg); }
-.raise__close::after { transform: translate(-50%, -50%) rotate(-45deg); }
-.raise__presets { display: flex; gap: 5px; justify-content: space-between; }
-.raise__presets .raise__preset { flex: 1; }
-.raise__preset {
-  font: inherit; font-size: 12px; color: var(--text); cursor: pointer; white-space: nowrap;
-  background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px;
-  transition: background 130ms ease, border-color 130ms ease, color 130ms ease;
-}
-.raise__preset:hover:not(:disabled) { background: rgba(201, 162, 74, 0.12); border-color: var(--brass-dim); color: var(--bone); }
-.raise__preset:disabled { cursor: default; opacity: 0.5; }
-.raise__preset:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.arc.is-drag .arc__fill { transition: none; }
+.arc.is-allin .arc__fill { stroke: #e2604b; filter: drop-shadow(0 0 8px rgba(226, 96, 75, 0.8)); }
+.arc.is-min .arc__fill { stroke: transparent; }
+.arc__hit { fill: none; stroke: transparent; stroke-width: 64; stroke-linecap: round; pointer-events: stroke; cursor: grab; touch-action: none; }
+.arc.is-drag .arc__hit { cursor: grabbing; }
 
-.raise__dial { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.raise__step {
-  width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
-  font: inherit; font-size: 20px; line-height: 1; color: var(--bone); cursor: pointer;
-  background: var(--ink-3); border: 1px solid var(--line);
-  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
-  user-select: none; -webkit-user-select: none; touch-action: manipulation;
+/* Кружки на концах дуги и отметки быстрых ставок. */
+.arc__knob {
+  position: absolute; transform: translate(-50%, -50%); display: grid; place-items: center; padding: 0; cursor: pointer;
+  font: inherit; font-weight: 700; color: var(--bone); border-radius: 50%;
+  transition: transform 100ms ease, border-color 140ms ease;
 }
-.raise__step:hover:not(:disabled) { background: #22343c; border-color: var(--brass-dim); }
-.raise__step:active:not(:disabled) { transform: scale(0.94); }
-.raise__step:disabled { opacity: 0.35; cursor: not-allowed; }
-.raise__step:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.arc__knob:active { transform: translate(-50%, -50%) scale(0.92); }
+.arc__knob--min, .arc__knob--max { width: 54px; height: 54px; font-size: 12.5px; background: rgba(14, 19, 22, 0.92); }
+.arc__knob--min { border: 2px solid #4f86c6; }
+.arc__knob--max { border: 2px solid #9fb64a; font-size: 14px; }
+.arc.is-allin .arc__knob--max { border-color: #e2604b; background: rgba(226, 96, 75, 0.25); }
+.arc__tick {   /* отметка быстрой ставки — кружок прямо на дуге */
+  width: 30px; height: 30px; font-size: 11px; font-weight: 700;
+  background: rgba(14, 19, 22, 0.96); border: 1.5px solid rgba(255, 255, 255, 0.3);
+}
+.arc__tick.is-on { border-color: var(--brass); color: var(--brass); }
 
-.raise__value { min-width: 92px; text-align: center; line-height: 1.1; }
-.raise__amount { display: block; font-size: 21px; font-weight: 600; color: var(--brass); font-variant-numeric: tabular-nums; }
-.raise__hint { display: block; font-size: 11px; color: var(--muted); }
+/* Фишка-ползунок. */
+.arc__thumb {
+  position: absolute; width: 50px; height: 50px; border-radius: 50%; transform: translate(-50%, -50%);
+  pointer-events: none !important;
+  background:
+    radial-gradient(circle, #f6dc8c 0 32%, transparent 33%),
+    repeating-conic-gradient(#d8b25a 0 20deg, #8a2a1f 20deg 40deg);
+  box-shadow: inset 0 0 0 3px rgba(0, 0, 0, 0.3), 0 5px 14px rgba(0, 0, 0, 0.65), 0 0 18px rgba(201, 162, 74, 0.55);
+  transition: left 90ms ease-out, top 90ms ease-out, transform 120ms ease;
+}
+.arc.is-drag .arc__thumb { transition: none; transform: translate(-50%, -50%) scale(1.15); }
 
-.raise__slider {
-  -webkit-appearance: none; appearance: none; width: 100%; height: 6px; margin: 4px 0;
-  border-radius: 999px; cursor: pointer; background: #22333a;
-  background-image: linear-gradient(90deg, var(--brass) var(--fill, 0%), transparent var(--fill, 0%));
+/* Сумма — над дугой слева. */
+.arc__readout {
+  position: absolute; right: calc(100% - 116px); top: 4px; display: grid; justify-items: end; line-height: 1.1;
+  padding: 7px 11px; border-radius: 12px; pointer-events: none !important; white-space: nowrap;
+  background: rgba(10, 14, 16, 0.92); border: 1px solid rgba(201, 162, 74, 0.45); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
 }
-.raise__slider::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #f0d68f, var(--brass) 60%, #8d7134);
-  border: 1px solid #6f5622; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55); cursor: pointer;
+.arc__readout small { font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.arc__readout b { font-size: 22px; font-weight: 700; color: var(--brass); font-variant-numeric: tabular-nums; }
+.arc__readout span { font-size: 10.5px; color: var(--muted); }
+.arc.is-allin .arc__readout { border-color: rgba(226, 96, 75, 0.7); }
+.arc.is-allin .arc__readout b { color: #ff8a70; }
+
+/* ±1 bb — таблетки справа от нижней части дуги, под большим пальцем. */
+.arc__pill {
+  position: absolute; right: 0; height: 44px; min-width: 88px; padding: 0 12px; cursor: pointer;
+  font: inherit; font-size: 15px; font-weight: 700; color: var(--bone); border-radius: 999px;
+  background: rgba(14, 19, 22, 0.94); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.5);
+  user-select: none; -webkit-user-select: none; touch-action: manipulation; transition: transform 80ms ease;
 }
-.raise__slider::-moz-range-thumb {
-  width: 16px; height: 16px; border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #f0d68f, var(--brass) 60%, #8d7134);
-  border: 1px solid #6f5622; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55); cursor: pointer;
+.arc__pill--plus { bottom: 86px; border: 2px solid #9fb64a; }
+.arc__pill--minus { bottom: 34px; border: 2px solid #4f86c6; }
+.arc__pill:active:not(:disabled) { transform: scale(0.95); }
+.arc__pill:disabled { opacity: 0.35; cursor: not-allowed; }
+/* размер ставки на компьютере — панель над кнопками: поле суммы, быстрые ставки, ползунок */
+.rbox {
+  --fill: 0%;
+  width: 432px; display: grid; gap: 10px; padding: 12px 14px 14px; border-radius: 16px;
+  background: linear-gradient(180deg, rgba(24, 34, 39, 0.98), rgba(11, 16, 19, 0.98));
+  border: 1px solid rgba(201, 162, 74, 0.45);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  pointer-events: auto; animation: rise 160ms ease-out both;
 }
-.raise__slider:disabled { cursor: default; }
-.raise__slider:focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; }
+.rbox.is-allin { border-color: rgba(226, 96, 75, 0.7); }
+.rbox__head { display: flex; align-items: center; gap: 12px; }
+.rbox__title { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.rbox__input {
+  width: 130px; padding: 6px 10px; border-radius: 10px; font: inherit; font-size: 22px; font-weight: 700;
+  color: var(--brass); background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(201, 162, 74, 0.35);
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+.rbox__input:focus { outline: none; border-color: var(--brass); box-shadow: 0 0 0 3px rgba(201, 162, 74, 0.18); }
+.rbox.is-allin .rbox__input { color: #ff8a70; }
+.rbox__hint { flex: 1; font-size: 12px; color: var(--muted); }
+.rbox__close {
+  position: relative; width: 28px; height: 28px; padding: 0; cursor: pointer; border-radius: 50%;
+  color: var(--muted); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line);
+}
+.rbox__close:hover { color: var(--text); border-color: var(--brass-dim); }
+.rbox__close::before, .rbox__close::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 11px; height: 1.5px; border-radius: 1px; background: currentColor;
+}
+.rbox__close::before { transform: translate(-50%, -50%) rotate(45deg); }
+.rbox__close::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.rbox__presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 6px; }
+.rbox__preset {
+  display: grid; justify-items: center; gap: 1px; padding: 6px 2px; cursor: pointer; font: inherit; color: var(--text);
+  border-radius: 10px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.rbox__preset b { font-size: 13px; font-weight: 700; }
+.rbox__preset small { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rbox__preset:hover { border-color: var(--brass-dim); background: rgba(201, 162, 74, 0.08); }
+.rbox__preset.is-on { border-color: var(--brass); background: rgba(201, 162, 74, 0.16); }
+.rbox__preset.is-on small { color: var(--brass); }
+.rbox__preset--allin b { color: #ff8a70; }
+.rbox__preset--allin.is-on { border-color: #e2604b; background: rgba(226, 96, 75, 0.14); }
+.rbox__row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 34px; align-items: center; gap: 10px; }
+.rbox__step {
+  width: 34px; height: 34px; border-radius: 10px; padding: 0; cursor: pointer; font: inherit; font-size: 20px; line-height: 1;
+  color: var(--bone); background: linear-gradient(180deg, #223238, #152126); border: 1px solid #2d434b;
+  user-select: none; -webkit-user-select: none;
+}
+.rbox__step:hover:not(:disabled) { border-color: var(--brass-dim); }
+.rbox__step:disabled { opacity: 0.3; cursor: not-allowed; }
+.rbox__slider {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 8px; margin: 0; border-radius: 999px; cursor: pointer;
+  background: linear-gradient(90deg, #2f8f5c, #c9a24a 60%, #e2604b) 0 0 / var(--fill) 100% no-repeat, rgba(0, 0, 0, 0.5);
+}
+.rbox__slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; cursor: grab;
+  background: radial-gradient(circle, #f6dc8c 0 30%, transparent 31%), repeating-conic-gradient(#d8b25a 0 20deg, #8a2a1f 20deg 40deg);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 10px rgba(201, 162, 74, 0.5);
+}
+.rbox__slider::-moz-range-thumb {
+  width: 22px; height: 22px; border: 0; border-radius: 50%; cursor: grab;
+  background: radial-gradient(circle, #f6dc8c 0 30%, transparent 31%), repeating-conic-gradient(#d8b25a 0 20deg, #8a2a1f 20deg 40deg);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+.rbox__slider:focus-visible { outline: 2px solid var(--brass); outline-offset: 4px; }
 
 /* диалог и уведомления */
 .dialog {
@@ -1685,9 +1759,8 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   .react__panel { width: min(300px, calc(100vw - 20px)); right: 0; }
   .menu__panel { min-width: 190px; }
   /* На телефоне панель ставки встаёт в поток над кнопками: всплывая, она закрыла бы свои карты. */
-  .acts__size { position: static; }
-  .raise { width: 100%; padding: 8px 10px 10px; gap: 8px; box-shadow: none; }
-  .raise__preset { padding: 6px 4px; }
+  /* Дуга ставки висит поверх стола у правого края над кнопками — ничего не сдвигает. */
+  .acts__size { position: absolute; right: 6px; left: auto; bottom: calc(100% + 6px); }
   /* Название и описание — на всю ширину, ниже строкой: статус слева, кнопка справа.
      Иначе длинный статус турнира сжимал колонку с названием. */
   .room { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "info info" "stats btn"; gap: 10px 14px; }
@@ -1761,7 +1834,7 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   .loading__card, .loading__chips i { animation: none; opacity: 1; transform: translate(var(--to-x, 0px), 0) rotate(var(--rot, 0deg)); }
   .loading__chips i { transform: none; }
   .loading__text { animation: none; }
-  .card--deal, .card--flip .card__inner, .bet.is-new, .seat__win, .raise, .seat__bubble.is-new, .react__panel,
+  .card--deal, .card--flip .card__inner, .bet.is-new, .seat__win, .arc, .seat__bubble.is-new, .react__panel,
   .room.is-new, .auth, .auth__mark span, .dialog[open], .toast, .felt__msg.is-win { animation: none; }
   .card--win, .meter.is-up .meter__name, .pot.is-bump strong, .bank strong.is-bump,
   .room__live--hot::before { animation: none; }
@@ -1770,3 +1843,7 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   .chip-fly, .card-fly { display: none; }
   .card, .card__inner { transition: none; }
 }
+
+/* Силомер между раздачами держит место пустым — стол не прыгает, когда он появляется. */
+.meter.is-empty > * { visibility: hidden; }
+

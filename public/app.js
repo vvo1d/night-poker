@@ -616,7 +616,6 @@ function renderToday(daily, referral, level) {
   // Задания: прогресс и награда.
   for (const q of daily.quests) {
     const card = el('article', `today__card today__quest${q.done ? ' is-done' : ''}${q.claimed ? ' is-claimed' : ''}`);
-    card.append(el('span', 'today__label', 'Задание дня'));
     card.append(el('span', 'today__title', q.title));
     const bar = el('span', 'today__bar');
     const fill = el('i');
@@ -670,7 +669,6 @@ function renderWeekly(w) {
   box.textContent = '';
   for (const q of w.quests) {
     const card = el('article', `today__card today__quest${q.done ? ' is-done' : ''}${q.claimed ? ' is-claimed' : ''}`);
-    card.append(el('span', 'today__label', 'Задание недели'));
     card.append(el('span', 'today__title', q.title));
     const bar = el('span', 'today__bar');
     const fill = el('i');
@@ -1741,6 +1739,23 @@ function paintCreate() {
   }
 }
 
+// Плитки режимов в лобби.
+document.querySelectorAll('.mode').forEach((tile) => tile.addEventListener('click', async () => {
+  Sound.play('click');
+  const mode = tile.dataset.mode;
+  if (mode === 'quick') $('#quick-play').click();
+  if (mode === 'own') $('#create-open').click();
+  if (mode === 'spin') {
+    const res = await cmd({ cmd: 'quickSng', buyIn: 100, spin: true, seats: 3, name: 'Спин' });
+    if (res.ok) Sound.play('chips');
+  }
+  if (mode === 'sng') {
+    const tab = document.querySelector('#lobby-filter [data-filter="sng"]');
+    if (tab) tab.click();
+    $('#lobby-filter').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}));
+
 // «Играть сейчас»: сервер сам подбирает стол по банку и сажает ботов.
 $('#quick-play').addEventListener('click', async () => {
   Sound.play('click');
@@ -2575,13 +2590,12 @@ function renderMeter(t) {
   placeMeter();
   const box = $('#meter');
   const hand = t.you && t.you.hand;
-  if (!meterOn() || !hand || hand.strength === null) {
-    box.hidden = true;
-    state.combo = '';
-    return;
-  }
-  if (!hand) {
-    box.hidden = true;
+  // Сидите за столом — полоса силомера держит место и между раздачами (просто пустая):
+  // иначе её появление и пропажа каждый раз сдвигали стол.
+  const empty = !meterOn() || !hand || hand.strength === null;
+  box.hidden = empty && !(t.you && meterOn());
+  box.classList.toggle('is-empty', empty);
+  if (empty) {
     state.combo = '';
     return;
   }
@@ -2969,6 +2983,11 @@ function openRaise(t) {
   Sound.play('click');
   renderActions(t);
 }
+
+// Пульт ставки закрывается касанием мимо него (или Esc) — отдельный крестик не нужен.
+document.addEventListener('pointerdown', (e) => {
+  if (state.raiseOpen && !e.target.closest('.arc, .actions')) closeRaise();
+});
 
 function closeRaise() {
   if (!state.raiseOpen) return;
@@ -3464,97 +3483,297 @@ function holdRepeat(btn, step) {
   ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, stop));
 }
 
-// Размер ставки: доли банка, шаг в блайнд и ползунок. Панель открывается
-// по кнопке рейза и висит над ней; сама кнопка остаётся в общем ряду
-// с фолдом и коллом и теперь отправляет выбранную сумму.
-function raiseBox(t, legal) {
-  const { minRaiseTo: min, maxRaiseTo: max, toCall, pot, isBet } = legal;
+// Размер ставки — дуга под большой палец правой руки (как в больших покерных играх).
+// Дуга идёт от минимума внизу слева к «Max» вверху справа — ровно по траектории
+// пальца, который держит телефон снизу справа. Фишку тянут по дуге, справа —
+// «+1 bb» и «−1 bb», на дуге — отметки ½, ¾ и «Банк» (нажать — прыгнуть).
+// Шкала нелинейная: внизу точный шаг, вверху крупные суммы. Пульт занимает
+// только правый край над кнопками: свои карты и стол открыты, ничего не сдвигается.
+const ARC_W = 180;
+const ARC_H = 300;
+const ARC_PATH = 'M 70 270 C 66 150, 98 60, 152 40';
+// Фишка ходит по середине дуги: концы заняты кружками «минимум» и «Max».
+const ARC_FROM = 0.2;
+const ARC_TO = 0.83;
+// На компьютере мышью по дуге не водят — там своя панель: быстрые ставки,
+// ползунок, ±блайнд и поле, куда сумму можно просто вписать.
+const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
 
-  const size = el('div', 'raise');
+function raiseBox(t, legal) {
+  return finePointer.matches ? deskRaiseBox(t, legal) : arcRaiseBox(t, legal);
+}
+
+function deskRaiseBox(t, legal) {
+  const { minRaiseTo: min, maxRaiseTo: max, toCall, pot, isBet } = legal;
+  const bb = Math.max(1, t.bb);
+  const span = Math.max(1, max - min);
+  const STEPS = 1000;
+  const toValue = (p) => min + span * p * p;   // ползунок нелинейный: точнее у минимума
+  const toPos = (v) => Math.sqrt(clamp((v - min) / span, 0, 1));
+  const inBb = (v) => { const x = v / bb; return `${x >= 100 ? Math.round(x) : Math.round(x * 10) / 10} bb`; };
   state.raiseValue = clamp(state.raiseValue || min, min, max);
 
-  const head = el('div', 'raise__head');
-  head.append(el('span', 'raise__title', isBet ? 'Размер бета' : 'Рейз до'));
-  const close = el('button', 'raise__close');
+  const size = el('div', 'rbox');
+  const head = el('div', 'rbox__head');
+  head.append(el('span', 'rbox__title', isBet ? 'Бет' : 'Рейз до'));
+  const input = document.createElement('input');
+  input.className = 'rbox__input';
+  input.inputMode = 'numeric';
+  input.autocomplete = 'off';
+  input.setAttribute('aria-label', 'Сумма ставки');
+  const hint = el('span', 'rbox__hint');
+  const close = el('button', 'rbox__close');
   close.type = 'button';
   close.title = 'Скрыть (Esc)';
   close.setAttribute('aria-label', 'Скрыть выбор ставки');
   close.addEventListener('click', closeRaise);
-  head.append(close);
+  head.append(input, hint, close);
 
-  const presets = el('div', 'raise__presets');
+  const presets = el('div', 'rbox__presets');
+  const row = el('div', 'rbox__row');
+  const minus = el('button', 'rbox__step', '−');
+  const plus = el('button', 'rbox__step', '+');
+  minus.type = 'button'; plus.type = 'button';
+  minus.title = 'Меньше на блайнд (↓ или колесо)';
+  plus.title = 'Больше на блайнд (↑ или колесо)';
   const slider = document.createElement('input');
   slider.type = 'range';
-  slider.className = 'raise__slider';
-  slider.min = min; slider.max = max; slider.step = 1;
-
-  const amount = el('b', 'raise__amount');
-  const hint = el('span', 'raise__hint');
-  const minus = el('button', 'raise__step', '−');
-  const plus = el('button', 'raise__step', '+');
-  minus.type = 'button'; plus.type = 'button';
-  minus.title = 'Меньше на блайнд (стрелка вниз)';
-  plus.title = 'Больше на блайнд (стрелка вверх)';
+  slider.className = 'rbox__slider';
+  slider.min = '0'; slider.max = String(STEPS); slider.step = '1';
+  slider.setAttribute('aria-label', 'Размер ставки');
+  row.append(minus, slider, plus);
 
   const submit = el('button', 'btn btn--primary btn--act raise__go');
 
-  const step = Math.max(1, t.bb);
-  const paint = () => {
+  const paint = (keepInput = false) => {
     const v = state.raiseValue;
-    slider.value = v;
-    amount.textContent = fmt(v);
+    const allIn = v >= max;
+    // В фокусе — голые цифры (их и правят), вне фокуса — с пробелами по разрядам.
+    if (!keepInput) input.value = document.activeElement === input ? String(v) : fmt(v);
     const share = pot > 0 ? Math.round(((v - toCall) / pot) * 100) : 0;
-    hint.textContent = v >= max
-      ? `олл-ин · ${(v / t.bb).toFixed(1)} bb`
-      : `${(v / t.bb).toFixed(1)} bb · ${share}% банка`;
+    hint.textContent = allIn ? `олл-ин · ${inBb(v)}` : `${inBb(v)} · ${share}% банка`;
+    slider.value = String(Math.round(toPos(v) * STEPS));
+    size.style.setProperty('--fill', `${toPos(v) * 100}%`);
     minus.disabled = v <= min;
-    plus.disabled = v >= max;
-    submit.textContent = v >= max ? `Олл-ин ${fmt(v)}` : `${isBet ? 'Бет' : 'Рейз'} ${fmt(v)}`;
+    plus.disabled = allIn;
+    submit.textContent = allIn ? `Олл-ин ${fmt(v)}` : `${isBet ? 'Бет' : 'Рейз'} ${fmt(v)}`;
     hotkey(submit, 'R');
-    size.style.setProperty('--fill', `${((v - min) / (max - min)) * 100}%`);
+    size.classList.toggle('is-allin', allIn);
+    for (const b of presets.children) b.classList.toggle('is-on', Number(b.dataset.value) === v);
   };
-
-  const setValue = (v, snap = false) => {
+  const setValue = (v, snap = false, keepInput = false) => {
     let next = clamp(Math.round(v), min, max);
-    if (snap && next > min && next < max) next = clamp(min + Math.round((next - min) / step) * step, min, max);
+    if (snap && next > min && next < max) next = clamp(min + Math.round((next - min) / bb) * bb, min, max);
     state.raiseValue = next;
-    paint();
+    paint(keepInput);
   };
-
-  state.setRaise = (delta) => setValue(state.raiseValue + delta * step, true);
+  state.setRaise = (delta) => setValue(state.raiseValue + delta * bb, true);
   holdRepeat(minus, () => state.setRaise(-1));
   holdRepeat(plus, () => state.setRaise(1));
-  slider.addEventListener('input', () => setValue(Number(slider.value)));
+  slider.addEventListener('input', () => {
+    const p = Number(slider.value) / STEPS;
+    setValue(p >= 0.995 ? max : toValue(p), true);
+  });
+  size.addEventListener('wheel', (e) => { e.preventDefault(); state.setRaise(e.deltaY < 0 ? 1 : -1); }, { passive: false });
 
-  const seen = new Set();
+  // Поле суммы: вписали — ставка следит за ним, но рамки (мин/макс) — только на выходе из поля.
+  // Только цифры: остальное не печатается вовсе, а вставленное — вычищается.
+  input.addEventListener('beforeinput', (e) => {
+    if (e.data && /\D/.test(e.data) && e.inputType !== 'insertFromPaste') e.preventDefault();
+  });
+  input.addEventListener('input', () => {
+    const digits = input.value.replace(/\D/g, '').slice(0, 9);
+    if (input.value !== digits) input.value = digits;
+    const n = Number(digits);
+    if (n) setValue(n, false, true);
+  });
+  const settle = () => setValue(Number(input.value.replace(/\D/g, '')) || min);
+  input.addEventListener('blur', settle);
+  input.addEventListener('focus', () => { input.value = String(state.raiseValue); input.select(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); settle(); sendRaise(t, state.raiseValue); }
+    if (e.key === 'Escape') { e.preventDefault(); closeRaise(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); state.setRaise(1); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); state.setRaise(-1); }
+  });
+
   for (const [label, target, title] of [
     ['Мин', min, 'Минимальное повышение'],
-    ['½', Math.round(toCall + pot * 0.5), 'Половина банка'],
-    ['¾', Math.round(toCall + pot * 0.75), 'Три четверти банка'],
-    ['Банк', Math.round(toCall + pot), 'Размер банка'],
+    ['½', toCall + pot * 0.5, 'Половина банка'],
+    ['¾', toCall + pot * 0.75, 'Три четверти банка'],
+    ['Банк', toCall + pot, 'Размер банка'],
     ['Олл-ин', max, 'Весь стек'],
   ]) {
-    const value = clamp(target, min, max);
-    if (seen.has(value) && label !== 'Олл-ин') continue;
-    seen.add(value);
-    const b = el('button', 'raise__preset', label);
+    const v = clamp(Math.round(target), min, max);
+    if ([...presets.children].some((b) => Number(b.dataset.value) === v) && label !== 'Олл-ин') continue;
+    const b = el('button', `rbox__preset${label === 'Олл-ин' ? ' rbox__preset--allin' : ''}`);
     b.type = 'button';
-    b.title = `${title}: ${fmt(value)}`;
-    b.addEventListener('click', () => { setValue(value); Sound.play('click'); });
+    b.dataset.value = String(v);
+    b.title = `${title}: ${fmt(v)}`;
+    b.append(el('b', null, label), el('small', null, fmt(v)));
+    b.addEventListener('click', () => { setValue(v); Sound.play('click'); });
     presets.append(b);
   }
 
   submit.addEventListener('click', () => sendRaise(t, state.raiseValue));
-
-  const dial = el('div', 'raise__dial');
-  const value = el('div', 'raise__value');
-  value.append(amount, hint);
-  dial.append(minus, value, plus);
-
-  size.append(head, presets, dial, slider);
+  size.append(head, presets, row);
   paint();
-  // Ползунок сразу под пальцем: стрелки и перетаскивание работают без лишнего клика.
-  requestAnimationFrame(() => slider.focus({ preventScroll: true }));
+  requestAnimationFrame(() => { input.focus({ preventScroll: true }); input.select(); });
+  return { size, submit };
+}
+
+function arcRaiseBox(t, legal) {
+  const { minRaiseTo: min, maxRaiseTo: max, toCall, pot, isBet } = legal;
+  const bb = Math.max(1, t.bb);
+  const span = Math.max(1, max - min);
+  const toValue = (p) => min + span * p * p;
+  const toPos = (v) => Math.sqrt(clamp((v - min) / span, 0, 1));
+  const inBb = (v) => { const x = v / bb; return `${x >= 100 ? Math.round(x) : Math.round(x * 10) / 10} bb`; };
+  state.raiseValue = clamp(state.raiseValue || min, min, max);
+
+  const size = el('div', 'arc');
+  size.style.setProperty('--w', `${ARC_W}px`);
+  size.style.setProperty('--h', `${ARC_H}px`);
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${ARC_W} ${ARC_H}`);
+  svg.setAttribute('class', 'arc__svg');
+  const mk = (cls) => {
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', ARC_PATH);
+    path.setAttribute('class', cls);
+    svg.append(path);
+    return path;
+  };
+  mk('arc__rail');
+  mk('arc__groove');
+  const fill = mk('arc__fill');
+  const hit = mk('arc__hit');   // широкая прозрачная дорожка — ловит палец
+  const len = hit.getTotalLength();
+  fill.setAttribute('stroke-dasharray', `${len} ${len}`);
+  const at = (p) => hit.getPointAtLength(clamp(p, 0, 1) * len);
+  // Точки дуги заранее — для поиска ближайшей к пальцу.
+  const samples = Array.from({ length: 121 }, (_, i) => { const pt = at(i / 120); return [i / 120, pt.x, pt.y]; });
+
+  const knob = (cls, text, p) => {
+    const b = el('button', `arc__knob ${cls}`, text);
+    b.type = 'button';
+    const pt = at(p);
+    b.style.left = `${pt.x}px`;
+    b.style.top = `${pt.y}px`;
+    return b;
+  };
+  const minKnob = knob('arc__knob--min', inBb(min), 0);
+  const maxKnob = knob('arc__knob--max', 'Max', 1);
+  minKnob.title = `Минимум: ${fmt(min)}`;
+  maxKnob.title = `Весь стек — олл-ин: ${fmt(max)}`;
+
+  const thumb = el('span', 'arc__thumb');
+  const along = (p) => ARC_FROM + (ARC_TO - ARC_FROM) * p;   // доля шкалы → место на дуге
+  const readout = el('div', 'arc__readout');
+  const amount = el('b', null);
+  const hint = el('span', null);
+  readout.append(el('small', null, isBet ? 'Бет' : 'Рейз до'), amount, hint);
+
+  const plus = el('button', 'arc__pill arc__pill--plus', '+1 bb');
+  const minus = el('button', 'arc__pill arc__pill--minus', '−1 bb');
+  plus.type = 'button'; minus.type = 'button';
+  plus.title = 'Больше на блайнд (стрелка вверх)';
+  minus.title = 'Меньше на блайнд (стрелка вниз)';
+
+
+  const submit = el('button', 'btn btn--primary btn--act raise__go');
+  const buzz = () => { if (navigator.vibrate) navigator.vibrate(8); };
+
+  // Отметки быстрых ставок на дуге.
+  const ticks = [];
+  for (const [label, target] of [['½', toCall + pot * 0.5], ['¾', toCall + pot * 0.75], ['Банк', toCall + pot]]) {
+    const v = clamp(Math.round(target), min, max);
+    if (v <= min || v >= max || ticks.some((x) => Math.abs(toPos(x.v) - toPos(v)) < 0.09)) continue;
+    const b = knob('arc__tick', label, along(toPos(v)));
+    b.title = `${label === 'Банк' ? 'Размер банка' : `${label} банка`}: ${fmt(v)}`;
+    ticks.push({ b, v });
+  }
+
+  const paint = () => {
+    const v = state.raiseValue;
+    const p = toPos(v);
+    const allIn = v >= max;
+    const pt = at(along(p));
+    thumb.style.left = `${pt.x}px`;
+    thumb.style.top = `${pt.y}px`;
+    fill.setAttribute('stroke-dashoffset', String(len * (1 - along(p))));
+    amount.textContent = fmt(v);
+    const share = pot > 0 ? Math.round(((v - toCall) / pot) * 100) : 0;
+    hint.textContent = allIn ? `олл-ин · ${inBb(v)}` : `${inBb(v)} · ${share}% банка`;
+    minus.disabled = v <= min;
+    plus.disabled = allIn;
+    submit.textContent = allIn ? `Олл-ин ${fmt(v)}` : `${isBet ? 'Бет' : 'Рейз'} ${fmt(v)}`;
+    hotkey(submit, 'R');
+    size.classList.toggle('is-allin', allIn);
+    size.classList.toggle('is-min', v <= min);
+    for (const x of ticks) x.b.classList.toggle('is-on', x.v === v);
+    svg.setAttribute('aria-valuenow', String(v));
+    svg.setAttribute('aria-valuetext', fmt(v));
+  };
+
+  const setValue = (v, snap = false) => {
+    let next = clamp(Math.round(v), min, max);
+    if (snap && next > min && next < max) next = clamp(min + Math.round((next - min) / bb) * bb, min, max);
+    if (next !== state.raiseValue && (next === max || next === min)) buzz();
+    state.raiseValue = next;
+    paint();
+  };
+  state.setRaise = (delta) => setValue(state.raiseValue + delta * bb, true);
+  holdRepeat(plus, () => state.setRaise(1));
+  holdRepeat(minus, () => state.setRaise(-1));
+  minKnob.addEventListener('click', () => { setValue(min); buzz(); });
+  maxKnob.addEventListener('click', () => { setValue(max); Sound.play('click'); });
+  for (const x of ticks) x.b.addEventListener('click', () => { setValue(x.v); Sound.play('click'); buzz(); });
+
+  // Палец по дуге: ищем ближайшую точку дуги к пальцу.
+  const fromPointer = (e) => {
+    const r = svg.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * ARC_W;
+    const y = ((e.clientY - r.top) / r.height) * ARC_H;
+    let best = samples[0];
+    let bestD = Infinity;
+    for (const smp of samples) {
+      const d = (smp[1] - x) ** 2 + (smp[2] - y) ** 2;
+      if (d < bestD) { bestD = d; best = smp; }
+    }
+    const p = clamp((best[0] - ARC_FROM) / (ARC_TO - ARC_FROM), 0, 1);
+    setValue(p >= 0.985 ? max : toValue(p), true);
+  };
+  const grab = (e) => {
+    e.preventDefault();
+    hit.setPointerCapture(e.pointerId);
+    size.classList.add('is-drag');
+    fromPointer(e);
+  };
+  hit.addEventListener('pointerdown', grab);
+  hit.addEventListener('pointermove', (e) => { if (hit.hasPointerCapture(e.pointerId)) fromPointer(e); });
+  const drop = () => size.classList.remove('is-drag');
+  hit.addEventListener('pointerup', drop);
+  hit.addEventListener('pointercancel', drop);
+  svg.addEventListener('wheel', (e) => { e.preventDefault(); state.setRaise(e.deltaY < 0 ? 1 : -1); }, { passive: false });
+
+  svg.setAttribute('role', 'slider');
+  svg.setAttribute('tabindex', '0');
+  svg.setAttribute('aria-label', 'Размер ставки');
+  svg.setAttribute('aria-valuemin', String(min));
+  svg.setAttribute('aria-valuemax', String(max));
+  svg.addEventListener('keydown', (e) => {
+    if (e.key === 'PageUp') { e.preventDefault(); state.setRaise(10); }
+    if (e.key === 'PageDown') { e.preventDefault(); state.setRaise(-10); }
+    if (e.key === 'Home') { e.preventDefault(); setValue(min); }
+    if (e.key === 'End') { e.preventDefault(); setValue(max); }
+  });
+
+  submit.addEventListener('click', () => sendRaise(t, state.raiseValue));
+  size.append(svg, readout, ...ticks.map((x) => x.b), minKnob, maxKnob, thumb, plus, minus);
+  paint();
+  requestAnimationFrame(() => svg.focus({ preventScroll: true }));
   return { size, submit };
 }
 
@@ -3771,8 +3990,7 @@ $('#chat-form').addEventListener('submit', (e) => {
 // ——— горячие клавиши ———
 
 document.addEventListener('keydown', (e) => {
-  // Ползунок рейза — тоже поле ввода, но горячие клавиши стола на нём должны работать.
-  const typing = e.target.tagName === 'INPUT' && !e.target.classList.contains('raise__slider');
+  const typing = e.target.tagName === 'INPUT';
   if (state.view !== 'table' || typing) return;
   if ((e.key === 'e' || e.key === 'у') && state.table && state.table.you) {
     $('#react-toggle').click();
