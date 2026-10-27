@@ -1103,6 +1103,7 @@ async function handleCommand(ctx, body) {
 
   switch (cmd) {
     case 'enterRoom': {
+      session.awayFrom = null;
       const seated = tableOfUser(user.id);
       if (seated) { session.roomId = seated.id; return { ok: true, roomId: seated.id }; }
       const table = tables.get(String(body.roomId));
@@ -1148,9 +1149,14 @@ async function handleCommand(ctx, body) {
     }
     case 'leaveRoom': {
       const table = room();
-      if (table && table.byUser(user.id)) table.leave(user.id);
+      // Из идущего турнира в лобби уходят «отошедшим»: место остаётся за игроком.
+      // Запоминаем это, чтобы поток не вернул его к столу сам (см. pushTo).
+      if (table && table.byUser(user.id)) {
+        table.leave(user.id);
+        if (table.byUser(user.id)) session.awayFrom = table.id;
+      }
       session.roomId = null;
-      return { ok: true };
+      return { ok: true, away: session.awayFrom && tables.get(session.awayFrom) ? { id: session.awayFrom, name: tables.get(session.awayFrom).name } : null };
     }
     case 'sit': {
       const table = room();
@@ -1413,7 +1419,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, {
         user: store.publicUser(ctx.user.id),
         admin: admin.isAdmin(ctx.user),
-        roomId: ctx.session.roomId || (tableOfUser(ctx.user.id) || {}).id || null,
+        roomId: ctx.session.roomId || (ctx.session.awayFrom ? null : (tableOfUser(ctx.user.id) || {}).id) || null,
+        // Ушёл из идущего турнира в лобби — клиент покажет «вернуться к столу».
+        away: (() => {
+          const t = ctx.session.awayFrom && tableOfUser(ctx.user.id);
+          return t && t.id === ctx.session.awayFrom ? { id: t.id, name: t.name } : null;
+        })(),
         leaderboard: store.leaderboard(),
       });
     }
@@ -1738,7 +1749,7 @@ function pushTo(client, force = false) {
     session.roomId = seatedAt.id;
   }
   // Сидит за столом, а сессия о нём не знает (например, после перезапуска сервера) — к столу.
-  if (seatedAt && !session.roomId) session.roomId = seatedAt.id;
+  if (seatedAt && !session.roomId && session.awayFrom !== seatedAt.id) session.roomId = seatedAt.id;
 
   if (session.roomId) {
     const table = tables.get(session.roomId);

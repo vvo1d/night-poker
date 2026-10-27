@@ -54,7 +54,7 @@ function tableRecord(table) {
       humans: tour.humans || 0,
     } : null,
     // Сдавшийся с присуждённым местом — уже не участник, хоть и сидит до конца раздачи.
-    players: table.players().filter((p) => !p.forfeitPlaced).map((p) => ({
+    players: table.players().filter((p) => !p.forfeitPlaced && !p.leftEarly).map((p) => ({
       userId: p.userId,
       name: p.name,
       isBot: p.isBot,

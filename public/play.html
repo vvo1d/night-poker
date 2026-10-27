@@ -99,6 +99,10 @@
   </header>
 
   <p class="announce" id="announce" hidden></p>
+  <div class="away-bar" id="away-bar" hidden>
+    <span id="away-text"></span>
+    <button class="btn btn--primary btn--sm" type="button" id="away-go">Вернуться к столу</button>
+  </div>
   <main class="lobby" id="page-tables">
     <div class="lobby__head">
       <div>
@@ -273,6 +277,11 @@
       </div>
 
       <!-- Реакции: кнопка и выбор эмодзи или фразы -->
+      <!-- Чат на телефоне — круглая кнопка в левом нижнем углу стола (значки — Lucide, ISC) -->
+      <button class="chat-fab" id="chat-fab" type="button" title="Чат стола" aria-label="Чат стола">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+        <span class="chat-badge" id="chat-fab-badge" hidden>0</span>
+      </button>
       <div class="react" id="react" hidden>
         <button class="react__toggle" id="react-toggle" type="button" title="Реакция (E)" aria-label="Реакция" aria-expanded="false">😊</button>
         <div class="react__panel" id="react-panel" hidden>
@@ -296,8 +305,8 @@
       <!-- Кто за столом: играют, смотрят, вылетели -->
       <div class="people" id="people" hidden></div>
       <form class="chat" id="chat-form">
-        <input id="chat-input" maxlength="140" placeholder="Сказать что-нибудь за столом" autocomplete="off">
-        <button class="btn btn--sm" type="submit">Отправить</button>
+        <input id="chat-input" maxlength="140" placeholder="Написать за столом…" autocomplete="off" enterkeyhint="send">
+        <button class="chat__send" type="submit" title="Отправить" aria-label="Отправить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg></button>
       </form>
     </aside>
   </div>

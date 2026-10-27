@@ -285,19 +285,31 @@ class Table {
       if (!p.sittingOut) this.setSittingOut(userId, true);
       return { error: 'Турнир идёт — место сохранится, а раздачи будут пропускаться' };
     }
-    if (p.inHand && !p.folded && this.phase === 'showdown') {
+    // Посреди раздачи игрок уходит сразу: карты в пас, стек — в банк, он свободен
+    // (может сесть за другой стол или на другое место). Стул с его вложенными в банк
+    // фишками остаётся «пустой тенью» до конца раздачи — иначе пересчёт банка разъедется.
+    if (p.inHand && this.phase !== 'idle') {
+      const betting = this.phase !== 'showdown';
+      if (betting && !p.folded) {
+        if (this.actingSeat === p.seat) this.applyAction(p, 'fold');
+        else { p.folded = true; p.lastAction = 'fold'; this.logAction(p, 'fold'); this.afterFoldCheck(); }
+      }
+      if (!this.seats[p.seat] || this.seats[p.seat] !== p) return { ok: true };   // раздача уже доиграна и место убрано
       p.leaving = true;
+      p.leftEarly = true;
+      p.sittingOut = true;
+      this.byUserId.delete(p.userId);
+      this.onUnseat(p, this);
+      // На вскрытии выигрыш ещё не роздан — стек вернётся, когда стул освободится.
+      if (p.folded) {
+        const chips = p.stack + (p.topUp || 0);
+        p.stack = 0;
+        p.topUp = 0;
+        this.onChipsReturn(p, chips);
+      }
       this.note(`${p.name} выходит из-за стола`, 'seat');
       this.touch();
-      return { ok: true, pending: true };
-    }
-    if (p.inHand && !p.folded && this.phase !== 'idle') {
-      p.leaving = true;
-      if (this.actingSeat === p.seat) this.applyAction(p, 'fold');
-      else { p.folded = true; p.lastAction = 'fold'; this.logAction(p, 'fold'); this.afterFoldCheck(); }
-      this.note(`${p.name} выходит из-за стола`, 'seat');
-      this.touch();
-      return { ok: true, pending: true };
+      return { ok: true };
     }
     return this.removePlayer(p);
   }
@@ -306,8 +318,11 @@ class Table {
     const chips = p.stack + (p.topUp || 0);
     p.topUp = 0;
     this.seats[p.seat] = null;
-    this.byUserId.delete(p.userId);
-    this.onUnseat(p, this);
+    // Ушедший посреди раздачи уже освобождён (см. leave) — не трогаем его новую посадку.
+    if (!p.leftEarly) {
+      this.byUserId.delete(p.userId);
+      this.onUnseat(p, this);
+    }
     if (!this.occupied()) this.emptyAt = Date.now();
     this.onChipsReturn(p, chips);
     this.note(`${p.name} покидает стол`, 'seat');

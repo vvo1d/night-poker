@@ -469,3 +469,14 @@ body { background: none; }
   .profile__title h2 { font-size: 21px; }
   .dialog--profile .profile__head { padding-right: 44px; }
 }
+
+/* Шапка профиля: аватар слева, справа имя и статус, кнопки — строкой под ними.
+   Раньше кнопки делили одну строку с именем и сжимали его до нуля. */
+.profile__head { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 18px; row-gap: 12px; align-items: center; }
+.profile__head .avatar { grid-row: 1 / span 2; }
+.profile__title { grid-column: 2; min-width: 0; }
+.profile__actions { grid-column: 2; justify-content: flex-start; }
+@media (max-width: 620px) {
+  .profile__head .avatar { grid-row: 1; }
+  .profile__actions { grid-column: 1 / -1; }
+}

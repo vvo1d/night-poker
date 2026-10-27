@@ -1856,3 +1856,80 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
 }
 #screen-table { overscroll-behavior: none; }
 .arc { touch-action: none; }
+
+/* ——— чат: «пузыри», круглая кнопка отправки ——— */
+.log { gap: 6px; padding: 12px; }
+.log__line { font-size: 12.5px; }
+.log__line--chat {
+  align-self: flex-start; max-width: 86%; display: grid; gap: 1px; padding: 7px 11px 8px;
+  border-radius: 4px 14px 14px 14px; font-size: 14px; color: var(--bone);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.log__line--chat .log__who { font-size: 11.5px; margin: 0; }
+.log__line--chat .log__text { overflow-wrap: anywhere; }
+.log__line--chat.is-mine {
+  align-self: flex-end; border-radius: 14px 4px 14px 14px;
+  color: #fff4d6; background: linear-gradient(180deg, rgba(201, 162, 74, 0.32), rgba(141, 113, 52, 0.28)); border-color: rgba(201, 162, 74, 0.45);
+}
+.log__line--chat.is-mine .log__who { display: none; }
+.log__line--hand {
+  align-self: center; margin: 6px 0 2px; padding: 2px 10px; border: 0; border-radius: 999px;
+  font-size: 11px; color: var(--muted); background: rgba(255, 255, 255, 0.04);
+}
+.chat { flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); }
+.chat input { border-radius: 999px; padding: 10px 14px; font-size: 14px; }
+.chat__send {
+  flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; padding: 0; cursor: pointer;
+  color: #2a1a02; border: 0; background: radial-gradient(circle at 35% 30%, #f6dc8c, #c9a24a 60%, #8a6a26);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+}
+.chat__send svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; margin-left: -2px; }
+.chat__send:active { transform: scale(0.94); }
+
+/* Кнопка чата в углу стола — только на телефоне. */
+.chat-fab { display: none; }
+@media (max-width: 620px) {
+  #toggle-log { display: none; }   /* в шапке стола её место заняла кнопка в углу */
+  .chat-fab {
+    position: absolute; left: 6px; bottom: 6px; z-index: 16; display: grid; place-items: center;
+    width: 40px; height: 40px; border-radius: 50%; padding: 0; cursor: pointer; color: var(--brass);
+    background: rgba(13, 21, 25, 0.92); border: 1px solid var(--line); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+  }
+  .chat-fab svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .chat-fab:active { transform: scale(0.95); }
+  .chat-fab .chat-badge { top: -5px; right: -5px; }
+  body:has(.actions.is-raising) .chat-fab { display: none; }
+
+  /* Чат — шторка снизу на две трети экрана: стол виден сверху, поле ввода под пальцем. */
+  .side {
+    position: fixed; left: 0; right: 0; top: auto; bottom: 0; width: auto; height: min(66vh, 560px); z-index: 50;
+    border: 0; border-top: 1px solid rgba(201, 162, 74, 0.4); border-radius: 20px 20px 0 0;
+    box-shadow: 0 -18px 50px rgba(0, 0, 0, 0.6); animation: sheetUp 220ms cubic-bezier(0.2, 1, 0.3, 1) both;
+  }
+  .side__head { position: relative; padding-top: 18px; }
+  .side__head::before {   /* «ручка» шторки */
+    content: ''; position: absolute; left: 50%; top: 7px; width: 38px; height: 4px; margin-left: -19px;
+    border-radius: 2px; background: rgba(255, 255, 255, 0.18);
+  }
+}
+@keyframes sheetUp { from { transform: translateY(100%); } to { transform: none; } }
+
+/* Системные строки чата — в тон «пузырям»: итог раздачи — карточка по центру
+   с пометкой-фишкой, служебное (сел, вышел, блайнды) — мелкая подпись по центру. */
+.log__line:not(.log__line--chat):not(.log__line--hand) {
+  align-self: center; max-width: 92%; text-align: center; font-size: 12px; color: var(--muted);
+}
+.log__line--result {
+  display: grid; justify-items: center; gap: 5px; padding: 8px 12px 9px; border-radius: 14px;
+  background: rgba(201, 162, 74, 0.06); border: 1px dashed rgba(201, 162, 74, 0.25);
+  color: rgba(223, 231, 230, 0.8) !important;
+}
+.log__line--result .log__cards { justify-content: center; margin-top: 0; }
+
+/* Ушли из идущего турнира в лобби — плашка «вернуться к столу» */
+.away-bar {
+  position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; font-size: 14px; color: var(--bone);
+  background: linear-gradient(90deg, rgba(201, 162, 74, 0.22), rgba(201, 162, 74, 0.1)); border-bottom: 1px solid rgba(201, 162, 74, 0.45);
+}
+.away-bar[hidden] { display: none; }

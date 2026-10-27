@@ -144,6 +144,7 @@ function show(view) {
   $('#screen-auth').hidden = view !== 'auth';
   $('#screen-lobby').hidden = view !== 'lobby';
   $('#screen-table').hidden = view !== 'table';
+  if (view === 'table' && state.awayTable) { state.awayTable = null; paintAway(); }
   if (view !== 'table') { state.snap = null; state.cardValues.clear(); state.logSeen = new Set(); clearUnread(); }
   if (view === 'lobby') showPage(state.page || 'tables');
 }
@@ -1816,7 +1817,24 @@ $('#back-to-lobby').addEventListener('click', async () => {
       : tour.status === 'registering' ? 'Отменить регистрацию? Взнос вернётся в банк.'
         : 'Турнир идёт. Выйти в лобби? Место сохранится, но раздачи будут пропускаться, а блайнды — списываться.';
   if (question && !confirm(question)) return;
-  await cmd({ cmd: 'leaveRoom' });
+  const res = await cmd({ cmd: 'leaveRoom' });
+  // Ушли из идущего турнира — в лобби плашка «вернуться к столу».
+  state.awayTable = res && res.away ? res.away : null;
+  paintAway();
+});
+
+function paintAway() {
+  const bar = $('#away-bar');
+  const away = state.awayTable;
+  bar.hidden = !away;
+  if (!away) return;
+  $('#away-text').textContent = `Вы в турнире «${away.name}» — сейчас раздачи пропускаются`;
+}
+$('#away-go').addEventListener('click', async () => {
+  const away = state.awayTable;
+  if (!away) return;
+  const res = await cmd({ cmd: 'enterRoom', roomId: away.id });
+  if (res.ok) { state.awayTable = null; paintAway(); }
 });
 
 // ——— отрисовка стола ———
@@ -2655,11 +2673,13 @@ function logLine(line) {
   if (kind === 'chat') {
     const split = line.text.indexOf(': ');
     if (split > 0) {
+      // Свои сообщения — справа золотым «пузырём», чужие — слева.
+      if (state.user && line.text.slice(0, split) === state.user.name) node.classList.add('is-mine');
       const who = el('b', 'log__who is-link', line.text.slice(0, split));
       who.title = 'Открыть профиль';
       who.addEventListener('click', () => openProfile(who.textContent));
       node.append(who);
-      node.append(document.createTextNode(line.text.slice(split + 1)));
+      node.append(el('span', 'log__text', line.text.slice(split + 2)));
     } else node.textContent = line.text;
     return node;
   }
@@ -3871,16 +3891,18 @@ $('#buyin-form').addEventListener('submit', (e) => {
 function notifyChat() {
   if (!$('#side').hidden && state.sideTab !== 'people') return;
   state.unread = (state.unread || 0) + 1;
-  const badge = $('#chat-badge');
-  badge.textContent = state.unread > 9 ? '9+' : String(state.unread);
-  badge.hidden = false;
-  retrigger(badge, 'is-bump');
+  for (const badge of [$('#chat-badge'), $('#chat-fab-badge')]) {
+    badge.textContent = state.unread > 9 ? '9+' : String(state.unread);
+    badge.hidden = false;
+    retrigger(badge, 'is-bump');
+  }
   Sound.play('click', { throttle: 400 });
 }
 
 function clearUnread() {
   state.unread = 0;
   $('#chat-badge').hidden = true;
+  $('#chat-fab-badge').hidden = true;
 }
 
 function toggleLog(open) {
@@ -3895,6 +3917,7 @@ function toggleLog(open) {
   }
 }
 $('#toggle-log').addEventListener('click', () => toggleLog());
+$('#chat-fab').addEventListener('click', () => { Sound.play('click'); toggleLog(); });
 
 // ——— кто за столом: играют, смотрят, вылетели ———
 
@@ -4176,7 +4199,9 @@ function telegramSection() {
   if (data.user) {
     setUser(data.user);
     $('#admin-link').hidden = !data.admin;
+    state.awayTable = data.away || null;
     show(data.roomId ? 'table' : 'lobby');
+    paintAway();
     connectStream();
     joinInvite();
     // Открыли игру в Telegram под аккаунтом без привязки — привязываем молча.
