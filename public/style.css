@@ -1189,7 +1189,7 @@ body:has(.actions.is-raising) .react { display: none; }
 /* Сумма — над дугой слева. */
 .arc__readout {
   position: absolute; right: calc(100% - 116px); top: 4px; display: grid; justify-items: end; line-height: 1.1;
-  padding: 7px 11px; border-radius: 12px; pointer-events: none !important; white-space: nowrap;
+  padding: 7px 11px; border-radius: 12px; white-space: nowrap; cursor: pointer; font: inherit; color: inherit;
   background: rgba(10, 14, 16, 0.92); border: 1px solid rgba(201, 162, 74, 0.45); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
 }
 .arc__readout small { font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
@@ -1956,3 +1956,8 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
 .profile__bot { margin: 6px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
 .profile__bot b { color: var(--brass); font-weight: 600; }
 .rating__bot { color: var(--muted) !important; border-color: var(--line) !important; }
+
+.arc__input {
+  width: 96px; padding: 2px 6px; border-radius: 8px; text-align: right; font: inherit; font-size: 20px; font-weight: 700;
+  color: var(--brass); background: rgba(0, 0, 0, 0.45); border: 1px solid var(--brass); outline: none;
+}

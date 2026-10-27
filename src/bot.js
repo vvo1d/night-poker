@@ -225,7 +225,12 @@ function decideBotAction(table, p) {
   const toCall = legal.toCall;
   const pot = Math.max(bb, legal.pot);
   const canRaise = legal.minRaiseTo !== undefined;
-  const raiseTo = (total) => ({ action: 'raise', amount: Math.max(legal.minRaiseTo, Math.min(legal.maxRaiseTo, Math.round(total))) });
+  // Ставки — круглые, как у людей: кратно большому блайнду (минимум и олл-ин — как есть).
+  const raiseTo = (total) => {
+    let amount = total >= legal.maxRaiseTo * 0.95 ? legal.maxRaiseTo : Math.round(total / bb) * bb;
+    amount = Math.max(legal.minRaiseTo, Math.min(legal.maxRaiseTo, amount));
+    return { action: 'raise', amount };
+  };
   const fold = () => (legal.check ? { action: 'check' } : { action: 'fold' });
   const stackBb = (p.stack + p.bet) / bb;
   const pos = positionOf(table, p);

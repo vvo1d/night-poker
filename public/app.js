@@ -762,7 +762,7 @@ async function fillInviteFriends(t) {
       if (!res.ok) return;
       btn.textContent = 'Позвали ✓';
       btn.disabled = true;
-      toast(res.online ? `${f.name} получил приглашение` : `${f.name} не в сети — напомнили в Telegram, если он его привязал`, { info: true });
+      toast(res.note || (res.online ? `${f.name} получил приглашение` : `${f.name} не в сети — напомнили в Telegram, если он его привязал`), { info: true });
     });
     li.append(who, status, btn);
     list.append(li);
@@ -3727,10 +3727,32 @@ function arcRaiseBox(t, legal) {
 
   const thumb = el('span', 'arc__thumb');
   const along = (p) => ARC_FROM + (ARC_TO - ARC_FROM) * p;   // доля шкалы → место на дуге
-  const readout = el('div', 'arc__readout');
+  // Сумма — кнопка: нажали — можно вписать точное число с клавиатуры телефона.
+  const readout = el('button', 'arc__readout');
+  readout.type = 'button';
+  readout.title = 'Вписать сумму';
   const amount = el('b', null);
   const hint = el('span', null);
-  readout.append(el('small', null, isBet ? 'Бет' : 'Рейз до'), amount, hint);
+  readout.append(el('small', null, `${isBet ? 'Бет' : 'Рейз до'} ✎`), amount, hint);
+  readout.addEventListener('click', () => {
+    if (readout.querySelector('input')) return;
+    const input = document.createElement('input');
+    input.className = 'arc__input';
+    input.inputMode = 'numeric';
+    input.enterKeyHint = 'done';
+    input.value = String(state.raiseValue);
+    amount.replaceWith(input);
+    input.focus();
+    input.select();
+    input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, 9); });
+    const done = () => {
+      const n = Number(input.value) || min;
+      input.replaceWith(amount);
+      setValue(n);   // точная сумма: без округления до блайнда
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
+    input.addEventListener('blur', done, { once: true });
+  });
 
   const plus = el('button', 'arc__pill arc__pill--plus', '+1 bb');
   const minus = el('button', 'arc__pill arc__pill--minus', '−1 bb');
