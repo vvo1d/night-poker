@@ -147,7 +147,32 @@ function show(view) {
   if (view === 'table' && state.awayTable) { state.awayTable = null; paintAway(); }
   if (view !== 'table') { state.snap = null; state.cardValues.clear(); state.logSeen = new Set(); clearUnread(); }
   if (view === 'lobby') showPage(state.page || 'tables');
+  keepAwake(view === 'table');
 }
+
+// За столом экран телефона не гаснет — как при просмотре видео (Screen Wake Lock).
+// Браузер снимает запрет, когда вкладка уходит в фон, — при возврате берём снова.
+// Где API нет (старые iOS до 16.4), экран гаснет по настройкам телефона.
+let wakeLock = null;
+let wakeWanted = false;
+async function keepAwake(on) {
+  wakeWanted = on;
+  if (!('wakeLock' in navigator)) return;
+  if (!on) {
+    if (wakeLock) wakeLock.release().catch(() => {});
+    wakeLock = null;
+    return;
+  }
+  if (wakeLock || document.visibilityState !== 'visible') return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+    if (!wakeWanted) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  } catch { wakeLock = null; /* например, режим энергосбережения — не мешаем игре */ }
+}
+document.addEventListener('visibilitychange', () => { if (wakeWanted) keepAwake(true); });
+// Safari иногда даёт запрет только после касания — пробуем снова при первом нажатии.
+document.addEventListener('pointerdown', () => { if (wakeWanted && !wakeLock) keepAwake(true); }, { passive: true });
 
 function setUser(user) {
   const before = state.user ? state.user.chips : null;
@@ -2534,15 +2559,12 @@ function renderBets(t, hero) {
       left: f.left - feltBox.left, right: f.right - feltBox.left,
       top: f.top - feltBox.top, bottom: f.bottom - feltBox.top,
     };
+    // Место карт — по их ряду, а не по самим картам: в начале раздачи карты ещё
+    // летят из центра стола, и ставки блайндов вставали посреди сукна.
     const cardsNode = seatNodes[i].querySelector('.seat__cards');
-    const c = cardsNode && cardsNode.childElementCount
-      ? [...cardsNode.children].reduce((box, card) => {
-        const cr = card.getBoundingClientRect();
-        return {
-          left: Math.min(box.left, cr.left - feltBox.left), right: Math.max(box.right, cr.right - feltBox.left),
-          top: Math.min(box.top, cr.top - feltBox.top), bottom: Math.max(box.bottom, cr.bottom - feltBox.top),
-        };
-      }, { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity })
+    const cr = cardsNode && cardsNode.childElementCount ? cardsNode.getBoundingClientRect() : null;
+    const c = cr && cr.width
+      ? { left: cr.left - feltBox.left, right: cr.right - feltBox.left, top: cr.top - feltBox.top, bottom: cr.bottom - feltBox.top }
       : null;
     const spot = betSpot(seatBox, core, feltBox, half, face);
     spots.push({ i, bet, x: spot.x, y: spot.y, w: bet.offsetWidth / 2, h: bet.offsetHeight / 2, face, cards: c, seat: seatBox });
