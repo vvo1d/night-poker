@@ -1312,7 +1312,7 @@ function seasonCard(season, { own = true } = {}) {
   const next = season.next;
   const bar = el('div', 'season__bar');
   const fill = el('i');
-  const from = LEAGUE_MIN[season.league.id] || 0;
+  const from = season.league.min || 0;
   fill.style.width = next ? `${Math.min(100, ((season.points - from) / (next.min - from)) * 100)}%` : '100%';
   bar.append(fill);
   card.append(bar);
@@ -1325,7 +1325,6 @@ function seasonCard(season, { own = true } = {}) {
   }
   return card;
 }
-const LEAGUE_MIN = { bronze: 0, silver: 100, gold: 300, platinum: 700, diamond: 1500 };
 
 function renderRating(data) {
   const box = $('#rating');

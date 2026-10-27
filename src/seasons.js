@@ -7,13 +7,24 @@
 
 const { dayKey } = require('./daily');
 
+// С ноября 2026 лиги втрое дороже: «Бриллиант» — для тех, кто играет почти каждый день
+// и берёт турниры. Октябрьский сезон доигрывается по прежним порогам.
 const LEAGUES = [
+  { id: 'bronze', name: 'Бронза', min: 0, reward: 0 },
+  { id: 'silver', name: 'Серебро', min: 300, reward: 2000 },
+  { id: 'gold', name: 'Золото', min: 900, reward: 5000 },
+  { id: 'platinum', name: 'Платина', min: 2000, reward: 12000 },
+  { id: 'diamond', name: 'Бриллиант', min: 4000, reward: 30000 },
+];
+const OLD_LEAGUES = [
   { id: 'bronze', name: 'Бронза', min: 0, reward: 0 },
   { id: 'silver', name: 'Серебро', min: 100, reward: 2000 },
   { id: 'gold', name: 'Золото', min: 300, reward: 5000 },
   { id: 'platinum', name: 'Платина', min: 700, reward: 10000 },
   { id: 'diamond', name: 'Бриллиант', min: 1500, reward: 25000 },
 ];
+const NEW_LEAGUES_FROM = '2026-11';
+const leaguesFor = (key) => (key < NEW_LEAGUES_FROM ? OLD_LEAGUES : LEAGUES);
 
 // За что дают очки.
 const POINTS = {
@@ -40,9 +51,10 @@ function seasonEnds(key) {
   return Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1) - 3 * 3600 * 1000;
 }
 
-function leagueOf(points) {
-  let league = LEAGUES[0];
-  for (const l of LEAGUES) if (points >= l.min) league = l;
+function leagueOf(points, key = seasonKey()) {
+  const list = leaguesFor(key);
+  let league = list[0];
+  for (const l of list) if (points >= l.min) league = l;
   return league;
 }
 
@@ -61,7 +73,7 @@ function ensure(user, now = Date.now()) {
 
 function finish(user, season) {
   if (!season.points) return null;
-  const league = leagueOf(season.points);
+  const league = leagueOf(season.points, season.key);
   const result = { key: season.key, name: seasonName(season.key), points: season.points, league: league.id, reward: league.reward };
   user.meta.seasons = [...(user.meta.seasons || []), result].slice(-24);
   return result;
@@ -91,17 +103,18 @@ function sngPoints(place, humans, seats) {
 function view(user, now = Date.now()) {
   const key = seasonKey(now);
   const s = user.meta.season && user.meta.season.key === key ? user.meta.season : { points: 0 };
-  const league = leagueOf(s.points);
-  const next = LEAGUES[LEAGUES.indexOf(league) + 1] || null;
+  const list = leaguesFor(key);
+  const league = leagueOf(s.points, key);
+  const next = list[list.indexOf(league) + 1] || null;
   return {
     key,
     name: seasonName(key),
     endsAt: seasonEnds(key),
     points: s.points,
-    league: { id: league.id, name: league.name, reward: league.reward },
+    league: { id: league.id, name: league.name, reward: league.reward, min: league.min },
     next: next ? { id: next.id, name: next.name, min: next.min, reward: next.reward } : null,
     history: (user.meta.seasons || []).slice(-6).reverse(),
   };
 }
 
-module.exports = { LEAGUES, POINTS, HAND_CAP, seasonKey, seasonName, seasonEnds, leagueOf, ensure, add, sngPoints, view };
+module.exports = { LEAGUES, leaguesFor, POINTS, HAND_CAP, seasonKey, seasonName, seasonEnds, leagueOf, ensure, add, sngPoints, view };

@@ -132,6 +132,12 @@ class Store {
     user.stats.peakChips = Math.max(user.stats.peakChips, user.chips);
     user.meta = user.meta || {};
     if (!Array.isArray(user.meta.days)) user.meta.days = [];
+    // Кривая уровней стала круче: опыт переводится один раз, уровень у игрока остаётся прежним.
+    if (user.meta.xpCurve !== levels.CURVE) {
+      if (user.meta.xp) user.meta.xp = levels.convertXp(user.meta.xp);
+      user.meta.xpCurve = levels.CURVE;
+      if (user.id) this.dirtyUsers.add(user.id);
+    }
     return user;
   }
 
@@ -523,16 +529,23 @@ class Store {
     }
     if (r.cash) s.cashNet += r.won - r.contributed;
 
-    // Задания дня.
+    // Задания дня и недели.
     this.track(u, 'hand');
+    if (r.cash) this.track(u, 'cashHand');
     if (gain > 0) {
       this.addXp(u, levels.XP.win);
       this.track(u, 'win');
       if (r.showdown) this.track(u, 'showdownWin');
+      else this.track(u, 'quietWin');                    // все сбросили — банк без вскрытия
       if (r.allIn) this.track(u, 'allInWin');
+      if (r.withHuman) this.track(u, 'humanWin');
       if (r.bb && r.won >= r.bb * 20) this.track(u, 'bigPot');
+      if (r.bb && r.won >= r.bb * 50) this.track(u, 'hugePot');
+      if (r.bb && r.cash) this.track(u, 'bbWon', Math.floor(gain / r.bb));   // чистый выигрыш в больших блайндах
     }
     if (r.result && category(r.result.value) >= 4) this.track(u, 'straightPlus');
+    if (r.result && category(r.result.value) >= 5) this.track(u, 'flushPlus');
+    if (r.result && category(r.result.value) >= 6) this.track(u, 'fullHousePlus');
     if (r.withFriend) this.track(u, 'friendHand');
 
     // Очки сезона: за раздачу и за банк, выигранный у человека.
@@ -550,7 +563,7 @@ class Store {
     const s = u.stats;
     if (start) { s.sngPlayed += 1; this.track(u, 'sngPlay'); this.addXp(u, levels.XP.tour); }
     if (prize > 0) { s.sngCashes += 1; s.sngPrizes += prize; this.track(u, 'sngCash'); this.addXp(u, levels.XP.tourCash); }
-    if (place === 1) s.sngWins += 1;
+    if (place === 1) { s.sngWins += 1; this.track(u, 'tourWin'); }
     if (place) this.seasonPoints(u, 'sng', seasons.sngPoints(place, humans, seats));
     this.checkAchievements(u);
     this.touch(u);
@@ -588,20 +601,22 @@ class Store {
     if (start) {
       s.mttPlayed += 1;
       this.track(u, 'sngPlay');
+      this.track(u, 'mttPlay');
       this.addXp(u, levels.XP.tour);
       this.seasonPoints(u, 'mtt', 5);
     }
     if (prize > 0) { s.mttCashes += 1; s.mttPrizes += prize; this.track(u, 'sngCash'); this.addXp(u, levels.XP.tourCash); }
-    if (place === 1) s.mttWins += 1;
+    if (place === 1) { s.mttWins += 1; this.track(u, 'tourWin'); }
     if (place) this.seasonPoints(u, 'mtt', place === 1 ? 60 : prize > 0 ? 25 : 0);
     this.checkAchievements(u);
     this.touch(u);
   }
 
   // Игровое событие двигает задания дня и недели разом.
-  track(u, event) {
-    daily.progress(u, event);
-    weekly.progress(u, event);
+  track(u, event, amount = 1) {
+    if (amount <= 0) return;
+    daily.progress(u, event, amount);
+    weekly.progress(u, event, amount);
   }
 
   // ——— история раздач ———
@@ -746,7 +761,7 @@ class Store {
 
   seasonReward(u, result) {
     if (result.reward > 0) this.addChips(u.id, result.reward, 'Награда за сезон');
-    const league = seasons.LEAGUES.find((l) => l.id === result.league);
+    const league = seasons.leaguesFor(result.key).find((l) => l.id === result.league);
     this.news.set(u.id, {
       id: `season-${result.key}`, icon: '🏆', title: `Сезон «${result.name}» — ${league.name}`,
       tierName: result.reward ? `награда ${result.reward}` : 'спасибо за игру', at: Date.now(),

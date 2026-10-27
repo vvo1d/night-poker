@@ -9,20 +9,27 @@ const DAY_MS = 24 * 3600 * 1000;
 // Бонус за 1-й, 2-й … 7-й день подряд; дальше — как за седьмой.
 const BONUS = [500, 750, 1000, 1500, 2000, 2500, 3000];
 
-// Задания. event — что их двигает (см. progress), goal — сколько нужно.
+// Задания. event — что их двигает (см. progress и store.recordHand), goal — сколько нужно.
+// Каждое — на полчаса–час игры: в одну-две раздачи задание дня не закрывается.
 const QUESTS = [
-  { id: 'hands', event: 'hand', goal: 20, reward: 500, title: 'Сыграйте 20 раздач' },
-  { id: 'wins', event: 'win', goal: 5, reward: 700, title: 'Выиграйте 5 раздач' },
-  { id: 'showdowns', event: 'showdownWin', goal: 3, reward: 600, title: 'Выиграйте 3 вскрытия' },
-  { id: 'bigpot', event: 'bigPot', goal: 1, reward: 700, title: 'Заберите банк от 20 больших блайндов' },
-  { id: 'allin', event: 'allInWin', goal: 1, reward: 800, title: 'Выиграйте банк в олл-ине' },
-  { id: 'combo', event: 'straightPlus', goal: 1, reward: 800, title: 'Соберите на вскрытии стрит или сильнее' },
-  { id: 'friend', event: 'friendHand', goal: 10, reward: 1000, title: 'Сыграйте 10 раздач за одним столом с другом' },
-  { id: 'sng', event: 'sngPlay', goal: 1, reward: 1000, title: 'Сыграйте sit-n-go' },
-  { id: 'sngcash', event: 'sngCash', goal: 1, reward: 1500, title: 'Займите призовое место в sit-n-go' },
+  { id: 'hands', event: 'hand', goal: 60, reward: 800, title: 'Сыграйте 60 раздач' },
+  { id: 'wins', event: 'win', goal: 15, reward: 900, title: 'Выиграйте 15 раздач' },
+  { id: 'showdowns', event: 'showdownWin', goal: 8, reward: 900, title: 'Выиграйте 8 вскрытий' },
+  { id: 'bigpot', event: 'bigPot', goal: 3, reward: 1000, title: 'Заберите 3 банка от 20 больших блайндов' },
+  { id: 'allin', event: 'allInWin', goal: 2, reward: 1000, title: 'Выиграйте 2 банка в олл-ине' },
+  { id: 'combo', event: 'straightPlus', goal: 3, reward: 1000, title: 'Соберите на вскрытии 3 раза стрит или сильнее' },
+  { id: 'friend', event: 'friendHand', goal: 30, reward: 1500, title: 'Сыграйте 30 раздач за одним столом с другом' },
+  { id: 'sng', event: 'sngPlay', goal: 2, reward: 1200, title: 'Сыграйте 2 турнира' },
+  { id: 'sngcash', event: 'sngCash', goal: 1, reward: 1500, title: 'Займите призовое место в турнире' },
+  // Новые
+  { id: 'quiet', event: 'quietWin', goal: 10, reward: 900, title: 'Заберите 10 банков без вскрытия — все сбросили' },
+  { id: 'humans', event: 'humanWin', goal: 6, reward: 1200, title: 'Выиграйте 6 банков у живых соперников' },
+  { id: 'flush', event: 'flushPlus', goal: 1, reward: 1000, title: 'Соберите на вскрытии флеш или сильнее' },
+  { id: 'bbwon', event: 'bbWon', goal: 60, reward: 1200, title: 'Выиграйте за кэш-столами 60 больших блайндов чистыми' },
+  { id: 'cash', event: 'cashHand', goal: 50, reward: 800, title: 'Сыграйте 50 раздач за кэш-столами' },
 ];
 const BY_ID = new Map(QUESTS.map((q) => [q.id, q]));
-const EASY = ['hands', 'wins'];        // одно лёгкое задание есть всегда
+const EASY = ['hands', 'wins', 'cash'];   // одно задание «на объём» есть всегда
 
 function dayKey(now = Date.now()) {
   return new Date(now + DAY_OFFSET).toISOString().slice(0, 10);

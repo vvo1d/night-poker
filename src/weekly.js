@@ -9,17 +9,25 @@ const { dayKey } = require('./daily');
 const DAY_MS = 24 * 3600 * 1000;
 const DAY_OFFSET = 3 * 3600 * 1000;
 
+// Неделя рассчитана на игру в 4–5 дней из семи, а не на один вечер.
 const QUESTS = [
-  { id: 'hands', event: 'hand', goal: 150, reward: 2000, title: 'Сыграйте 150 раздач' },
-  { id: 'wins', event: 'win', goal: 30, reward: 2000, title: 'Выиграйте 30 раздач' },
-  { id: 'daily', event: 'dailyDone', goal: 7, reward: 3000, title: 'Выполните 7 заданий дня' },
-  { id: 'tours', event: 'sngPlay', goal: 5, reward: 2500, title: 'Сыграйте 5 турниров' },
-  { id: 'showdowns', event: 'showdownWin', goal: 15, reward: 2000, title: 'Выиграйте 15 вскрытий' },
-  { id: 'bigpots', event: 'bigPot', goal: 5, reward: 2500, title: 'Заберите 5 банков от 20 больших блайндов' },
-  { id: 'cash', event: 'sngCash', goal: 2, reward: 3000, title: 'Дважды займите призовое место в турнире' },
+  { id: 'hands', event: 'hand', goal: 400, reward: 3000, title: 'Сыграйте 400 раздач' },
+  { id: 'wins', event: 'win', goal: 80, reward: 3000, title: 'Выиграйте 80 раздач' },
+  { id: 'daily', event: 'dailyDone', goal: 12, reward: 4000, title: 'Выполните 12 заданий дня' },
+  { id: 'tours', event: 'sngPlay', goal: 10, reward: 3500, title: 'Сыграйте 10 турниров' },
+  { id: 'showdowns', event: 'showdownWin', goal: 35, reward: 3000, title: 'Выиграйте 35 вскрытий' },
+  { id: 'bigpots', event: 'bigPot', goal: 12, reward: 3500, title: 'Заберите 12 банков от 20 больших блайндов' },
+  { id: 'cash', event: 'sngCash', goal: 4, reward: 4000, title: 'Займите призовое место в 4 турнирах' },
+  // Новые
+  { id: 'tourwin', event: 'tourWin', goal: 1, reward: 5000, title: 'Выиграйте турнир — первое место' },
+  { id: 'mtt', event: 'mttPlay', goal: 2, reward: 3500, title: 'Сыграйте 2 турнира по расписанию' },
+  { id: 'fullhouse', event: 'fullHousePlus', goal: 2, reward: 3500, title: 'Соберите на вскрытии 2 раза фулл-хаус или сильнее' },
+  { id: 'hugepots', event: 'hugePot', goal: 3, reward: 4000, title: 'Заберите 3 банка от 50 больших блайндов' },
+  { id: 'humans', event: 'humanWin', goal: 30, reward: 4000, title: 'Выиграйте 30 банков у живых соперников' },
+  { id: 'bbwon', event: 'bbWon', goal: 300, reward: 4500, title: 'Выиграйте за кэш-столами 300 больших блайндов чистыми' },
 ];
 const BY_ID = new Map(QUESTS.map((q) => [q.id, q]));
-const CHEST = 5000;      // сундук за все четыре задания недели
+const CHEST = 8000;      // сундук за все четыре задания недели
 
 // Понедельник текущей недели по Москве — ключ недели.
 function weekKey(now = Date.now()) {
