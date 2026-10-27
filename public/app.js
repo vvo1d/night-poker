@@ -3954,6 +3954,17 @@ function toggleLog(open) {
 $('#toggle-log').addEventListener('click', () => toggleLog());
 $('#chat-fab').addEventListener('click', () => { Sound.play('click'); toggleLog(); });
 
+// Клик мимо чата закрывает его: на телефоне — любое касание вне шторки,
+// на компьютере — клик по столу (кнопки хода и шапка чат не трогают).
+document.addEventListener('pointerdown', (e) => {
+  const side = $('#side');
+  if (side.hidden || state.view !== 'table') return;
+  if (e.target.closest('#side, #chat-fab, #toggle-log, dialog')) return;
+  const phone = window.matchMedia('(max-width: 620px)').matches;
+  if (!phone && !e.target.closest('.table-wrap')) return;
+  toggleLog(false);
+});
+
 // ——— кто за столом: играют, смотрят, вылетели ———
 
 function setSideTab(tab) {
