@@ -1072,6 +1072,7 @@ function ratingRow(r, col) {
   who.append(avatarEl(r.name, r.avatar, 'avatar--xs'));
   who.append(document.createTextNode(r.name));
   if (r.you) who.append(el('span', 'rating__you', 'вы'));
+  if (r.bot) who.append(el('span', 'rating__you rating__bot', 'бот'));
   row.append(who);
   row.append(el('span', 'rating__hands', `${fmt(r.hands)} ${plural(r.hands, 'раздача', 'раздачи', 'раздач')}`));
   row.append(el('span', 'rating__ach', `★ ${r.achievements}`));
@@ -1521,6 +1522,12 @@ function renderProfile(box, data) {
   const sub = el('p', `profile__sub${data.online ? ' is-online' : ''}`,
     `${data.online ? 'онлайн' : 'не в сети'}${where} · в игре с ${DATE_FMT.format(new Date(data.createdAt))}`);
   title.append(sub);
+  // Бот-резидент: уровень, характер и пометка, что это не настоящий человек.
+  if (data.bot) {
+    const note = el('p', 'profile__bot');
+    note.append(el('b', null, `Бот · ${BOT_LEVEL_NAME[data.bot.level] || ''}`), document.createTextNode(` — ${data.bot.bio}. ${data.bot.disclaimer}`));
+    title.append(note);
+  }
   head.append(title);
 
   const actions = el('div', 'profile__actions');
@@ -2093,21 +2100,27 @@ function renderTable(t) {
       name.prepend(lvl);
     }
     // Квадрат с фото (или первой буквой) между именем и фишками; у людей — открывает профиль.
-    const face = el(seat.isBot ? 'span' : 'button', `seat__face${seat.isBot ? ' seat__face--bot' : ''}`);
-    if (seat.avatar) {
+    const face = el(seat.isBot && !seat.resident ? 'span' : 'button', `seat__face${seat.isBot ? ' seat__face--bot' : ''}`);
+    if (seat.isBot && seat.botLevel) {
+      botAvatar(face, seat);
+    } else if (seat.avatar) {
       const img = document.createElement('img');
       img.src = seat.avatar;
       img.alt = '';
       img.decoding = 'async';
       face.append(img);
-    } else if (seat.isBot && seat.botLevel) {
-      botAvatar(face, seat);
     } else {
       face.textContent = seat.name.slice(0, 1).toUpperCase();
     }
     if (seat.isBot) {
       // Бот: подсказка, что это не настоящий игрок, даже если у него известное имя.
       name.title = `${seat.name} — бот. ${(state.config && state.config.botDisclaimer) || ''}`;
+      if (seat.resident) {   // у резидента есть профиль — открывается, как у людей
+        face.type = 'button';
+        face.addEventListener('click', () => openProfile(seat.name));
+        name.classList.add('is-link');
+        name.addEventListener('click', () => openProfile(seat.name));
+      }
     } else {
       face.type = 'button';
       face.title = `Профиль ${seat.name}`;

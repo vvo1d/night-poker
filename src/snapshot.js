@@ -58,6 +58,8 @@ function tableRecord(table) {
       userId: p.userId,
       name: p.name,
       isBot: p.isBot,
+      resident: !!p.resident,
+      botStyle: p.botStyle || null,
       seat: p.seat,
       sittingOut: !!p.sittingOut,
       chips: p.stack + (p.topUp || 0) + (live ? p.contributed : 0),
@@ -69,7 +71,8 @@ function tableRecord(table) {
 // перезапуск сервера или администратор закрыл стол.
 function refunds(rec) {
   const out = [];
-  const humans = rec.players.filter((p) => !p.isBot);
+  // Фишки возвращаем людям и ботам-резидентам — у них свой банк.
+  const humans = rec.players.filter((p) => !p.isBot || p.resident);
   const sng = rec.sng;
   if (!sng) {
     // Кэш: стек плюс вложенное в недоигранную раздачу.

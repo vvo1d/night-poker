@@ -410,3 +410,5 @@ a { color: var(--brass); }
   .nav.is-open .nav__links { animation: none; }
   .nav__burger span { transition: none; }
 }
+
+.pp-bot { margin: 6px 0 0; font-size: 13px; color: var(--muted, #8fa3a3); max-width: 60ch; }

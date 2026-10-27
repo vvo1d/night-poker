@@ -1951,3 +1951,8 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
   box-shadow: 0 0 0 2px var(--bot-ring), 0 0 16px rgba(246, 220, 140, 0.45), 0 6px 16px rgba(0, 0, 0, 0.55);
 }
 .seat--folded .seat__face--bot[data-lvl] { filter: grayscale(0.7); }
+
+/* Бот-резидент: пометка в профиле и рейтинге */
+.profile__bot { margin: 6px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.profile__bot b { color: var(--brass); font-weight: 600; }
+.rating__bot { color: var(--muted) !important; border-color: var(--line) !important; }

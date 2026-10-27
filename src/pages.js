@@ -85,6 +85,7 @@ function profilePage(user, origin, avatar = null) {
       : escapeHtml(user.name.slice(0, 1).toUpperCase())}</div>
     <div>
       <h1>${escapeHtml(user.name)}</h1>
+      ${user.meta && user.meta.bot ? `<p class="pp-bot">Бот THPoker${user.meta.bot.bio ? ` — ${escapeHtml(user.meta.bot.bio)}` : ''}. Боты носят имена известных игроков в покер как дань уважения; они не связаны с этими людьми и не повторяют их реальную игру.</p>` : ''}
       <p class="pp-sub"><i class="pp-league pp-league--${season.league.id}"></i>Лига «${season.league.name}» · ${fmt(season.points)} очк. в сезоне «${escapeHtml(season.name)}» · в игре с ${since}</p>
     </div>
   </section>

@@ -49,12 +49,37 @@ const CHARACTERS = [
   { name: 'Федор Хольц', style: 'pro', bio: 'Сбалансирован — его не прочитать' },
   { name: 'Джастин Бономо', style: 'pro', bio: 'Точен в каждом решении' },
 ];
+// Резиденты — боты, которые живут как обычные игроки: ник, банк, профиль, рейтинг.
+// Ключ (key) постоянный — по нему аккаунт находится, даже если ник поменяли.
+const RESIDENTS = [
+  { key: 'r01', name: 'Алексей_М', style: 'novice' },
+  { key: 'r02', name: 'katya_k', style: 'novice' },
+  { key: 'r03', name: 'Dimon77', style: 'novice' },
+  { key: 'r04', name: 'Ирина', style: 'novice' },
+  { key: 'r05', name: 'olegb', style: 'amateur' },
+  { key: 'r06', name: 'Тимур', style: 'amateur' },
+  { key: 'r07', name: 'NataliaS', style: 'amateur' },
+  { key: 'r08', name: 'vlad1990', style: 'amateur' },
+  { key: 'r09', name: 'Андрей Н', style: 'amateur' },
+  { key: 'r10', name: 'MaxRiver', style: 'regular' },
+  { key: 'r11', name: 'lena_p', style: 'regular' },
+  { key: 'r12', name: 'Денис', style: 'regular' },
+  { key: 'r13', name: 'AceHunter', style: 'shark' },
+  { key: 'r14', name: 'Марина', style: 'shark' },
+  { key: 'r15', name: 'kostya_nsk', style: 'shark' },
+  { key: 'r16', name: 'Сергей К', style: 'shark' },
+  { key: 'r17', name: 'Pavel_V', style: 'pro' },
+  { key: 'r18', name: 'Grinder', style: 'pro' },
+  { key: 'r19', name: 'Ольга', style: 'pro' },
+];
+
 const BOT_DISCLAIMER = 'Боты носят имена известных игроков в покер как дань уважения. Они не связаны с этими людьми и не повторяют их реальную игру.';
 const BOT_NAMES = CHARACTERS.map((c) => c.name);
 const BY_NAME = new Map(CHARACTERS.map((c) => [c.name, c]));
 
 // Уровень бота: задан при посадке или — по имени персонажа (у ботов турнира по расписанию имя «Имя-12»).
 function botLevel(p) {
+  if (p.botStyle) return p.botStyle;
   const c = BY_NAME.get(String(p.name).replace(/-\d+$/, ''));
   return p.botStyle || (c && c.style) || 'amateur';
 }
@@ -291,4 +316,4 @@ function decideBotAction(table, p) {
   }
 }
 
-module.exports = { decideBotAction, botThinkingTime, botLevel, BOT_NAMES, CHARACTERS, BOT_DISCLAIMER, STYLES, equity, holePercent };
+module.exports = { decideBotAction, botThinkingTime, botLevel, BOT_NAMES, CHARACTERS, RESIDENTS, BOT_DISCLAIMER, STYLES, equity, holePercent };

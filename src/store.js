@@ -775,6 +775,15 @@ class Store {
     if (!o) return { error: 'Игрока с таким именем нет' };
     if (o.id === userId) return { error: 'Себя в друзья не добавить' };
     if (u.friends.includes(o.id)) return { ok: true, status: 'friend' };
+    // Резиденты принимают заявку сразу.
+    if (this.isBotUser(o) && !this.isBotUser(u)) {
+      if (u.friends.length >= FRIENDS_MAX || o.friends.length >= FRIENDS_MAX) return { error: `В друзьях может быть до ${FRIENDS_MAX} игроков` };
+      u.friends.push(o.id);
+      if (!o.friends.includes(u.id)) o.friends.push(u.id);
+      this.checkAchievements(u);
+      this.touch(u); this.touch(o);
+      return { ok: true, status: 'friend' };
+    }
     if (u.friendsIn.includes(o.id)) return this.acceptFriend(userId, o.name);
     if (u.friendsOut.includes(o.id)) return { ok: true, status: 'out' };
     if (u.friends.length >= FRIENDS_MAX) return { error: `В друзьях может быть до ${FRIENDS_MAX} игроков` };
@@ -904,6 +913,36 @@ class Store {
     this.addChips(userId, RELOAD_CHIPS, 'Бесплатное пополнение');
     return { ok: true, chips: u.chips };
   }
+
+  // ——— боты-резиденты ———
+  // Резиденты живут как обычные игроки: аккаунт без пароля (войти нельзя), банк,
+  // статистика, профиль, рейтинг. Находятся по постоянному ключу — ник можно сменить.
+  ensureResident(r, bankroll) {
+    let user = [...this.users.values()].find((u) => u.meta && u.meta.resident === r.key);
+    if (user) {
+      if (user.name !== r.name && !this.byName.has(r.name.toLowerCase())) {
+        this.byName.delete(user.name.toLowerCase());
+        user.name = r.name;
+        this.byName.set(user.name.toLowerCase(), user.id);
+      }
+      user.meta.residentStyle = r.style;
+      this.touch(user);
+      return user;
+    }
+    if (this.byName.has(r.name.toLowerCase())) return null;   // ник уже занят живым игроком
+    user = {
+      id: crypto.randomUUID(), name: r.name, salt: '', hash: '',
+      chips: bankroll, handsPlayed: 0, createdAt: Date.now() - Math.floor(Math.random() * 60) * 86_400_000,
+      meta: { source: 'direct', resident: r.key, residentStyle: r.style },
+    };
+    this.prepare(user);
+    this.users.set(user.id, user);
+    this.byName.set(user.name.toLowerCase(), user.id);
+    this.touch(user);
+    return user;
+  }
+
+  isBotUser(u) { return !!(u && u.meta && u.meta.resident); }
 
   // Адрес аватара: версия в адресе сбрасывает кэш браузера после замены.
   avatarUrl(u) {

@@ -190,6 +190,7 @@ class Table {
       return { error: `Закупка от ${this.minBuyIn} до ${this.maxBuyIn} фишек` };
     }
     const p = new Player({ userId: user.id, name: user.name, isBot: !!user.isBot, stack: buyIn, seat });
+    if (user.resident) { p.resident = true; p.botStyle = user.botStyle; }   // бот-резидент: свой банк и профиль
     this.seats[seat] = p;
     this.byUserId.set(p.userId, p);
     this.emptyAt = 0;
@@ -205,6 +206,7 @@ class Table {
   restoreSeat(user, seat, stack, sittingOut = false) {
     if (seat < 0 || seat >= this.maxSeats || this.seats[seat] || this.byUser(user.id)) return { error: 'Место занято' };
     const p = new Player({ userId: user.id, name: user.name, isBot: !!user.isBot, stack, seat });
+    if (user.resident) { p.resident = true; p.botStyle = user.botStyle; }   // бот-резидент: свой банк и профиль
     p.sittingOut = sittingOut || (stack === 0 && !this.tour);
     this.seats[seat] = p;
     this.byUserId.set(p.userId, p);
@@ -1143,11 +1145,12 @@ class Table {
         return {
           seat: i,
           name: p.name,
-          isBot: p.isBot,
-          botLevel: p.isBot ? botLevel(p) : null,   // уровень — для аватара бота
+          // Резидент снаружи — обычный игрок: ни пометки «бот», ни уровня бота.
+          isBot: p.isBot && !p.resident,
+          botLevel: p.isBot && !p.resident ? botLevel(p) : null,   // уровень — для аватара бота
           avatar: p.avatar || null,
           frame: p.frame || null,
-          level: p.isBot ? null : (p.level || 1),
+          level: p.isBot && !p.resident ? null : (p.level || 1),
           stack: p.stack,
           bet: p.bet,
           inHand: p.inHand,

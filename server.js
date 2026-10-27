@@ -11,7 +11,7 @@ const crypto = require('node:crypto');
 const { Store, REF_HANDS } = require('./src/store');
 const { CATALOG: SHOP_CATALOG } = require('./src/shop');
 const { Table, setEvalBudget, REACTIONS, PHRASES, SIT_OUT_MS } = require('./src/table');
-const { CHARACTERS: BOT_CHARACTERS, BOT_DISCLAIMER } = require('./src/bot');
+const { CHARACTERS: BOT_CHARACTERS, RESIDENTS: RESIDENT_LIST, BOT_DISCLAIMER } = require('./src/bot');
 const { Tournament, SNG_STACK, SNG_TIMEOUT, SNG_BUY_INS, SPIN_STACK, SPIN_TIMEOUT } = require('./src/tournament');
 const { ACHIEVEMENTS, achievementView, tierTotal } = require('./src/achievements');
 const { Snapshot, mttRefunds, tableRecord, refunds } = require('./src/snapshot');
@@ -120,57 +120,61 @@ function dropTable(table) {
   invites.delete(table.invite);
 }
 
+// Чьи фишки и статистику ведёт хранилище: людей и ботов-резидентов (у них свой банк).
+const tracked = (p) => !p.isBot || !!p.resident;
+
 function createTable(cfg, {
   owner = null, sng = 0, buyIn, spin = false, invite = null, privateTable = false, createdAt = 0, mttTour = null, mttId = null,
 } = {}) {
   const n = ++tableSeq;
   // Стол турнира по расписанию получает «переходник» от турнира, sit-n-go — свой Tournament.
   const tour = mttTour || (sng ? new Tournament(sng, {
-    pay: (player, amount, place) => { if (!player.isBot) store.addChips(player.userId, amount, `Приз за ${place} место: ${cfg.name}`); },
+    pay: (player, amount, place) => { if (tracked(player)) store.addChips(player.userId, amount, `Приз за ${place} место: ${cfg.name}`); },
     onStart: (players) => {
       for (const p of players) {
-        if (p.isBot) continue;
+        if (!tracked(p)) continue;
         store.recordSng(p.userId, { start: true });
+        if (p.isBot) continue;
         // Записался и ушёл — бот напомнит, что турнир начался.
         if (!isOnline(p.userId)) notify(p.userId, `Турнир начался — вас ждут за столом. Пока вас нет, блайнды списываются.`);
       }
     },
     onPlace: (player, place, prize) => {
-      if (!player.isBot) store.recordSng(player.userId, { place, prize, humans: tour.humans, seats: tour.seats });
+      if (tracked(player)) store.recordSng(player.userId, { place, prize, humans: tour.humans, seats: tour.seats });
     },
   }, buyIn, { spin }) : null);
   const table = new Table({ ...cfg, id: cfg.id || `t${n}`, tour }, {
     onChipsReturn: (player, chips) => {
-      if (player.isBot) return;
+      if (!tracked(player)) return;
       // Турнирные фишки в банк не уходят. До старта уход из-за стола — отмена регистрации.
       if (tour) { if (tour.status === 'registering') store.addChips(player.userId, tour.buyIn, `Возврат взноса: ${cfg.name}`); return; }
       if (chips > 0) store.addChips(player.userId, chips, `Со стола «${cfg.name}»`);
     },
     onHandStart: (players) => {
       handsByDay.set(dayKey(), (handsByDay.get(dayKey()) || 0) + 1);
-      for (const p of players) if (!p.isBot) store.countHand(p.userId);
+      for (const p of players) if (tracked(p)) store.countHand(p.userId);
     },
     onHandEnd: (results) => {
       const humans = results.filter((r) => !r.player.isBot).map((r) => r.player.userId);
       for (const r of results) {
-        if (r.player.isBot) continue;
+        if (!tracked(r.player)) continue;
         // Сыграл раздачу за одним столом с другом — для задания дня.
         const me = store.user(r.player.userId);
         const withFriend = !!me && humans.some((id) => id !== me.id && me.friends.includes(id));
-        store.recordHand(r.player.userId, { ...r, cash: !tour, withFriend, withHuman: humans.length > 1 });
+        store.recordHand(r.player.userId, { ...r, cash: !tour, withFriend, withHuman: humans.some((id) => id !== r.player.userId) });
       }
     },
     // Сыгранная раздача — в историю участников («Последние раздачи»).
     onHandRecord: (record) => store.saveHand(record),
     onSeat: (player, t) => {
-      if (player.isBot) return;
+      if (!tracked(player)) return;
       playerTable.set(player.userId, t);
       player.avatar = store.avatarUrl(store.user(player.userId));   // аватар — на месте за столом
       player.frame = store.frameOf(store.user(player.userId));       // и рамка из магазина
       player.level = store.levelOf(store.user(player.userId));       // и уровень
     },
     // Пересаженного в турнире уже записали за новый стол — старый не должен его стереть.
-    onUnseat: (player, t) => { if (!player.isBot && playerTable.get(player.userId) === t) playerTable.delete(player.userId); },
+    onUnseat: (player, t) => { if (tracked(player) && playerTable.get(player.userId) === t) playerTable.delete(player.userId); },
   });
   table.house = !owner && !mttId;
   table.mttId = mttId;
@@ -250,8 +254,10 @@ function botMixFor(table) {
   return BOT_MIX.find((m) => level <= m.upTo).mix;
 }
 
-// Посадить бота на первое свободное место: персонаж подходящего уровня, ещё не сидящий за столом.
-function addBotTo(table) {
+// Посадить бота на первое свободное место. Игрок нажал «Позвать ботов» — садится бот
+// с пометкой (персонаж подходящего уровня). Стол сам добирает соперников (быстрая игра,
+// турниры заведения) — сначала зовёт свободного резидента, как будто подсел живой игрок.
+function addBotTo(table, { residentsOk = false } = {}) {
   const seat = table.seats.findIndex((s) => s === null);
   if (seat < 0) return { error: 'Свободных мест нет' };
   const taken = new Set(table.players().map((p) => p.name));
@@ -261,11 +267,143 @@ function addBotTo(table) {
   const total = pool.reduce((sum, c) => sum + mix[c.style], 0);
   let roll = Math.random() * total;
   for (const c of pool) { roll -= mix[c.style]; if (roll < 0) { pick = c; break; } }
-  if (!pick) pick = BOT_CHARACTERS.find((c) => !taken.has(c.name)) || { name: `Бот-${seat + 1}`, style: 'amateur' };
+  const resident = residentsOk ? pickResident(table, mix) : null;
+  if (resident) {
+    const res = sitResident(resident, table, seat);
+    if (!res.error) return res;
+  }
+  if (!pick) pick = { name: EXTRA_BOT_NAMES.find((n) => !taken.has(n)) || `Бот-${seat + 1}`, style: 'amateur' };
   const stack = table.tour ? table.tour.stack : Math.round((table.minBuyIn + table.maxBuyIn) / 2);
   const res = table.sit({ id: `bot-${crypto.randomUUID()}`, name: pick.name, isBot: true }, seat, stack);
   if (!res.error) table.seats[seat].botStyle = pick.style;
   return res;
+}
+
+// ——— боты-резиденты ———
+// Персонажи живут как игроки: у каждого аккаунт, банк и профиль (с пометкой «бот»).
+// Сами садятся за столы — к людям и друг к другу, — открывают свои столы, играют
+// сессию 10–40 минут, уходят и через какое-то время возвращаются. Если их ни разу
+// не позвали, за столами одновременно сидит несколько резидентов — в лобби есть жизнь.
+// Стартовый банк — как у живых игроков, чуть больше у сильных: дальше он растёт или тает от игры.
+const RESIDENT_BANK = { novice: 10_000, amateur: 15_000, regular: 30_000, shark: 45_000, pro: 70_000 };
+// Ставки, которые персонаж любит: новички — маленькие, профи — крупные.
+const RESIDENT_BB = { novice: [2, 10], amateur: [2, 20], regular: [5, 50], shark: [10, 100], pro: [10, 200] };
+const EXTRA_BOT_NAMES = ['Лёва', 'Мира', 'Нил', 'Оля', 'Паша', 'Рома', 'Сима', 'Тима', 'Уля', 'Фима', 'Хана', 'Ян'];
+const residents = new Map();   // ключ -> { userId, style, until, restUntil }
+for (const r of RESIDENT_LIST) {
+  const u = store.ensureResident(r, RESIDENT_BANK[r.style]);
+  if (u) residents.set(r.key, { userId: u.id, key: r.key, style: r.style, until: 0, restUntil: 0 });
+}
+const isResidentOwner = (t) => !!t.ownerId && [...residents.values()].some((r) => r.userId === t.ownerId);
+
+const residentFree = (r, now = Date.now()) => !tableOfUser(r.userId) && now >= r.restUntil;
+
+function pickResident(table, mix) {
+  const now = Date.now();
+  const pool = [...residents.values()].filter((r) => residentFree(r, now) && mix[r.style]
+    && store.user(r.userId).chips >= (table.tour ? table.tour.buyIn : table.minBuyIn));
+  if (!pool.length) return null;
+  const total = pool.reduce((sum, r) => sum + mix[r.style], 0);
+  let roll = Math.random() * total;
+  for (const r of pool) { roll -= mix[r.style]; if (roll < 0) return r; }
+  return pool[0];
+}
+
+// Посадить резидента: закупка или взнос — из его банка, как у человека.
+function sitResident(r, table, seat) {
+  const tour = table.tour;
+  if (tour && tour.status !== 'registering') return { error: 'Турнир уже идёт' };
+  if (!Number.isInteger(seat) || seat < 0) seat = table.seats.findIndex((x) => x === null);
+  if (seat < 0) return { error: 'Свободных мест нет' };
+  const u = store.user(r.userId);
+  const want = tour ? tour.buyIn : Math.min(table.maxBuyIn, Math.max(table.minBuyIn, Math.round(table.bb * (40 + Math.random() * 60))));
+  if (u.chips < want) return { error: 'Мало фишек' };
+  const stack = tour ? tour.stack : want;
+  store.addChips(u.id, -want, tour ? `Взнос: ${table.name}` : `За стол «${table.name}»`);
+  const res = table.sit({ id: u.id, name: u.name, isBot: true, resident: true, botStyle: r.style }, seat, stack);
+  if (res.error) { store.addChips(u.id, want, 'Посадка не удалась — возврат'); return res; }
+  r.until = Date.now() + (10 + Math.random() * 30) * 60_000;
+  return res;
+}
+
+// Проигрался за кэш-столом — докупается из банка; не на что — встаёт.
+function residentRebuy(table, p) {
+  const u = store.user(p.userId);
+  const want = Math.min(table.maxBuyIn - p.stack, Math.round(table.bb * 60));
+  if (u && u.chips >= want && want > 0) {
+    store.addChips(u.id, -want, `Докупка за стол «${table.name}»`);
+    p.stack += want;
+    p.sittingOut = false;
+    p.busted = false;
+    table.maybeStartHand();
+  } else {
+    table.leave(p.userId);
+  }
+}
+
+// Раз в несколько секунд: кто-то встаёт, кто-то садится.
+const RESIDENTS_ONLINE = [4, 9];       // сколько резидентов играет одновременно (мин–макс)
+const RESIDENT_TABLES_MAX = 3;         // столов, открытых самими резидентами
+let residentsAt = 0;
+function residentsTick(now) {
+  if (now - residentsAt < 5000) return;
+  residentsAt = now;
+  const all = [...residents.values()];
+  // Банк кончился почти совсем — раз в сутки «приходят деньги» (это боты, им можно).
+  for (const r of all) {
+    const u = store.user(r.userId);
+    if (u && u.chips < 200 && !tableOfUser(r.userId)) store.reload(u.id);   // как у людей — бесплатное пополнение
+  }
+  // Сессия вышла — встаём (из идущего турнира — нет, доигрываем).
+  for (const r of all) {
+    const t = tableOfUser(r.userId);
+    if (!t || now < r.until || (t.tour && t.tour.status === 'running')) continue;
+    t.leave(r.userId);
+    r.restUntil = now + (5 + Math.random() * 25) * 60_000;
+  }
+  // Сидит один за своим столом дольше 3 минут — никто не пришёл, встаёт.
+  for (const r of all) {
+    const t = tableOfUser(r.userId);
+    if (!t || t.tour || t.occupied() > 1) { r.aloneSince = 0; continue; }
+    if (!r.aloneSince) r.aloneSince = now;
+    else if (now - r.aloneSince > 3 * 60_000) { t.leave(r.userId); r.restUntil = now + 10 * 60_000; r.aloneSince = 0; }
+  }
+  const seated = all.filter((r) => tableOfUser(r.userId)).length;
+  const humansOnline = [...presence.values()].filter((p) => p.conns > 0).length;
+  const target = Math.min(RESIDENTS_ONLINE[1], RESIDENTS_ONLINE[0] + Math.ceil(humansOnline / 2));
+  if (seated >= target) return;
+  const free = all.filter((r) => residentFree(r, now));
+  if (!free.length) return;
+  const r = free[Math.floor(Math.random() * free.length)];
+  // Кто-то из резидентов ждёт соперников один — подсаживаемся к нему в первую очередь.
+  const lonely = [...tables.values()].find((t) => !t.tour && !t.private && t.occupied() === 1
+    && t.players()[0].resident && t.occupied() < t.maxSeats && store.user(r.userId).chips >= t.minBuyIn * 2);
+  if (lonely) { sitResident(r, lonely); return; }
+  const [lo, hi] = RESIDENT_BB[r.style];
+  const bank = store.user(r.userId).chips;
+  const fits = (t) => !t.tour && !t.mttId && !t.private && t.occupied() < t.maxSeats
+    && t.bb >= lo && t.bb <= hi && bank >= t.minBuyIn * 2;
+  const open = [...tables.values()].filter(fits);
+  // Куда: к людям — охотнее всего, к другим резидентам — тоже, иначе — свой стол.
+  const withHumans = open.filter((t) => t.humans() > 0);
+  const withResidents = open.filter((t) => t.players().some((p) => p.resident) && !t.humans());
+  const roll = Math.random();
+  let table = roll < 0.6 && withHumans.length ? withHumans[Math.floor(Math.random() * withHumans.length)]
+    : roll < 0.85 && withResidents.length ? withResidents[Math.floor(Math.random() * withResidents.length)] : null;
+  if (!table) {
+    const ownTables = [...tables.values()].filter((t) => isResidentOwner(t) && t.occupied()).length;
+    if (ownTables < RESIDENT_TABLES_MAX && Math.random() < 0.5) {
+      const stakes = BLIND_STEPS.filter((bb) => bb >= lo && bb <= hi && bank >= bb * 100);
+      if (stakes.length) {
+        const bb = stakes[Math.floor(Math.random() * Math.min(3, stakes.length))];
+        const owner = store.user(r.userId);
+        const made = createUserTable(owner, { kind: 'cash', seats: [6, 6, 9, 4][Math.floor(Math.random() * 4)], bb, timeout: 25 });
+        if (!made.error) table = made;
+      }
+    }
+    if (!table && open.length) table = open[Math.floor(Math.random() * open.length)];
+  }
+  if (table) sitResident(r, table);
 }
 
 // Посадить игрока: взнос или закупка списывается из банка до посадки —
@@ -304,7 +442,7 @@ function quickPlay(user, session) {
   if (buyIn < table.minBuyIn) return { error: 'В банке мало фишек — пополните его в шапке', reload: true };
   const res = seatUser(user, table, buyIn);
   if (res.error) return res;
-  while (table.occupied() < Math.min(QUICK_PLAYERS, table.maxSeats) && !addBotTo(table).error) { /* добираем ботов */ }
+  while (table.occupied() < Math.min(QUICK_PLAYERS, table.maxSeats) && !addBotTo(table, { residentsOk: true }).error) { /* добираем соперников */ }
   session.roomId = table.id;
   return { ok: true, roomId: table.id };
 }
@@ -361,7 +499,7 @@ function maintainHouseSngs(now) {
     if (!open.humans()) { if (tour.fillAt) { tour.fillAt = 0; open.touch(); } continue; }
     if (!tour.fillAt) { tour.fillAt = now + open.fillMs; open.touch(); }
     if (now >= tour.fillAt) {
-      while (open.occupied() < open.maxSeats && !addBotTo(open).error) { /* до полного стола — турнир стартует */ }
+      while (open.occupied() < open.maxSeats && !addBotTo(open, { residentsOk: true }).error) { /* до полного стола — турнир стартует */ }
       open.maybeStartHand();
     }
   }
@@ -373,6 +511,8 @@ function maintainHouseSngs(now) {
 function dropLonelyBots(now) {
   for (const table of tables.values()) {
     if (table.mttId || table.humans() || !table.occupied()) { table.botsOnlyAt = 0; continue; }
+    // Резиденты играют и без людей — уходят сами по своему расписанию (см. residentsTick).
+    if (!table.tour && table.players().some((p) => p.resident)) { table.botsOnlyAt = 0; continue; }
     if (table.tour && !(table.houseSng && table.tour.status === 'running')) continue;
     if (!table.botsOnlyAt) { table.botsOnlyAt = now; continue; }
     if (now - table.botsOnlyAt < BOTS_ONLY_MS) continue;
@@ -513,7 +653,8 @@ function restoreTable(rec) {
     table.minRaise = table.bb;
   }
   for (const p of rec.players) {
-    table.restoreSeat({ id: p.userId, name: p.name, isBot: p.isBot }, p.seat, p.chips, !!p.sittingOut);
+    table.restoreSeat({ id: p.userId, name: p.name, isBot: p.isBot, resident: p.resident, botStyle: p.botStyle }, p.seat, p.chips, !!p.sittingOut);
+    if (p.isBot && !p.resident && p.botStyle) table.seats[p.seat].botStyle = p.botStyle;
     // Не вернувшийся после перезапуска станет «отошедшим», а с кэш-стола — встанет (см. maintain).
     if (!p.isBot && !presence.has(p.userId)) presence.set(p.userId, { conns: 0, lastSeen: Date.now() });
   }
@@ -875,7 +1016,7 @@ function tableInfo(table) {
     maxBuyIn: table.maxBuyIn,
     timeout: table.timeout,
     // Место за местом: 0 — свободно, 1 — человек, 2 — бот.
-    seats: table.seats.map((p) => (!p ? 0 : p.isBot ? 2 : 1)),
+    seats: table.seats.map((p) => (!p ? 0 : p.isBot && !p.resident ? 2 : 1)),
     playing: table.phase !== 'idle',
     watchers: table.watchers || 0,
     sng: tour ? {
@@ -1052,6 +1193,8 @@ function closeOwnTable(table, user) {
 // ——— кабинет, друзья, рейтинг ———
 
 function isOnline(userId) {
+  // Бот-резидент «в сети», пока сидит за столом.
+  if (store.isBotUser(store.user(userId))) return !!tableOfUser(userId);
   const rec = presence.get(userId);
   return !!(rec && rec.conns > 0);
 }
@@ -1240,7 +1383,7 @@ async function handleCommand(ctx, body) {
       const table = room();
       if (!table) return { error: 'Сначала войдите в комнату' };
       const p = table.bySeat(Number(body.seat));
-      if (!p || !p.isBot) return { error: 'На этом месте не бот' };
+      if (!p || !p.isBot || p.resident) return { error: 'На этом месте не бот' };
       if (table.tour && table.tour.status !== 'registering') return { error: 'Из турнира бота не убрать' };
       if (p.inHand && table.phase !== 'idle') { p.leaving = true; return { ok: true, pending: true }; }
       return table.removePlayer(p);
@@ -1912,6 +2055,8 @@ function maintain(now) {
   for (const table of tables.values()) {
     if (table.phase === 'idle' && !table.tour) {
       for (const p of table.players()) {
+        // Резидент докупается из своего банка (или уходит, если банк пуст).
+        if (p.resident && p.stack < table.bb * 10) { residentRebuy(table, p); continue; }
         // Ботам возвращаем стек, чтобы стол не останавливался.
         if (p.isBot && p.stack < table.bb * 10) {
           p.stack = Math.round((table.minBuyIn + table.maxBuyIn) / 2);
@@ -1947,6 +2092,7 @@ function maintain(now) {
 
   dropIdleTables(now);
   dropLonelyBots(now);
+  residentsTick(now);
   maintainHouseSngs(now);
   mtts.tick(now);
   saveSnapshot();

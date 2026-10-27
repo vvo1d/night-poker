@@ -132,7 +132,7 @@ class Tournament {
 
   award(table, p, place) {
     const prize = this.prizes[place - 1] || 0;
-    this.places.push({ place, name: p.name, prize, isBot: p.isBot });
+    this.places.push({ place, name: p.name, prize, isBot: p.isBot && !p.resident });
     this.places.sort((a, b) => a.place - b.place);
     if (prize) this.pay(p, prize, place);
     this.onPlace(p, place, prize);

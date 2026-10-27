@@ -232,7 +232,7 @@ class Mtt {
 
   award(table, p, place) {
     const prize = this.prizes[place - 1] || 0;
-    this.places.push({ place, userId: p.isBot ? null : p.userId, name: p.name, prize, isBot: p.isBot });
+    this.places.push({ place, userId: p.isBot ? null : p.userId, name: p.name, prize, isBot: p.isBot && !p.resident });
     this.places.sort((a, b) => a.place - b.place);
     if (!p.isBot) {
       if (prize) this.hooks.pay({ userId: p.userId, name: p.name }, prize);
