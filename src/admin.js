@@ -97,7 +97,7 @@ function createAdmin(deps) {
       blinds: `${t.sb}/${t.bb}`,
       phase: t.phase,
       status: t.tour ? t.tour.status : null,
-      players: t.players().map((p) => ({ name: p.name, bot: p.isBot, stack: p.stack, away: p.sittingOut })),
+      players: t.players().map((p) => ({ name: p.name, bot: p.isBot && !p.resident, resident: !!p.resident, stack: p.stack, away: p.sittingOut })),
       maxSeats: t.maxSeats,
     };
   }

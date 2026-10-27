@@ -386,7 +386,7 @@ loaders.tables = async () => {
     if (t.house) name.append(el('span', 'badge', 'заведения'));
     const kind = { cash: 'кэш', sng: 'sit-n-go', mtt: 'турнир' }[t.kind];
     const players = t.players.length
-      ? t.players.map((p) => `${p.name}${p.bot ? ' (бот)' : ''} ${fmt(p.stack)}${p.away ? ' · отошёл' : ''}`).join(', ')
+      ? t.players.map((p) => `${p.name}${p.bot ? ' (бот)' : p.resident ? ' (резидент)' : ''} ${fmt(p.stack)}${p.away ? ' · отошёл' : ''}`).join(', ')
       : '—';
     const close = el('button', 'btn btn--sm btn--danger', 'Закрыть');
     close.addEventListener('click', async () => {
@@ -477,6 +477,165 @@ loaders.tournaments = async () => {
   const wrap = el('section', 'panel');
   wrap.append(el('h3', null, 'Турниры'), list);
   box.append(wrap);
+};
+
+// ——— резиденты (живые боты) ———
+// Форма строится по схеме с сервера: новое поле там — новое поле здесь, без правок.
+
+const minutes = (ms) => `${Math.ceil(ms / 60000)} мин`;
+
+function fieldInput(f, value, levels, levelNames) {
+  const num = (v, min = f.min ?? 0, max = f.max ?? 100) => {
+    const i = el('input', 'res-num');
+    i.type = 'number';
+    i.min = min;
+    i.max = max;
+    i.value = v;
+    return i;
+  };
+  const wrap = el('div', `res-field res-field--${f.type}`);
+  const label = el('label', 'res-field__label', f.label);
+  if (f.hint) label.append(el('small', 'muted', f.hint));
+  wrap.append(label);
+  const box = el('div', 'res-field__input');
+  let read;
+  if (f.type === 'bool') {
+    const i = el('input');
+    i.type = 'checkbox';
+    i.checked = !!value;
+    box.append(i);
+    read = () => i.checked;
+  } else if (f.type === 'num' || f.type === 'pct') {
+    const i = num(value, f.type === 'pct' ? 0 : f.min, f.type === 'pct' ? 100 : f.max);
+    box.append(i);
+    if (f.type === 'pct') box.append(el('span', 'muted', '%'));
+    read = () => i.value;
+  } else if (f.type === 'range') {
+    const a = num(value[0]);
+    const b = num(value[1]);
+    box.append(el('span', 'muted', 'от'), a, el('span', 'muted', 'до'), b);
+    read = () => [a.value, b.value];
+  } else if (f.type === 'levels') {
+    const inputs = {};
+    for (const l of levels) {
+      const cell = el('span', 'res-level');
+      cell.append(el('small', 'muted', levelNames[l]), inputs[l] = num(value[l]));
+      box.append(cell);
+    }
+    read = () => Object.fromEntries(levels.map((l) => [l, inputs[l].value]));
+  }
+  wrap.append(box);
+  return { node: wrap, read };
+}
+
+loaders.residents = async () => {
+  const d = await api('/api/admin/residents');
+  const box = $('#res-admin');
+  box.textContent = '';
+
+  // Настройки поведения — по группам.
+  const form = el('form', 'panel res-form');
+  form.append(el('h3', null, 'Поведение'),
+    el('p', 'panel__note', 'Применяется сразу, без перезапуска. Диапазон «от–до» — каждый раз берётся случайное значение внутри.'));
+  const readers = {};
+  const groups = new Map();
+  for (const f of d.schema) {
+    if (!groups.has(f.group)) {
+      const g = el('fieldset', 'res-group');
+      g.append(el('legend', null, f.group));
+      groups.set(f.group, g);
+      form.append(g);
+    }
+    const { node, read } = fieldInput(f, d.settings[f.key], d.levels, d.levelNames);
+    groups.get(f.group).append(node);
+    readers[f.key] = read;
+  }
+  const bar = el('div', 'adm__bar res-form__bar');
+  const save = el('button', 'btn btn--primary btn--sm', 'Сохранить');
+  save.type = 'submit';
+  const reset = el('button', 'btn btn--ghost btn--sm', 'Вернуть по умолчанию');
+  reset.type = 'button';
+  reset.addEventListener('click', async () => {
+    if (!confirm('Вернуть все настройки поведения к значениям по умолчанию?')) return;
+    const res = await api('/api/admin/residents', { action: 'reset' }).catch(() => null);
+    if (res) { toast('Настройки сброшены', true); loaders.residents(); }
+  });
+  bar.append(save, reset);
+  form.append(bar);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const settings = Object.fromEntries(Object.entries(readers).map(([k, read]) => [k, read()]));
+    const res = await api('/api/admin/residents', { action: 'settings', settings }).catch(() => null);
+    if (!res) return;
+    if (res.errors.length) toast(`Не сохранено: ${res.errors.join(', ')}`);
+    else toast('Настройки сохранены', true);
+    loaders.residents();
+  });
+
+  // Состав: ник, уровень, играет или нет.
+  const roster = el('section', 'panel');
+  roster.append(el('h3', null, `Состав · ${d.list.filter((r) => !r.off).length} из ${d.list.length} играют`),
+    el('p', 'panel__note', 'Ник меняется у аккаунта сразу (если не занят живым игроком). Уровень — стиль игры. Банк и раздачи — как у обычного игрока: фишки можно добавить во вкладке «Игроки».'));
+  const tbl = el('table', 'tbl res-roster');
+  const head = el('tr');
+  ['', 'Ник', 'Уровень', 'Играет', 'Банк', 'Раздач', 'Сейчас'].forEach((h) => head.append(el('th', null, h)));
+  tbl.append(head);
+  const rows = [];
+  for (const r of d.list) {
+    const tr = el('tr');
+    const face = el('td');
+    if (r.avatar) {
+      const img = el('img', 'user-card__avatar');
+      img.src = r.avatar;
+      img.alt = '';
+      face.append(img);
+    }
+    const name = el('input', 'res-name');
+    name.value = r.name;
+    name.maxLength = 20;
+    name.placeholder = r.baseName;
+    const style = el('select', 'adm__select');
+    for (const l of d.levels) {
+      const o = el('option', null, d.levelNames[l]);
+      o.value = l;
+      o.selected = l === r.style;
+      style.append(o);
+    }
+    const on = el('input');
+    on.type = 'checkbox';
+    on.checked = !r.off;
+    const now = r.conflict || r.nameTaken ? 'ник занят живым игроком'
+      : r.table ? `за столом «${r.table}»`
+        : r.mtt ? `записан: ${r.mtt}`
+          : r.off ? 'выключен'
+            : r.restLeft ? `отдыхает ещё ${minutes(r.restLeft)}` : 'свободен';
+    const cell = (node) => { const td = el('td'); td.append(node); return td; };
+    tr.append(face, cell(name), cell(style), cell(on), el('td', 'num', fmt(r.chips)), el('td', 'num', fmt(r.hands)), el('td', 'muted', now));
+    tbl.append(tr);
+    rows.push({ r, name, style, on });
+  }
+  const rosterBar = el('div', 'adm__bar');
+  const saveRoster = el('button', 'btn btn--primary btn--sm', 'Сохранить состав');
+  saveRoster.addEventListener('click', async () => {
+    // В настройки уходят только отличия от исходного списка.
+    const out = {};
+    for (const { r, name, style, on } of rows) {
+      const item = {};
+      const n = name.value.trim();
+      if (n && n !== r.baseName) item.name = n;
+      if (style.value !== r.baseStyle) item.style = style.value;
+      if (!on.checked) item.off = true;
+      if (Object.keys(item).length) out[r.key] = item;
+    }
+    const res = await api('/api/admin/residents', { action: 'roster', roster: out }).catch(() => null);
+    if (res) { toast('Состав сохранён', true); loaders.residents(); }
+  });
+  rosterBar.append(saveRoster);
+  const scroll = el('div', 'res-scroll');
+  scroll.append(tbl);
+  roster.append(scroll, rosterBar);
+
+  box.append(roster, form);
 };
 
 window.adminApi = { api, el, fmt, toast, loaders, DATETIME };

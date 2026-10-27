@@ -23,6 +23,7 @@ const seasons = require('./src/seasons');
 const { createAdmin } = require('./src/admin');
 const pages = require('./src/pages');
 const { MttManager } = require('./src/mtt');
+const { createResidentsConfig } = require('./src/residents-config');
 
 const PORT = Number(process.env.PORT) || 3000;
 // За обратным прокси сервер стоит слушать только петлю, чтобы снаружи
@@ -289,20 +290,45 @@ function addBotTo(table, { residentsOk = false, residentsOnly = false } = {}) {
 // Сами садятся за столы — к людям и друг к другу, — открывают свои столы, играют
 // сессию 10–40 минут, уходят и через какое-то время возвращаются. Если их ни разу
 // не позвали, за столами одновременно сидит несколько резидентов — в лобби есть жизнь.
-// Стартовый банк — как у живых игроков, чуть больше у сильных: дальше он растёт или тает от игры.
-const RESIDENT_BANK = { novice: 10_000, amateur: 15_000, regular: 30_000, shark: 45_000, pro: 70_000 };
-// Ставки, которые персонаж любит: новички — маленькие, профи — крупные.
-const RESIDENT_BB = { novice: [2, 10], amateur: [2, 20], regular: [5, 50], shark: [10, 100], pro: [10, 200] };
+// Все числа поведения — в настройках (админка → «Резиденты», data/residents.json):
+// банк нового резидента и любимые ставки по уровням, длина сессий, куда садятся и т. д.
+const residentsCfg = createResidentsConfig(store.dataDir, RESIDENT_LIST.map((r) => r.key));
+const RS = residentsCfg.settings;
+const residentBB = (style) => [RS.bbMin[style], RS.bbMax[style]];
+const between = ([lo, hi]) => lo + Math.random() * (hi - lo);
 const EXTRA_BOT_NAMES = ['Лёва', 'Мира', 'Нил', 'Оля', 'Паша', 'Рома', 'Сима', 'Тима', 'Уля', 'Фима', 'Хана', 'Ян'];
-const residents = new Map();   // ключ -> { userId, style, until, restUntil }
-for (const r of RESIDENT_LIST) {
-  const u = store.ensureResident(r, RESIDENT_BANK[r.style]);
-  if (u) residents.set(r.key, { userId: u.id, key: r.key, style: r.style, until: 0, restUntil: 0 });
+const residents = new Map();   // ключ -> { userId, style, off, until, restUntil }
+const residentByUser = new Map();
+// Список из bot.js с правками из админки (ник, уровень, выключен). Вызывается
+// при старте и после сохранения состава — аккаунты переименовываются на месте.
+function applyRoster() {
+  const roster = residentsCfg.roster();
+  for (const base of RESIDENT_LIST) {
+    const r = { ...base, ...roster[base.key] };
+    const u = store.ensureResident(r, RS.bank[r.style]);
+    if (!u) { residents.delete(base.key); continue; }
+    const had = residents.get(base.key);
+    if (had) Object.assign(had, { userId: u.id, style: r.style, off: !!r.off });
+    else residents.set(base.key, { userId: u.id, key: base.key, style: r.style, off: !!r.off, until: 0, restUntil: 0 });
+  }
+  residentByUser.clear();
+  for (const r of residents.values()) residentByUser.set(r.userId, r);
 }
-const isResidentOwner = (t) => !!t.ownerId && [...residents.values()].some((r) => r.userId === t.ownerId);
+applyRoster();
+const isResidentOwner = (t) => !!t.ownerId && residentByUser.has(t.ownerId);
 
-const residentFree = (r, now = Date.now()) => !tableOfUser(r.userId) && now >= r.restUntil && !r.pending;
-const residentByUser = new Map([...residents.values()].map((r) => [r.userId, r]));
+// Записан на турнир по расписанию, который вот-вот начнётся, — за другие столы не садится.
+const MTT_HOLD_MS = 3 * 60_000;
+let mttsReady = false;
+function mttSoon(r, now = Date.now()) {
+  if (!mttsReady) return null;   // столы заведения создаются раньше турниров
+  for (const m of mtts.list.values()) {
+    if (m.status === 'registering' && m.entries.has(r.userId) && m.startAt - now < MTT_HOLD_MS) return m;
+  }
+  return null;
+}
+const residentFree = (r, now = Date.now()) => RS.enabled && !r.off && !tableOfUser(r.userId)
+  && now >= r.restUntil && !r.pending && !mttSoon(r, now);
 
 function pickResident(table, mix) {
   const now = Date.now();
@@ -328,7 +354,7 @@ function sitResident(r, table, seat) {
   store.addChips(u.id, -want, tour ? `Взнос: ${table.name}` : `За стол «${table.name}»`);
   const res = table.sit({ id: u.id, name: u.name, isBot: true, resident: true, botStyle: r.style }, seat, stack);
   if (res.error) { store.addChips(u.id, want, 'Посадка не удалась — возврат'); return res; }
-  r.until = Date.now() + (10 + Math.random() * 30) * 60_000;
+  r.until = Date.now() + between(RS.sessionMin) * 60_000;
   return res;
 }
 
@@ -348,24 +374,28 @@ function residentRebuy(table, p) {
 }
 
 // Столы, где сидят люди, — в приоритете: резиденты подсаживаются туда постепенно
-// (раз в 8–25 с), но не до полного стола — заполняют примерно 35–65% мест.
+// (по умолчанию раз в 8–25 с), но не до полного стола — заполняют примерно 35–65% мест.
 // Свободных нет — кто-нибудь встаёт из-за стола, где одни резиденты, и пересаживается.
 function residentsToHumans(now) {
+  if (!RS.enabled || !RS.humanTables) return;
   for (const t of tables.values()) {
     if (t.tour || t.mttId || t.private || !t.humans() || t.occupied() >= t.maxSeats - 1) continue;
-    if (!t.residentCap) t.residentCap = t.maxSeats <= 2 ? 1 : Math.max(1, Math.round(t.maxSeats * (0.35 + Math.random() * 0.3)));
+    // У каждого стола своя доля в пределах настройки — постоянная, чтобы столы не «дышали».
+    if (t.residentRoll === undefined) t.residentRoll = Math.random();
+    const [lo, hi] = RS.humanShare;
+    const cap = t.maxSeats <= 2 ? 1 : Math.round(t.maxSeats * (lo + t.residentRoll * (hi - lo)) / 100);
     const have = t.players().filter((p) => p.resident).length;
-    if (have >= t.residentCap) continue;
-    if (!t.nextResidentAt) { t.nextResidentAt = now + 5000 + Math.random() * 10_000; continue; }
+    if (have >= cap) continue;
+    if (!t.nextResidentAt) { t.nextResidentAt = now + between(RS.humanJoinSec) * 600; continue; }
     if (now < t.nextResidentAt) continue;
-    t.nextResidentAt = now + 8000 + Math.random() * 17_000;
+    t.nextResidentAt = now + between(RS.humanJoinSec) * 1000;
     const canPay = (r) => store.user(r.userId).chips >= t.minBuyIn * 2;
     const free = [...residents.values()].filter((r) => residentFree(r, now) && canPay(r));
     if (free.length) { sitResident(free[Math.floor(Math.random() * free.length)], t); continue; }
     // Пересадка: резидент из-за стола без людей, между раздачами.
     const mover = [...residents.values()].find((r) => {
       const at = tableOfUser(r.userId);
-      return at && at !== t && !at.tour && !at.humans() && at.phase === 'idle' && canPay(r) && !r.pending;
+      return at && at !== t && !at.tour && !at.humans() && at.phase === 'idle' && canPay(r) && !r.pending && !r.off;
     });
     if (mover) { tableOfUser(mover.userId).leave(mover.userId); sitResident(mover, t); }
   }
@@ -381,9 +411,10 @@ function inviteResident(user, friend, table) {
   if (r.pending) return { ok: true, online: true, note: `${friend.name} уже позвали за другой стол` };
   const busy = tableOfUser(friend.id);
   const price = table.tour ? table.tour.buyIn : table.minBuyIn;
-  const [lo, hi] = RESIDENT_BB[r.style];
-  let yes = 0.8;
-  if (!table.tour && (table.bb < lo / 2 || table.bb > hi * 2)) yes = 0.45;
+  const [lo, hi] = residentBB(r.style);
+  let yes = RS.inviteYes / 100;
+  if (!table.tour && (table.bb < lo / 2 || table.bb > hi * 2)) yes = RS.inviteOffStakes / 100;
+  if (!RS.enabled || r.off || mttSoon(r)) yes = 0;
   if (busy) yes -= 0.15;
   if (store.user(friend.id).chips < price) yes = 0;
   setTimeout(() => {
@@ -423,12 +454,55 @@ function residentInvites(now) {
   }
 }
 
+// Турниры по расписанию: резиденты записываются заранее — по одному, вразброс
+// за mttRegMin минут до старта, — платят взнос из своего банка, как люди.
+// За 3 минуты до старта больше никуда не садятся, а сидящие встают между раздачами.
+function residentsMtt(now) {
+  for (const m of mtts.list.values()) {
+    if (m.status !== 'registering') continue;
+    const left = m.startAt - now;
+    for (const e of m.entries.values()) {
+      const r = e.resident && residentByUser.get(e.userId);
+      const t = r && left < MTT_HOLD_MS && tableOfUser(r.userId);
+      if (t && !t.mttId && !(t.tour && t.tour.status === 'running') && t.phase === 'idle') t.leave(r.userId);
+    }
+    if (!RS.enabled || !RS.mtt || left > RS.mttRegMin * 60_000 || left < 60_000) continue;
+    if (RS.mttNeedHuman && ![...m.entries.values()].some((e) => !e.isBot)) continue;
+    if (m.residentRoll === undefined) m.residentRoll = Math.random();
+    const goal = Math.round(RS.mttCount[0] + m.residentRoll * (RS.mttCount[1] - RS.mttCount[0]));
+    const have = [...m.entries.values()].filter((e) => e.resident).length;
+    if (have >= goal) continue;
+    // Вероятность за обход такая, чтобы недостающие успели записаться к старту.
+    const ticksLeft = Math.max(1, (left - 60_000) / (RS.tickSec * 1000));
+    if (Math.random() > Math.min(1, ((goal - have) / ticksLeft) * 1.5)) continue;
+    const busy = new Set();
+    for (const o of mtts.list.values()) if (o.status === 'registering') for (const id of o.entries.keys()) busy.add(id);
+    const pool = [...residents.values()].filter((r) => !r.off && !busy.has(r.userId)
+      && store.user(r.userId).chips >= m.buyIn * 3);
+    if (!pool.length) continue;
+    const r = pool[Math.floor(Math.random() * pool.length)];
+    const u = store.user(r.userId);
+    const res = m.register({ userId: u.id, name: u.name, isBot: true, resident: true, botStyle: r.style }, u.chips);
+    if (res.pay) store.addChips(u.id, -res.pay, `Взнос: ${m.name}`);
+  }
+}
+
+// Старт турнира: записанные резиденты освобождаются от других столов. Из идущего
+// sit-n-go не уйти — тогда запись снимается, взнос возвращается.
+function residentsBeforeMtt(m) {
+  for (const e of [...m.entries.values()]) {
+    if (!e.resident) continue;
+    const t = tableOfUser(e.userId);
+    if (!t || t.mttId) continue;
+    if (t.tour && t.tour.status === 'running') m.unregister(e.userId);
+    else t.leave(e.userId);
+  }
+}
+
 // Раз в несколько секунд: кто-то встаёт, кто-то садится.
-const RESIDENTS_ONLINE = [4, 9];       // сколько резидентов играет одновременно (мин–макс)
-const RESIDENT_TABLES_MAX = 3;         // столов, открытых самими резидентами
 let residentsAt = 0;
 function residentsTick(now) {
-  if (now - residentsAt < 5000) return;
+  if (now - residentsAt < RS.tickSec * 1000) return;
   residentsAt = now;
   const all = [...residents.values()];
   // Банк кончился почти совсем — раз в сутки «приходят деньги» (это боты, им можно).
@@ -436,26 +510,32 @@ function residentsTick(now) {
     const u = store.user(r.userId);
     if (u && u.chips < 200 && !tableOfUser(r.userId)) store.reload(u.id);   // как у людей — бесплатное пополнение
   }
-  // Сессия вышла — встаём (из идущего турнира — нет, доигрываем).
+  // Сессия вышла — встаём (из идущего турнира — нет, доигрываем). Резидентов выключили
+  // в админке — встают так же, между раздачами.
   for (const r of all) {
     const t = tableOfUser(r.userId);
-    if (!t || now < r.until || (t.tour && t.tour.status === 'running')) continue;
+    const stop = !RS.enabled || r.off;
+    if (!t || (now < r.until && !stop) || (t.tour && t.tour.status === 'running')) continue;
+    if (stop && t.phase !== 'idle') continue;
     t.leave(r.userId);
-    r.restUntil = now + (5 + Math.random() * 25) * 60_000;
-    r.onlineUntil = now + (3 + Math.random() * 7) * 60_000;   // ещё побудет «в сети» — его можно позвать
+    r.restUntil = now + between(RS.restMin) * 60_000;
+    r.onlineUntil = stop ? 0 : now + between(RS.onlineAfterMin) * 60_000;   // ещё побудет «в сети» — его можно позвать
   }
+  residentsMtt(now);
+  if (!RS.enabled) return;
   residentInvites(now);
   residentsToHumans(now);
-  // Сидит один за своим столом дольше 3 минут — никто не пришёл, встаёт.
+  // Сидит один за своим столом дольше aloneMin минут — никто не пришёл, встаёт.
   for (const r of all) {
     const t = tableOfUser(r.userId);
     if (!t || t.tour || t.occupied() > 1) { r.aloneSince = 0; continue; }
     if (!r.aloneSince) r.aloneSince = now;
-    else if (now - r.aloneSince > 3 * 60_000) { t.leave(r.userId); r.restUntil = now + 10 * 60_000; r.aloneSince = 0; }
+    else if (now - r.aloneSince > RS.aloneMin * 60_000) { t.leave(r.userId); r.restUntil = now + between(RS.restMin) * 60_000; r.aloneSince = 0; }
   }
-  const seated = all.filter((r) => tableOfUser(r.userId)).length;
+  // За столами турниров по расписанию резиденты не в счёт: там своя запись.
+  const seated = all.filter((r) => { const t = tableOfUser(r.userId); return t && !t.mttId; }).length;
   const humansOnline = [...presence.values()].filter((p) => p.conns > 0).length;
-  const target = Math.min(RESIDENTS_ONLINE[1], RESIDENTS_ONLINE[0] + Math.ceil(humansOnline / 2));
+  const target = Math.min(RS.online[1], RS.online[0] + Math.ceil(humansOnline / RS.perHumans));
   if (seated >= target) return;
   const free = all.filter((r) => residentFree(r, now));
   if (!free.length) return;
@@ -464,7 +544,7 @@ function residentsTick(now) {
   const lonely = [...tables.values()].find((t) => !t.tour && !t.private && t.occupied() === 1
     && t.players()[0].resident && t.occupied() < t.maxSeats && store.user(r.userId).chips >= t.minBuyIn * 2);
   if (lonely) { sitResident(r, lonely); return; }
-  const [lo, hi] = RESIDENT_BB[r.style];
+  const [lo, hi] = residentBB(r.style);
   const bank = store.user(r.userId).chips;
   const fits = (t) => !t.tour && !t.mttId && !t.private && t.occupied() < t.maxSeats
     && t.bb >= lo && t.bb <= hi && bank >= t.minBuyIn * 2;
@@ -472,12 +552,12 @@ function residentsTick(now) {
   // Куда: к людям — охотнее всего, к другим резидентам — тоже, иначе — свой стол.
   const withHumans = open.filter((t) => t.humans() > 0);
   const withResidents = open.filter((t) => t.players().some((p) => p.resident) && !t.humans());
-  const roll = Math.random();
-  let table = roll < 0.6 && withHumans.length ? withHumans[Math.floor(Math.random() * withHumans.length)]
-    : roll < 0.85 && withResidents.length ? withResidents[Math.floor(Math.random() * withResidents.length)] : null;
+  const roll = Math.random() * 100;
+  let table = roll < RS.preferHumans && withHumans.length ? withHumans[Math.floor(Math.random() * withHumans.length)]
+    : roll < RS.preferHumans + RS.preferResidents && withResidents.length ? withResidents[Math.floor(Math.random() * withResidents.length)] : null;
   if (!table) {
     const ownTables = [...tables.values()].filter((t) => isResidentOwner(t) && t.occupied()).length;
-    if (ownTables < RESIDENT_TABLES_MAX && Math.random() < 0.5) {
+    if (ownTables < RS.ownTablesMax && Math.random() * 100 < RS.ownTableChance) {
       const stakes = BLIND_STEPS.filter((bb) => bb >= lo && bb <= hi && bank >= bb * 100);
       if (stakes.length) {
         const bb = stakes[Math.floor(Math.random() * Math.min(3, stakes.length))];
@@ -590,13 +670,13 @@ function maintainHouseSngs(now) {
     if (!tour.fillAt) { tour.fillAt = now + span; open.touch(); }
     if (!open.nextJoinAt) open.nextJoinAt = now + span * (0.08 + Math.random() * 0.15);
     if (now >= tour.fillAt) {
-      while (open.occupied() < open.maxSeats && !addBotTo(open, { residentsOk: true }).error) { /* до полного стола — турнир стартует */ }
+      while (open.occupied() < open.maxSeats && !addBotTo(open, { residentsOk: RS.sngJoin }).error) { /* до полного стола — турнир стартует */ }
       open.maybeStartHand();
       continue;
     }
     const free = open.maxSeats - open.occupied();
     if (free > 1 && now >= open.nextJoinAt) {
-      addBotTo(open, { residentsOnly: true });
+      if (RS.sngJoin) addBotTo(open, { residentsOnly: true });
       const left = tour.fillAt - now;
       open.nextJoinAt = now + (left / Math.max(1, free)) * (0.4 + Math.random() * 0.9);
     }
@@ -653,7 +733,9 @@ const mtts = new MttManager({
   record: (entry, info) => store.recordMtt(entry.userId, info),
   notify: (userId, text) => notify(userId, text),
   isOnline: (userId) => isOnline(userId),
+  beforeStart: (mtt) => residentsBeforeMtt(mtt),
 });
+mttsReady = true;
 
 // Что из турниров кладётся в снимок рядом со столами.
 function mttSnapshot() {
@@ -1736,7 +1818,13 @@ const server = http.createServer(async (req, res) => {
       const ctx = requireAuth(req, res);
       if (!ctx) return;
       const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 50));
-      return send(res, 200, { entries: store.chipLog(ctx.user.id, limit) });
+      // Чужая история — по имени из профиля; что именно написал администратор, видно только владельцу.
+      const name = url.searchParams.get('name');
+      const who = name ? store.byNameLower(name) : ctx.user;
+      if (!who) return send(res, 404, { error: 'Игрок не найден' });
+      let entries = store.chipLog(who.id, limit);
+      if (who.id !== ctx.user.id) entries = entries.map((e) => (e.reason.startsWith('Администратор') ? { ...e, reason: 'Администратор' } : e));
+      return send(res, 200, { entries });
     }
 
     // История раздач: список своих последних, одна своя целиком, чужая — по коду ссылки.
@@ -1796,11 +1884,25 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, user: store.publicUser(ctx.user.id) });
     }
 
+    // Готовый аватар из набора — вместо своего фото.
+    if (route === '/api/avatar/stock' && req.method === 'POST') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      if (!allowCommand(ctx.session)) return send(res, 429, { error: 'Слишком часто. Подождите секунду' });
+      const body = await readBody(req);
+      const result = store.setStockAvatar(ctx.user.id, String(body.id || ''));
+      if (result.error) return send(res, 400, result);
+      if (result.old) dropAvatarFile(ctx.user.id, result.old.ext);
+      refreshSeatAvatar(ctx.user.id);
+      pushAll();
+      return send(res, 200, { ok: true, user: store.publicUser(ctx.user.id) });
+    }
+
     if (route === '/api/avatar/remove' && req.method === 'POST') {
       const ctx = requireAuth(req, res);
       if (!ctx) return;
       const old = store.removeAvatar(ctx.user.id);
-      if (old) dropAvatarFile(ctx.user.id, old.ext);
+      if (old && old.ext) dropAvatarFile(ctx.user.id, old.ext);
       refreshSeatAvatar(ctx.user.id);
       pushAll();
       return send(res, 200, { ok: true, user: store.publicUser(ctx.user.id) });
@@ -1854,11 +1956,71 @@ function sessionCookie(token) {
 
 // ——— админка ———
 
+// Резиденты в админке: настройки поведения по схеме и состав (ник, уровень, выключен).
+function residentsView() {
+  const roster = residentsCfg.roster();
+  const now = Date.now();
+  return {
+    schema: residentsCfg.schema,
+    levels: residentsCfg.levels,
+    levelNames: residentsCfg.levelNames,
+    settings: RS,
+    list: RESIDENT_LIST.map((base) => {
+      const r = residents.get(base.key);
+      const u = r && store.user(r.userId);
+      const t = r && tableOfUser(r.userId);
+      const mtt = r && [...mtts.list.values()].find((m) => m.status === 'registering' && m.entries.has(r.userId));
+      const own = roster[base.key] || {};
+      return {
+        key: base.key,
+        baseName: base.name,
+        baseStyle: base.style,
+        name: u ? u.name : (own.name || base.name),
+        style: own.style || base.style,
+        off: !!own.off,
+        avatar: u ? store.avatarUrl(u) : null,
+        chips: u ? u.chips : 0,
+        hands: u ? u.handsPlayed : 0,
+        conflict: !u,
+        nameTaken: !!(u && own.name && u.name !== own.name),   // желаемый ник занят живым игроком
+        table: t ? t.name : null,
+        restLeft: r && !t && r.restUntil > now ? r.restUntil - now : 0,
+        mtt: mtt ? mtt.name : null,
+      };
+    }),
+  };
+}
+
+async function adminResidents(req, res, ctx) {
+  if (req.method === 'GET') { send(res, 200, residentsView()); return true; }
+  if (req.method !== 'POST') return false;
+  const body = await readBody(req);
+  const by = ctx.user.name;
+  let errors = [];
+  if (body.action === 'settings') {
+    errors = residentsCfg.update(body.settings || {});
+    console.log(`Админ ${by}: изменены настройки резидентов`);
+  } else if (body.action === 'reset') {
+    residentsCfg.reset();
+    console.log(`Админ ${by}: настройки резидентов сброшены`);
+  } else if (body.action === 'roster') {
+    residentsCfg.setRoster(body.roster || {});
+    applyRoster();
+    lobbyAt = 0;
+    console.log(`Админ ${by}: изменён состав резидентов`);
+  } else {
+    send(res, 400, { error: 'Неизвестное действие' });
+    return true;
+  }
+  send(res, 200, { ok: true, errors, ...residentsView() });
+  return true;
+}
+
 const admin = createAdmin({
   // Убрать неприемлемый аватар — файл тоже удаляется.
   removeAvatar: (userId) => {
     const old = store.removeAvatar(userId);
-    if (old) dropAvatarFile(userId, old.ext);
+    if (old && old.ext) dropAvatarFile(userId, old.ext);
     refreshSeatAvatar(userId);
     return !!old;
   },
@@ -1908,6 +2070,7 @@ const admin = createAdmin({
   announcementChanged: () => { lobbyAt = 0; pushAll(); },
   // Турниры по расписанию: список, разовый турнир, старт сейчас, отмена, боты для проверки.
   extra: async (req, res, route, url, ctx) => {
+    if (route === '/api/admin/residents') return adminResidents(req, res, ctx);
     if (route === '/api/admin/mtt' && req.method === 'GET') {
       send(res, 200, { list: [...mtts.list.values()].sort((a, b) => a.startAt - b.startAt).map((m) => m.info()) });
       return true;

@@ -9,6 +9,14 @@ const weekly = require('./weekly');
 const levels = require('./levels');
 
 const START_CHIPS = 10000;
+// Готовые аватары (public/stock-avatars, см. tools/gen-stock-avatars.js): 15 мужских, 15 женских.
+const STOCK_AVATARS = [
+  ...Array.from({ length: 15 }, (_, i) => `m${String(i + 1).padStart(2, '0')}`),
+  ...Array.from({ length: 15 }, (_, i) => `f${String(i + 1).padStart(2, '0')}`),
+];
+// Версия в адресе — после перерисовки набора браузеры не покажут старые из кэша.
+const STOCK_V = 2;
+const stockAvatarUrl = (id) => `/stock-avatars/${id}.svg?v=${STOCK_V}`;
 const RELOAD_CHIPS = 2000; // бесплатное пополнение для игроков без фишек
 // Приглашение друга: новичок по ссылке сыграл REF_HANDS раздач — оба получают REF_REWARD.
 const REF_HANDS = 20;
@@ -246,6 +254,7 @@ class Store {
     this.users.set(user.id, user);
     this.byName.set(name.toLowerCase(), user.id);
     this.markActive(user);
+    this.logStart(user);
     this.linkReferral(user, friend);
     this.touch(user);
     return { user };
@@ -406,6 +415,7 @@ class Store {
     this.users.set(user.id, user);
     this.byName.set(user.name.toLowerCase(), user.id);
     this.byTg.set(tg.id, user.id);
+    this.logStart(user);
     this.linkReferral(user, friend);
     this.touch(user);
     return { user, created: true };
@@ -472,6 +482,11 @@ class Store {
   user(id) { return this.users.get(id) || null; }
 
   // Любое изменение банка — с причиной: она попадает в «Историю фишек» игрока.
+  // Первая строка истории фишек — стартовый банк нового аккаунта.
+  logStart(user) {
+    try { this.backend.logChips(user.id, user.createdAt, user.chips, user.chips, 'Стартовый банк'); } catch { /* история не важнее игры */ }
+  }
+
   addChips(userId, amount, reason = 'Прочее') {
     const u = this.users.get(userId);
     if (!u) return;
@@ -926,6 +941,7 @@ class Store {
         this.byName.set(user.name.toLowerCase(), user.id);
       }
       user.meta.residentStyle = r.style;
+      if (r.avatar) user.meta.residentAvatar = r.avatar; else delete user.meta.residentAvatar;
       this.touch(user);
       return user;
     }
@@ -933,7 +949,7 @@ class Store {
     user = {
       id: crypto.randomUUID(), name: r.name, salt: '', hash: '',
       chips: bankroll, handsPlayed: 0, createdAt: Date.now() - Math.floor(Math.random() * 60) * 86_400_000,
-      meta: { source: 'direct', resident: r.key, residentStyle: r.style },
+      meta: { source: 'direct', resident: r.key, residentStyle: r.style, ...(r.avatar ? { residentAvatar: r.avatar } : {}) },
     };
     this.prepare(user);
     this.users.set(user.id, user);
@@ -944,25 +960,43 @@ class Store {
 
   isBotUser(u) { return !!(u && u.meta && u.meta.resident); }
 
-  // Адрес аватара: версия в адресе сбрасывает кэш браузера после замены.
+  // Адрес аватара: своё фото (версия в адресе сбрасывает кэш браузера после замены),
+  // иначе — выбранный готовый, иначе у резидента — его из того же набора.
   avatarUrl(u) {
-    const a = u && u.meta && u.meta.avatar;
-    return a ? `/avatars/${u.id}.${a.ext}?v=${a.v}` : null;
+    const meta = u && u.meta;
+    if (!meta) return null;
+    if (meta.avatar) return `/avatars/${u.id}.${meta.avatar.ext}?v=${meta.avatar.v}`;
+    if (STOCK_AVATARS.includes(meta.avatarStock)) return stockAvatarUrl(meta.avatarStock);
+    return meta.residentAvatar || null;
   }
 
   setAvatar(userId, ext) {
     const u = this.users.get(userId);
     if (!u) return null;
     u.meta.avatar = { ext, v: Date.now().toString(36) };
+    delete u.meta.avatarStock;
     this.touch(u);
     return this.avatarUrl(u);
   }
 
+  // Готовый аватар вместо фото. Возвращает прежнее фото — его файл сервер удалит.
+  setStockAvatar(userId, id) {
+    const u = this.users.get(userId);
+    if (!u || !STOCK_AVATARS.includes(id)) return { error: 'Такого аватара нет' };
+    const old = u.meta.avatar || null;
+    delete u.meta.avatar;
+    u.meta.avatarStock = id;
+    this.touch(u);
+    return { ok: true, old };
+  }
+
+  // Убрать аватар — и фото, и готовый. Возвращает прежнее фото (или true, если был готовый).
   removeAvatar(userId) {
     const u = this.users.get(userId);
-    if (!u || !u.meta.avatar) return null;
-    const old = u.meta.avatar;
+    if (!u || (!u.meta.avatar && !u.meta.avatarStock)) return null;
+    const old = u.meta.avatar || true;
     delete u.meta.avatar;
+    delete u.meta.avatarStock;
     this.touch(u);
     return old;
   }
@@ -1088,4 +1122,4 @@ function cleanSource(source) {
   return s || null;
 }
 
-module.exports = { Store, START_CHIPS, RELOAD_CHIPS, REF_HANDS, REF_REWARD };
+module.exports = { Store, START_CHIPS, RELOAD_CHIPS, REF_HANDS, REF_REWARD, STOCK_AVATARS, stockAvatarUrl };

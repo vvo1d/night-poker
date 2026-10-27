@@ -36,6 +36,9 @@ const SCHEDULE = [
 
 const MSK = 3 * 3600_000;
 
+// Чьи фишки и места считаются по-настоящему: люди и резиденты (у них свой банк).
+const real = (e) => !e.isBot || !!e.resident;
+
 // Момент «сегодня в HH:MM по Москве» (или завтра, если уже прошло).
 function nextAt(time, now = Date.now()) {
   const [h, m] = time.split(':').map(Number);
@@ -68,7 +71,7 @@ class Mtt {
     this.scheduled = scheduled;
     this.hooks = hooks;
     this.status = 'registering';     // registering → running → finished | cancelled
-    this.entries = new Map();        // userId -> { userId, name, isBot }
+    this.entries = new Map();        // userId -> { userId, name, isBot, resident?, botStyle? }
     this.tables = new Set();
     this.places = [];                // { place, userId, name, prize }
     this.prizes = [];
@@ -103,7 +106,7 @@ class Mtt {
     const entry = this.entries.get(userId);
     if (!entry || this.status !== 'registering') return { error: 'Вы не записаны' };
     this.entries.delete(userId);
-    if (!entry.isBot && this.buyIn) this.hooks.refund(entry, this.buyIn);
+    if (real(entry) && this.buyIn) this.hooks.refund(entry, this.buyIn);
     return { ok: true };
   }
 
@@ -119,7 +122,7 @@ class Mtt {
   // Отмена: до старта — взносы назад; во время игры — невыплаченный фонд делится по стекам.
   cancel(reason = 'отменён') {
     if (this.status === 'registering') {
-      for (const e of this.entries.values()) if (!e.isBot && this.buyIn) this.hooks.refund(e, this.buyIn);
+      for (const e of this.entries.values()) if (real(e) && this.buyIn) this.hooks.refund(e, this.buyIn);
     } else if (this.status === 'running') {
       const left = this.prizes.reduce((a, b) => a + b, 0) - this.places.reduce((s, p) => s + p.prize, 0);
       const seated = [];
@@ -127,7 +130,7 @@ class Mtt {
       const total = seated.reduce((s, p) => s + p.stack + (p.inHand ? p.contributed : 0), 0);
       for (const p of seated) {
         const share = total ? Math.floor((left * (p.stack + (p.inHand ? p.contributed : 0))) / total) : 0;
-        if (!p.isBot && share > 0) this.hooks.refund({ userId: p.userId, name: p.name }, share);
+        if (real(p) && share > 0) this.hooks.refund({ userId: p.userId, name: p.name }, share);
       }
       for (const t of [...this.tables]) this.closeTable(t);
     }
@@ -155,11 +158,12 @@ class Mtt {
     list.forEach((entry, i) => {
       const table = tables[i % count];
       const seat = table.seats.findIndex((s) => s === null);
-      table.sit({ id: entry.userId, name: entry.name, isBot: entry.isBot }, seat, STACK);
+      table.sit({ id: entry.userId, name: entry.name, isBot: entry.isBot, resident: entry.resident, botStyle: entry.botStyle }, seat, STACK);
       const p = table.byUser(entry.userId);
+      if (p && entry.isBot && !entry.resident && entry.botStyle) p.botStyle = entry.botStyle;
       // Кого нет онлайн — «отошёл», но в турнире: блайнды платит, карты сбрасываются.
       if (p && !entry.isBot && !this.hooks.isOnline(entry.userId)) p.sittingOut = true;
-      if (!entry.isBot) this.hooks.record(entry, { start: true, entrants: this.entrants });
+      if (real(entry)) this.hooks.record(entry, { start: true, entrants: this.entrants });
     });
     for (const t of tables) t.note(`Турнир «${this.name}» начался: ${this.entrants} игроков, фонд ${this.pool}`, 'result');
   }
@@ -232,9 +236,9 @@ class Mtt {
 
   award(table, p, place) {
     const prize = this.prizes[place - 1] || 0;
-    this.places.push({ place, userId: p.isBot ? null : p.userId, name: p.name, prize, isBot: p.isBot && !p.resident });
+    this.places.push({ place, userId: real(p) ? p.userId : null, name: p.name, prize, isBot: p.isBot && !p.resident });
     this.places.sort((a, b) => a.place - b.place);
-    if (!p.isBot) {
+    if (real(p)) {
       if (prize) this.hooks.pay({ userId: p.userId, name: p.name }, prize);
       this.hooks.record({ userId: p.userId, name: p.name }, { place, prize, entrants: this.entrants });
     }
@@ -297,12 +301,15 @@ class Mtt {
   }
 
   move(p, from, to) {
-    const { userId, name, isBot, stack, sittingOut } = p;
+    const { userId, name, isBot, resident, botStyle, stack, sittingOut } = p;
     from.removePlayer(p);
     const seat = to.seats.findIndex((s) => s === null);
-    to.sit({ id: userId, name, isBot }, seat, stack);
+    to.sit({ id: userId, name, isBot, resident, botStyle }, seat, stack);
     const moved = to.byUser(userId);
-    if (moved) moved.sittingOut = sittingOut;
+    if (moved) {
+      moved.sittingOut = sittingOut;
+      if (isBot && !resident && botStyle) moved.botStyle = botStyle;
+    }
     to.note(`${name} пересаживается сюда со стола «${from.name}»`, 'seat');
   }
 
@@ -413,9 +420,11 @@ class MttManager {
           }
         }
         if (now >= mtt.startAt) {
-          // Людей нет — играть некому. Людей мало — недостающих добирают боты.
-          const humans = [...mtt.entries.values()].filter((e) => !e.isBot).length;
-          if (!humans) mtt.cancel('никто не записался');
+          // Перед стартом сервер освобождает участников-резидентов от других столов.
+          if (this.hooks.beforeStart) this.hooks.beforeStart(mtt);
+          // Играть некому — отмена (резиденты считаются игроками). Мало — добирают боты.
+          const players = [...mtt.entries.values()].filter(real).length;
+          if (!players) mtt.cancel('никто не записался');
           else {
             if (mtt.entries.size < MIN_PLAYERS) mtt.addBots(BOT_FILL - mtt.entries.size);
             mtt.start(now);
@@ -452,4 +461,4 @@ class MttManager {
   }
 }
 
-module.exports = { Mtt, MttManager, SCHEDULE, payouts, nextAt, STACK, LEVEL_MS, MIN_PLAYERS };
+module.exports = { Mtt, MttManager, SCHEDULE, payouts, nextAt, STACK, LEVEL_MS, MIN_PLAYERS, TABLE_SEATS };

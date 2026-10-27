@@ -6,7 +6,7 @@ body.admin { min-height: 100%; }
 .adm__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
 .adm__bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
 .adm__count { font-size: 13px; color: var(--muted); }
-.adm__search, .adm__select, .adm__text, .user-card__form input {
+.adm__search, .adm__select, .adm__text, .user-card__form input, .res-num, .res-name {
   font: inherit; font-size: 14px; color: var(--text); background: #0b1215;
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
 }
@@ -102,3 +102,27 @@ code { font-size: 12px; color: var(--brass); }
 .mtt-form .adm__search { width: auto; flex: 1 1 160px; }
 .mtt-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .user-card__avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; margin-right: 6px; }
+
+/* Резиденты */
+.res-form { margin-top: 16px; }
+.res-group { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px 4px; margin: 0 0 14px; }
+.res-group legend { padding: 0 6px; font-size: 13px; font-weight: 600; color: var(--bone); }
+.res-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 16px; padding: 8px 0; border-top: 1px dashed var(--line); }
+.res-field:first-of-type { border-top: 0; }
+.res-field__label { font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+.res-field__input { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; font-size: 13px; }
+.res-field--levels { grid-template-columns: 1fr; }
+.res-field--levels .res-field__input { justify-content: flex-start; }
+.res-level { display: flex; flex-direction: column; gap: 2px; }
+.res-num { width: 92px; padding: 6px 8px; }
+.res-field input[type="checkbox"] { width: 18px; height: 18px; }
+.res-form__bar { margin: 0; }
+.res-field input[type="checkbox"], .res-roster input[type="checkbox"] { accent-color: var(--brass); cursor: pointer; }
+.res-scroll { overflow-x: auto; }
+.res-roster td { vertical-align: middle; }
+.res-name { width: 150px; }
+.res-roster .user-card__avatar { width: 30px; height: 30px; margin: 0; }
+@media (max-width: 640px) {
+  .res-field { grid-template-columns: 1fr; }
+  .res-field__input { justify-content: flex-start; }
+}

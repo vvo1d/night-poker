@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs><radialGradient id="gm08" cx="35%" cy="25%" r="90%"><stop offset="0" stop-color="#2e5a3a"/><stop offset="1" stop-color="#13291a"/></radialGradient></defs>
+<rect width="256" height="256" fill="url(#gm08)"/>
+<circle cx="128" cy="118" r="96" fill="#fff" opacity="0.04"/>
+<path d="M24 256 C28 200 76 172 128 172 C180 172 228 200 232 256 Z" fill="#e8e1cf"/><path d="M24 256 C28 214 60 192 92 182 C80 206 76 232 78 256 Z" fill="#000" opacity="0.10"/><path d="M106 174 C114 186 142 186 150 174" fill="none" stroke="#000" stroke-opacity="0.18" stroke-width="5" stroke-linecap="round"/>
+
+
+
+  <path d="M112 132 L144 132 L146 178 C138 186 118 186 110 178 Z" fill="#6f4530"/>
+  <path d="M110 160 C120 170 136 170 146 160 L146 172 C136 180 120 180 110 172 Z" fill="#000" opacity="0.12"/>
+  <ellipse cx="88" cy="114" rx="7" ry="11" fill="#6f4530"/>
+  <ellipse cx="168" cy="114" rx="7" ry="11" fill="#6f4530"/>
+  <ellipse cx="128" cy="108" rx="41" ry="50" fill="#6f4530"/>
+
+  <path d="M100 95 Q111 90 122 95" fill="none" stroke="#1e1b1a" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M134 95 Q145 90 156 95" fill="none" stroke="#1e1b1a" stroke-width="4.5" stroke-linecap="round"/>
+  <ellipse cx="112" cy="109" rx="5.5" ry="6" fill="#2a1d17"/>
+  <ellipse cx="144" cy="109" rx="5.5" ry="6" fill="#2a1d17"/>
+  <circle cx="114" cy="107" r="1.8" fill="#fff" opacity="0.9"/>
+  <circle cx="146" cy="107" r="1.8" fill="#fff" opacity="0.9"/>
+  <path d="M128 112 Q124 124 126 126 Q128 128 132 126" fill="none" stroke="#000" stroke-opacity="0.22" stroke-width="2.5" stroke-linecap="round"/>
+
+<path d="M119 138 Q128 141 137 138" fill="none" stroke="#7a3b30" stroke-width="3.5" stroke-linecap="round"/>
+<path d="M88 100 C88 70 104 58 128 58 C152 58 168 70 168 100 C160 84 146 76 128 76 C110 76 96 84 88 100 Z" fill="#1e1b1a" opacity="0.85"/>
+<path d="M84 112 C80 52 176 52 172 112" fill="none" stroke="#202326" stroke-width="9" stroke-linecap="round"/><rect x="72" y="100" width="20" height="32" rx="8" fill="#202326"/><rect x="164" y="100" width="20" height="32" rx="8" fill="#202326"/><rect x="76" y="106" width="8" height="20" rx="4" fill="#c9a24a"/><rect x="172" y="106" width="8" height="20" rx="4" fill="#c9a24a"/>
+</svg>

@@ -1171,6 +1171,66 @@ function pickAvatar(done) {
   input.click();
 }
 
+// Окно выбора аватара: своё фото или один из 30 готовых портретов.
+const STOCK_AVATARS = {
+  'Мужские': Array.from({ length: 15 }, (_, i) => `m${String(i + 1).padStart(2, '0')}`),
+  'Женские': Array.from({ length: 15 }, (_, i) => `f${String(i + 1).padStart(2, '0')}`),
+};
+const avatarDialog = $('#avatar-dialog');
+$('#avatar-close').addEventListener('click', () => avatarDialog.close());
+avatarDialog.addEventListener('click', (e) => { if (e.target === avatarDialog) avatarDialog.close(); });
+
+function openAvatarPicker(done) {
+  const body = $('#avatar-body');
+  body.textContent = '';
+  const current = (state.user && state.user.avatar) || '';
+  body.append(el('h3', null, 'Аватар'));
+  const top = el('div', 'avatar-pick__top');
+  const upload = el('button', 'btn btn--primary btn--sm', 'Загрузить своё фото');
+  upload.addEventListener('click', () => { avatarDialog.close(); pickAvatar(done); });
+  top.append(upload);
+  if (current) {
+    const drop = el('button', 'btn btn--ghost btn--sm', 'Убрать аватар');
+    drop.addEventListener('click', async () => {
+      const { ok, data } = await post('/api/avatar/remove');
+      if (!ok) return;
+      setUser(data.user);
+      avatarDialog.close();
+      if (done) done();
+    });
+    top.append(drop);
+  }
+  body.append(top, el('p', 'hint', 'Или выберите готовый — его видят все за столом и в профиле.'));
+  for (const [title, ids] of Object.entries(STOCK_AVATARS)) {
+    body.append(el('h4', 'avatar-pick__title', title));
+    const grid = el('div', 'avatar-pick');
+    for (const id of ids) {
+      const url = `/stock-avatars/${id}.svg?v=2`;   // версия — как STOCK_V в src/store.js
+      const b = el('button', `avatar-pick__item${current === url ? ' is-on' : ''}`);
+      b.type = 'button';
+      b.setAttribute('aria-label', `${id[0] === 'm' ? 'Мужской' : 'Женский'} аватар ${Number(id.slice(1))}`);
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = '';
+      img.loading = 'lazy';
+      b.append(img);
+      b.addEventListener('click', async () => {
+        const { ok, data } = await post('/api/avatar/stock', { id });
+        if (!ok) { toast((data && data.error) || 'Не удалось сменить аватар'); return; }
+        setUser(data.user);
+        avatarDialog.close();
+        toast('Аватар обновлён', { good: true });
+        Sound.play('chips');
+        if (done) done();
+      });
+      grid.append(b);
+    }
+    body.append(grid);
+  }
+  openModal(avatarDialog);
+  Sound.play('click');
+}
+
 // ——— сезон и лиги ———
 
 const LEAGUE_NAMES = { bronze: 'Бронза', silver: 'Серебро', gold: 'Золото', platinum: 'Платина', diamond: 'Бриллиант' };
@@ -1276,10 +1336,21 @@ function linkCard(card, title, open) {
   return btn;
 }
 
+// Счётчик фишек в шапке (лобби и стол) — тоже открывает историю фишек.
+document.querySelectorAll('.bank').forEach((b) => {
+  b.classList.add('bank--link');
+  b.title = 'История фишек';
+  b.setAttribute('role', 'button');
+  b.tabIndex = 0;
+  b.addEventListener('click', (e) => { if (!e.target.closest('button')) openChipLog(); });
+  b.addEventListener('keydown', (e) => { if (e.key === 'Enter') openChipLog(); });
+});
+
 // Фишки — история фишек; раздачи — последние раздачи с повтором.
 function chipsCard(data, s) {
   const card = statCard(fmt(data.chips), 'фишек', `максимум ${fmt(s.peakChips)}`);
-  return data.own ? linkCard(card, 'История фишек: за что начислялись и списывались', openChipLog) : card;
+  // История фишек открывается и в чужом профиле — у любого игрока.
+  return linkCard(card, 'История фишек: за что начислялись и списывались', () => openChipLog(data.own ? null : data.name));
 }
 
 function handsCard(data, s) {
@@ -1288,10 +1359,10 @@ function handsCard(data, s) {
 }
 
 // История фишек — в окне: причина, время, сумма и остаток в банке.
-async function openChipLog() {
+async function openChipLog(name = null) {
   const body = $('#hands-body');
   body.textContent = '';
-  body.append(el('h3', null, 'История фишек'));
+  body.append(el('h3', null, name ? `История фишек · ${name}` : 'История фишек'));
   const list = el('ul', 'chip-log');
   list.append(el('li', 'hint', 'Загружаем…'));
   const more = el('button', 'btn btn--sm', 'Показать всю историю');
@@ -1301,10 +1372,10 @@ async function openChipLog() {
   openModal(handsDialog);
   Sound.play('click');
   const fill = async (limit) => {
-    const res = await getJson(`/api/chips-log?limit=${limit}`);
+    const res = await getJson(`/api/chips-log?limit=${limit}${name ? `&name=${encodeURIComponent(name)}` : ''}`);
     const entries = (res && res.entries) || [];
     list.textContent = '';
-    if (!entries.length) list.append(el('li', 'hint', 'Здесь появится, за что вам начислялись и списывались фишки.'));
+    if (!entries.length) list.append(el('li', 'hint', name ? 'Пока пусто.' : 'Здесь появится, за что вам начислялись и списывались фишки.'));
     for (const e of entries) {
       const li = el('li', `chip-log__row${e.amount > 0 ? ' is-plus' : ' is-minus'}`);
       li.append(
@@ -1504,10 +1575,10 @@ function renderProfile(box, data) {
   // Свой аватар меняется по нажатию: выбрать фото — обрежем и сожмём прямо в браузере.
   if (data.own) {
     face.classList.add('avatar--edit');
-    face.title = 'Сменить фото';
+    face.title = 'Сменить аватар';
     face.tabIndex = 0;
     face.setAttribute('role', 'button');
-    const pick = () => pickAvatar(() => refreshProfile(data, box));
+    const pick = () => openAvatarPicker(() => refreshProfile(data, box));
     face.addEventListener('click', pick);
     face.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
   }
@@ -1534,18 +1605,9 @@ function renderProfile(box, data) {
   if (!data.own) actions.append(...friendButtons(data, box));
   // Публичная страница профиля — ей можно поделиться где угодно.
   if (data.own) {
-    const photo = el('button', 'btn btn--ghost btn--sm', data.avatar ? 'Сменить фото' : 'Загрузить фото');
-    photo.addEventListener('click', () => pickAvatar(() => refreshProfile(data, box)));
+    const photo = el('button', 'btn btn--ghost btn--sm', data.avatar ? 'Сменить аватар' : 'Установить аватар');
+    photo.addEventListener('click', () => openAvatarPicker(() => refreshProfile(data, box)));
     actions.append(photo);
-    if (data.avatar) {
-      const drop = el('button', 'btn btn--ghost btn--sm', 'Убрать фото');
-      drop.addEventListener('click', async () => {
-        if (!confirm('Убрать фото профиля?')) return;
-        const { ok, data: res } = await post('/api/avatar/remove');
-        if (ok) { setUser(res.user); refreshProfile(data, box); }
-      });
-      actions.append(drop);
-    }
   }
   const share = el('button', 'btn btn--ghost btn--sm', data.own ? 'Поделиться профилем' : 'Ссылка на профиль');
   share.addEventListener('click', async () => {
@@ -2165,6 +2227,8 @@ function renderTable(t) {
 
     if (seat.isBot && t.you && (!tour || tour.status === 'registering')) {
       const kick = el('button', 'seat__kick');
+      // Крест — картинкой: псевдоэлементы на телефоне съезжали с середины кружка.
+      kick.innerHTML = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 2.5l5 5m0-5l-5 5"/></svg>';
       kick.title = 'Убрать бота';
       kick.setAttribute('aria-label', `Убрать бота ${seat.name}`);
       kick.addEventListener('click', () => cmd({ cmd: 'kickBot', seat: i }));
@@ -3835,6 +3899,25 @@ function arcRaiseBox(t, legal) {
   const drop = () => size.classList.remove('is-drag');
   hit.addEventListener('pointerup', drop);
   hit.addEventListener('pointercancel', drop);
+  // Кружки на концах и отметки лежат на самой дуге: палец, попавший на них,
+  // тоже тянет ставку. Сдвинул на несколько пикселей — это перетаскивание, а не нажатие.
+  for (const b of [minKnob, maxKnob, ...ticks.map((x) => x.b)]) {
+    let start = null;
+    let dragged = false;
+    b.addEventListener('pointerdown', (e) => { start = [e.clientX, e.clientY]; dragged = false; b.setPointerCapture(e.pointerId); });
+    b.addEventListener('pointermove', (e) => {
+      if (!start || !b.hasPointerCapture(e.pointerId)) return;
+      if (!dragged && Math.hypot(e.clientX - start[0], e.clientY - start[1]) < 6) return;
+      dragged = true;
+      size.classList.add('is-drag');
+      fromPointer(e);
+    });
+    const end = () => { start = null; drop(); };
+    b.addEventListener('pointerup', end);
+    b.addEventListener('pointercancel', end);
+    // Нажатие после перетаскивания не считается кликом по кружку.
+    b.addEventListener('click', (e) => { if (dragged) { e.stopImmediatePropagation(); dragged = false; } }, true);
+  }
   svg.addEventListener('wheel', (e) => { e.preventDefault(); state.setRaise(e.deltaY < 0 ? 1 : -1); }, { passive: false });
 
   svg.setAttribute('role', 'slider');
