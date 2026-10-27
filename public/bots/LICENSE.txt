@@ -1,0 +1,8 @@
+Аватары ботов — Fluent Emoji 3D (Microsoft), лицензия MIT:
+https://github.com/microsoft/fluentui-emoji
+  novice.png  — Hatching chick   (новичок — «цыплёнок»)
+  amateur.png — Fish             (любитель — «рыба», так в покере зовут слабого игрока)
+  regular.png — Fox              (регуляр — хитрый лис)
+  shark.png   — Shark            (акула)
+  pro.png     — Smiling face with sunglasses (профи в тёмных очках)
+Уменьшены до 144×144.

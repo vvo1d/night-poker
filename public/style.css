@@ -1933,3 +1933,21 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
   background: linear-gradient(90deg, rgba(201, 162, 74, 0.22), rgba(201, 162, 74, 0.1)); border-bottom: 1px solid rgba(201, 162, 74, 0.45);
 }
 .away-bar[hidden] { display: none; }
+
+.people__note { margin: 16px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+
+/* ——— аватары ботов по уровню: персонаж на фоне цвета уровня ——— */
+.seat__face--bot[data-lvl] {
+  overflow: hidden; display: grid; place-items: center;
+  background: var(--bot-bg); box-shadow: 0 0 0 2px var(--bot-ring), 0 6px 16px rgba(0, 0, 0, 0.55);
+}
+.bot-face__img { width: 82% !important; height: 82% !important; object-fit: contain !important; filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.45)); }
+.seat__face--bot[data-lvl="novice"]  { --bot-bg: radial-gradient(circle at 50% 35%, #4f8f63, #1f4a31); --bot-ring: #7bc796; }
+.seat__face--bot[data-lvl="amateur"] { --bot-bg: radial-gradient(circle at 50% 35%, #4d7fbf, #1f3b66); --bot-ring: #7eaee6; }
+.seat__face--bot[data-lvl="regular"] { --bot-bg: radial-gradient(circle at 50% 35%, #8a6a3f, #3d2b17); --bot-ring: #d39a55; }
+.seat__face--bot[data-lvl="shark"]   { --bot-bg: radial-gradient(circle at 50% 35%, #2f6f8a, #10303f); --bot-ring: #e27a68; }
+.seat__face--bot[data-lvl="pro"]     {
+  --bot-bg: radial-gradient(circle at 50% 35%, #3a2f12, #120d04); --bot-ring: #f6dc8c;
+  box-shadow: 0 0 0 2px var(--bot-ring), 0 0 16px rgba(246, 220, 140, 0.45), 0 6px 16px rgba(0, 0, 0, 0.55);
+}
+.seat--folded .seat__face--bot[data-lvl] { filter: grayscale(0.7); }

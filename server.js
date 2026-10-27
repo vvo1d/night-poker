@@ -11,7 +11,7 @@ const crypto = require('node:crypto');
 const { Store, REF_HANDS } = require('./src/store');
 const { CATALOG: SHOP_CATALOG } = require('./src/shop');
 const { Table, setEvalBudget, REACTIONS, PHRASES, SIT_OUT_MS } = require('./src/table');
-const { BOT_NAMES } = require('./src/bot');
+const { CHARACTERS: BOT_CHARACTERS, BOT_DISCLAIMER } = require('./src/bot');
 const { Tournament, SNG_STACK, SNG_TIMEOUT, SNG_BUY_INS, SPIN_STACK, SPIN_TIMEOUT } = require('./src/tournament');
 const { ACHIEVEMENTS, achievementView, tierTotal } = require('./src/achievements');
 const { Snapshot, mttRefunds, tableRecord, refunds } = require('./src/snapshot');
@@ -233,14 +233,39 @@ function createSngTable(name, seats, buyIn, opts = {}) {
   return table;
 }
 
-// Посадить бота на первое свободное место.
+// Кого из ботов сажать — по ставкам стола: на маленьких — новички и любители,
+// чтобы новым игрокам было по силам; на крупных — регуляры, акулы и профи.
+// Вес — сколько «билетов в шляпе» у каждого уровня.
+const BOT_MIX = [
+  { upTo: 2, mix: { novice: 6, amateur: 3, regular: 1 } },
+  { upTo: 10, mix: { novice: 3, amateur: 4, regular: 2, shark: 1 } },
+  { upTo: 50, mix: { novice: 1, amateur: 3, regular: 4, shark: 2, pro: 1 } },
+  // И на крупных ставках иногда садится «рыба» — как в жизни: есть на ком заработать.
+  { upTo: Infinity, mix: { novice: 1, amateur: 2, regular: 3, shark: 4, pro: 3 } },
+];
+function botMixFor(table) {
+  const tour = table.tour;
+  // Турниры: по взносу — дешёвые как маленькие столы, дорогие как крупные; спины — вперемешку.
+  const level = tour ? (tour.spin ? 10 : Math.min(100, (tour.buyIn || 100) / 20)) : table.bb;
+  return BOT_MIX.find((m) => level <= m.upTo).mix;
+}
+
+// Посадить бота на первое свободное место: персонаж подходящего уровня, ещё не сидящий за столом.
 function addBotTo(table) {
   const seat = table.seats.findIndex((s) => s === null);
   if (seat < 0) return { error: 'Свободных мест нет' };
   const taken = new Set(table.players().map((p) => p.name));
-  const name = BOT_NAMES.find((n) => !taken.has(n)) || `Бот-${seat + 1}`;
+  const mix = botMixFor(table);
+  const pool = BOT_CHARACTERS.filter((c) => !taken.has(c.name) && mix[c.style]);
+  let pick = null;
+  const total = pool.reduce((sum, c) => sum + mix[c.style], 0);
+  let roll = Math.random() * total;
+  for (const c of pool) { roll -= mix[c.style]; if (roll < 0) { pick = c; break; } }
+  if (!pick) pick = BOT_CHARACTERS.find((c) => !taken.has(c.name)) || { name: `Бот-${seat + 1}`, style: 'amateur' };
   const stack = table.tour ? table.tour.stack : Math.round((table.minBuyIn + table.maxBuyIn) / 2);
-  return table.sit({ id: `bot-${crypto.randomUUID()}`, name, isBot: true }, seat, stack);
+  const res = table.sit({ id: `bot-${crypto.randomUUID()}`, name: pick.name, isBot: true }, seat, stack);
+  if (!res.error) table.seats[seat].botStyle = pick.style;
+  return res;
 }
 
 // Посадить игрока: взнос или закупка списывается из банка до посадки —
@@ -1364,6 +1389,7 @@ const server = http.createServer(async (req, res) => {
         telegramLogin: TG_LOGIN,
         reactions: REACTIONS,
         phrases: PHRASES,
+        botDisclaimer: BOT_DISCLAIMER,
         metrika: METRIKA_ID || null,
         shop: SHOP_CATALOG,
       });

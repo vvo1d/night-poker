@@ -1320,6 +1320,21 @@ async function openChipLog() {
   fill(50);
 }
 
+// Аватар бота — персонаж его уровня: цыплёнок-новичок, рыба-любитель (так в покере
+// зовут слабого игрока), хитрый лис-регуляр, акула и профи в тёмных очках.
+// Картинки — Fluent Emoji 3D (Microsoft, MIT), см. public/bots/LICENSE.txt.
+const BOT_LEVEL_NAME = { novice: 'новичок', amateur: 'любитель', regular: 'регуляр', shark: 'акула', pro: 'профи' };
+function botAvatar(face, seat) {
+  face.dataset.lvl = seat.botLevel;
+  const img = document.createElement('img');
+  img.src = `/bots/${seat.botLevel}.png`;
+  img.alt = '';
+  img.decoding = 'async';
+  img.className = 'bot-face__img';
+  face.append(img);
+  face.title = `Бот · ${BOT_LEVEL_NAME[seat.botLevel] || ''}`;
+}
+
 function statCard(value, label, note = '') {
   const card = el('div', 'stat');
   card.append(el('b', 'stat__value', value), el('span', 'stat__label', label));
@@ -2069,7 +2084,9 @@ function renderTable(t) {
     node.append(cards);
 
     const plate = el('div', 'seat__plate');
-    const name = el('span', `seat__name${seat.isBot ? '' : ' is-link'}`, seat.name + (seat.isBot ? ' •' : ''));
+    // У ботов с именем и фамилией за столом — только фамилия: «Негреану», полное имя — в подсказке.
+    const shown = seat.isBot && seat.name.includes(' ') ? seat.name.split(/\s+/).pop() : seat.name;
+    const name = el('span', `seat__name${seat.isBot ? '' : ' is-link'}`, shown + (seat.isBot ? ' •' : ''));
     if (seat.level) {
       const lvl = el('span', 'seat__lvl', String(seat.level));
       lvl.title = `Уровень ${seat.level}`;
@@ -2083,10 +2100,15 @@ function renderTable(t) {
       img.alt = '';
       img.decoding = 'async';
       face.append(img);
+    } else if (seat.isBot && seat.botLevel) {
+      botAvatar(face, seat);
     } else {
       face.textContent = seat.name.slice(0, 1).toUpperCase();
     }
-    if (!seat.isBot) {
+    if (seat.isBot) {
+      // Бот: подсказка, что это не настоящий игрок, даже если у него известное имя.
+      name.title = `${seat.name} — бот. ${(state.config && state.config.botDisclaimer) || ''}`;
+    } else {
       face.type = 'button';
       face.title = `Профиль ${seat.name}`;
       face.setAttribute('aria-label', `Открыть профиль ${seat.name}`);
@@ -3988,6 +4010,9 @@ function renderPeople(t) {
   if (t.tour) {
     section('Вылетели', out.map((p) => personRow(p.name, null, `${p.place} место${p.prize ? ` · ${fmt(p.prize)}` : ''}`, { bot: p.isBot, you: p.name === me })),
       'Пока никто.');
+  }
+  if (seated.some((s) => s.isBot) && state.config && state.config.botDisclaimer) {
+    box.append(el('p', 'people__note', `• — бот. ${state.config.botDisclaimer}`));
   }
 }
 $('#close-log').addEventListener('click', () => toggleLog(false));

@@ -1,6 +1,6 @@
 'use strict';
 const { freshDeck, shuffle, evaluate, handInfo } = require('./cards');
-const { decideBotAction, botThinkingTime } = require('./bot');
+const { decideBotAction, botThinkingTime, botLevel } = require('./bot');
 const { SNG_AWAY_MS } = require('./tournament');
 
 const PHASES = ['preflop', 'flop', 'turn', 'river'];
@@ -976,7 +976,42 @@ class Table {
       x.hand = x.shown ? p.handName || null : null;
     }
     h.pot = h.players.reduce((sum, x) => sum + (x.won || 0), 0);
+    this.learnFrom(h);
     this.onHandRecord(h, this);
+  }
+
+  // Что стол «помнит» о каждом игроке — по этому сильные боты подстраиваются:
+  // как часто входит в раздачу и повышает до флопа, как часто ставит после флопа
+  // и как часто сбрасывает на ставку. Ключ — имя: так боты узнают и людей, и друг друга.
+  learnFrom(h) {
+    if (!this.reads) this.reads = new Map();
+    const seatName = new Map(h.players.map((x) => [x.seat, x.name]));
+    const get = (seat) => {
+      const name = seatName.get(seat);
+      if (!this.reads.has(name)) this.reads.set(name, { hands: 0, vpip: 0, pfr: 0, aggro: 0, passive: 0, faced: 0, folded: 0 });
+      return this.reads.get(name);
+    };
+    for (const x of h.players) get(x.seat).hands += 1;
+    const vp = new Set();
+    const pr = new Set();
+    let street = '';
+    let betOn = false;
+    for (const a of h.actions) {
+      if (a.a === 'board') { street = a.st; betOn = false; continue; }
+      if (a.a === 'sb' || a.a === 'bb') continue;
+      const r = get(a.seat);
+      if (a.st === 'preflop' || street === '') {
+        if (a.a === 'call' || a.a === 'raise' || a.a === 'bet') vp.add(a.seat);
+        if (a.a === 'raise' || a.a === 'bet') pr.add(a.seat);
+        continue;
+      }
+      if (a.a === 'bet' || a.a === 'raise') r.aggro += 1;
+      if (a.a === 'call') r.passive += 1;
+      if (betOn && (a.a === 'fold' || a.a === 'call' || a.a === 'raise')) { r.faced += 1; if (a.a === 'fold') r.folded += 1; }
+      if (a.a === 'bet' || a.a === 'raise') betOn = true;
+    }
+    for (const seat of vp) get(seat).vpip += 1;
+    for (const seat of pr) get(seat).pfr += 1;
   }
 
   // Итог раздачи по каждому участнику — для статистики игрока. Комбинацию
@@ -1109,6 +1144,7 @@ class Table {
           seat: i,
           name: p.name,
           isBot: p.isBot,
+          botLevel: p.isBot ? botLevel(p) : null,   // уровень — для аватара бота
           avatar: p.avatar || null,
           frame: p.frame || null,
           level: p.isBot ? null : (p.level || 1),
