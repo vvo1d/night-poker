@@ -247,7 +247,7 @@ loaders.users = async () => {
   const box = $('#users');
   box.textContent = '';
   const head = el('tr');
-  ['Игрок', 'Фишки', 'Раздач', 'Сезон', 'Заходил', 'Источник'].forEach((h, i) => head.append(el('th', i ? 'num' : '', h)));
+  ['ID', 'Игрок', 'Фишки', 'Раздач', 'Сезон', 'Заходил', 'Источник'].forEach((h, i) => head.append(el('th', i > 1 ? 'num' : '', h)));
   box.append(head);
   for (const u of d.users) {
     const tr = el('tr');
@@ -256,15 +256,19 @@ loaders.users = async () => {
     name.append(document.createTextNode(u.name));
     if (u.banned) name.append(el('span', 'badge badge--bad', 'бан'));
     if (u.telegram) name.append(el('span', 'badge', 'tg'));
-    tr.append(name, el('td', 'num', fmt(u.chips)), el('td', 'num', fmt(u.hands)), el('td', 'num', fmt(u.season)),
+    if (u.vk) name.append(el('span', 'badge', 'vk'));
+    if (u.guest) name.append(el('span', 'badge', 'гость'));
+    if (u.owner) name.append(el('span', 'badge badge--ok', 'владелец'));
+    else if (u.admin) name.append(el('span', 'badge badge--ok', 'админ'));
+    tr.append(el('td', 'muted', String(u.pid || '')), name, el('td', 'num', fmt(u.chips)), el('td', 'num', fmt(u.hands)), el('td', 'num', fmt(u.season)),
       el('td', 'num', u.lastDay ? dayLabel(u.lastDay) : '—'), el('td', 'num', u.source || '—'));
-    tr.addEventListener('click', () => openUser(u.name));
+    tr.addEventListener('click', () => openUser(u.pid || u.name));
     box.append(tr);
   }
 };
 
-async function openUser(name) {
-  const u = await api(`/api/admin/user?name=${encodeURIComponent(name)}`);
+async function openUser(key) {
+  const u = await api(`/api/admin/user?name=${encodeURIComponent(key)}`);
   renderUser(u);
 }
 
@@ -279,7 +283,9 @@ function renderUser(u) {
     img.alt = '';
     head.append(img);
   }
-  head.append(el('h3', null, u.name));
+  head.append(el('h3', null, u.name), el('span', 'badge', `ID ${u.pid}`));
+  if (u.owner) head.append(el('span', 'badge badge--ok', 'владелец'));
+  else if (u.admin) head.append(el('span', 'badge badge--ok', 'админ'));
   if (u.banned) head.append(el('span', 'badge badge--bad', 'заблокирован'));
   if (u.online) head.append(el('span', 'badge badge--ok', 'онлайн'));
   card.append(head);
@@ -293,13 +299,15 @@ function renderUser(u) {
   add('Дней в игре', fmt(u.days));
   add('Источник', u.source || '—');
   add('Telegram', u.telegram || '—');
+  add('VK', u.vk || '—');
+  if (u.guest) add('Аккаунт', 'гостевой (не сохранён)');
   add('Вход по паролю', u.password ? 'да' : 'нет');
   add('За столом', u.table || '—');
   if (u.banInfo) add('Бан', `${u.banInfo.by}${u.banInfo.reason ? `: ${u.banInfo.reason}` : ''}`);
   card.append(info);
 
   const act = async (body, done) => {
-    const res = await api('/api/admin/user', { name: u.name, ...body }).catch(() => null);
+    const res = await api('/api/admin/user', { pid: u.pid, ...body }).catch(() => null);
     if (!res) return;
     toast(done, true);
     renderUser(res.user);
@@ -317,6 +325,20 @@ function renderUser(u) {
     act({ action: 'chips', amount: Number(amount.value), reason: reason.value }, 'Фишки изменены');
   });
   card.append(el('h4', null, 'Фишки'), chips);
+
+  // Ник: администратор меняет в любое время, прежние ники — ниже.
+  const ren = el('form', 'user-card__form');
+  const newName = el('input'); newName.placeholder = 'Новый ник'; newName.maxLength = 16; newName.value = u.name;
+  const doRen = el('button', 'btn btn--sm', 'Сменить ник'); doRen.type = 'submit';
+  ren.append(newName, doRen);
+  ren.addEventListener('submit', (e) => {
+    e.preventDefault();
+    act({ action: 'rename', newName: newName.value }, 'Ник изменён');
+  });
+  card.append(el('h4', null, 'Ник'), ren);
+  if (u.oldNames && u.oldNames.length) {
+    card.append(el('p', 'muted', `Прежние ники: ${u.oldNames.map((o) => `${o.name} (${DATE.format(new Date(o.at))})`).join(', ')}`));
+  }
 
   // Пароль
   const pass = el('form', 'user-card__form');
@@ -355,7 +377,32 @@ function renderUser(u) {
     });
     row.append(ban);
   }
+  // Права администратора — назначает владелец (ADMIN_IDS); владельца не снять отсюда.
+  if (!u.owner && !u.resident) {
+    const adm = el('button', `btn btn--sm${u.admin ? ' btn--danger' : ''}`, u.admin ? 'Снять с администраторов' : 'Сделать администратором');
+    adm.addEventListener('click', () => {
+      if (!confirm(u.admin ? `Снять ${u.name} с администраторов?` : `Дать ${u.name} (ID ${u.pid}) права администратора?`)) return;
+      act({ action: 'admin', on: !u.admin }, u.admin ? 'Права сняты' : 'Назначен администратором');
+    });
+    row.append(adm);
+  }
   card.append(el('h4', null, 'Доступ'), row);
+
+  // Удаление насовсем — только с подтверждением именем: отменить его нельзя.
+  if (!u.resident) {
+    const del = el('button', 'btn btn--sm btn--danger', 'Удалить игрока');
+    del.addEventListener('click', async () => {
+      const typed = prompt(`Удалить ${u.name} насовсем? Аккаунт, фишки, статистика, друзья и история пропадут, вернуть их будет нельзя.\n\nЧтобы подтвердить, введите имя игрока:`);
+      if (typed === null) return;
+      if (typed.trim().toLowerCase() !== u.name.toLowerCase()) { toast('Имя не совпало — игрок не удалён'); return; }
+      const res = await api('/api/admin/user', { pid: u.pid, action: 'delete' }).catch(() => null);
+      if (!res) return;
+      toast(`Игрок ${res.deleted} удалён`, true);
+      $('#user-card').hidden = true;
+      loaders.users();
+    });
+    card.append(el('h4', null, 'Удаление'), del);
+  }
 
   if (u.log.length) {
     card.append(el('h4', null, 'История действий администраторов'));

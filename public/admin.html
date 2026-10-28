@@ -30,7 +30,7 @@
 </header>
 
 <main class="adm">
-  <p class="adm__denied" id="denied" hidden>Эта страница — только для администратора. Войдите в игру под аккаунтом из списка <code>ADMIN_NAMES</code>.</p>
+  <p class="adm__denied" id="denied" hidden>Эта страница — только для администратора. Войдите в игру под аккаунтом администратора (номер игрока в <code>ADMIN_IDS</code> или назначен владельцем в админке).</p>
 
   <!-- Обзор -->
   <section id="tab-overview">
@@ -65,7 +65,7 @@
   <!-- Игроки -->
   <section id="tab-users" hidden>
     <div class="adm__bar">
-      <input class="adm__search" id="user-q" placeholder="Имя или @telegram" autocomplete="off">
+      <input class="adm__search" id="user-q" placeholder="Имя, ID или @telegram" autocomplete="off">
       <select class="adm__select" id="user-sort">
         <option value="recent">Недавно заходили</option>
         <option value="new">Новые</option>

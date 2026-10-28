@@ -22,7 +22,7 @@
   font-family: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif; font-weight: 700;
   font-size: 52cqw; line-height: 1; letter-spacing: -0.03em;
 }
-.card__idx-r.is-ten { font-size: 44cqw; letter-spacing: -0.04em; transform: scaleX(0.76); }   /* «10» — уже и чуть меньше: влезает в полосу индекса */
+.card__idx-r.is-ten { letter-spacing: -0.04em; transform: scaleX(0.74); -webkit-text-stroke: 0.035em currentColor; }   /* «10» той же высоты, что и другие ранги: уже, а толщину штриха после сжатия возвращает обводка */
 .card__idx-s { font-size: 38cqw; line-height: 1; margin-top: 4cqw; }   /* зазор: хвост «Q» не налезает на масть */
 
 /* Крупная масть в правом нижнем углу — у всех карт. */

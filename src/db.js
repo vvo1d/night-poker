@@ -180,6 +180,12 @@ function sqliteBackend(file = DEFAULT_DB) {
       (SELECT id FROM chip_log WHERE user_id = ? ORDER BY id DESC LIMIT 1 OFFSET ${CHIP_LOG_PER_USER})`),
     chipLog: db.prepare('SELECT at, amount, balance, reason FROM chip_log WHERE user_id = ? ORDER BY id DESC LIMIT ?'),
     pruneLinks: db.prepare('DELETE FROM user_hands WHERE at < ?'),
+    // Удаление игрока из админки: аккаунт, сессии, его история фишек и ссылки на раздачи.
+    deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
+    deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
+    deleteUserChips: db.prepare('DELETE FROM chip_log WHERE user_id = ?'),
+    deleteUserHands: db.prepare('DELETE FROM user_hands WHERE user_id = ?'),
+    deleteUserShares: db.prepare('DELETE FROM hand_shares WHERE user_id = ?'),
   };
 
   importOldFiles(db, sql, path.dirname(file));
@@ -237,6 +243,21 @@ function sqliteBackend(file = DEFAULT_DB) {
     },
 
     top(limit) { return sql.top.all(limit); },
+
+    deleteUser(id) {
+      db.exec('BEGIN');
+      try {
+        sql.deleteUserSessions.run(id);
+        sql.deleteUserChips.run(id);
+        sql.deleteUserHands.run(id);
+        sql.deleteUserShares.run(id);
+        sql.deleteUser.run(id);
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+    },
 
     // ——— история раздач ———
     saveHand(id, at, data, userIds) {
@@ -488,6 +509,15 @@ function fileBackend(dir = DATA_DIR) {
     },
     chipLog(userId, limit = CHIP_LOG_PER_USER) {
       return (hands.chips.get(userId) || []).slice(0, limit);
+    },
+
+    // Журнал удалять не умеет — убираем из памяти и переписываем полный снимок.
+    async deleteUser(id) {
+      known.delete(id);
+      hands.byUser.delete(id);
+      hands.chips.delete(id);
+      saveHandsSoon();
+      await snapshot();
     },
 
     async close() { await snapshot(); writeHands(); },

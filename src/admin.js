@@ -1,7 +1,11 @@
 'use strict';
 // Админ-панель: обзор и аналитика, игроки, столы, объявление для всех.
-// Доступ — по списку имён в ADMIN_NAMES (через запятую). Всё, что делает
-// администратор, пишется в журнал сервера и в историю игрока.
+// Доступ — по номерам игроков (ID в профиле) в ADMIN_IDS через запятую: это
+// владельцы, они же назначают других администраторов прямо в админке (meta.admin).
+// Ники меняются, номера — нет, поэтому права привязаны к номеру.
+// Пока ADMIN_IDS не задан, работает прежний ADMIN_NAMES (по нику) — эти ники
+// никто другой занять не может. Всё, что делает администратор, пишется в журнал
+// сервера и в историю игрока.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -9,16 +13,32 @@ const analytics = require('./analytics');
 const { tableRecord, refunds } = require('./snapshot');
 const seasons = require('./seasons');
 
+const ADMIN_IDS = new Set(String(process.env.ADMIN_IDS || '')
+  .split(',').map((s) => Number(s.trim().replace(/^#/, ''))).filter((n) => n > 0));
 const ADMIN_NAMES = new Set(String(process.env.ADMIN_NAMES || '')
   .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 
+// Владелец — из ADMIN_IDS (или, пока его нет, из ADMIN_NAMES): его права не снять из админки.
+function isOwner(user) {
+  if (!user) return false;
+  if (ADMIN_IDS.size) return ADMIN_IDS.has(user.meta && user.meta.pid);
+  return ADMIN_NAMES.has(user.name.toLowerCase());
+}
+
 function isAdmin(user) {
-  return !!user && ADMIN_NAMES.has(user.name.toLowerCase());
+  return !!user && (isOwner(user) || !!(user.meta && user.meta.admin));
 }
 
 // deps — то, чем владеет сервер: столы, присутствие, метрики, отправка ответа.
 function createAdmin(deps) {
   const { store, tables, send, readBody, requireAuth } = deps;
+  if (ADMIN_IDS.size) {
+    console.log(`Администраторы по номерам: ${[...ADMIN_IDS].join(', ')}`);
+  } else if (ADMIN_NAMES.size) {
+    // Ники из ADMIN_NAMES закрыты для всех: иначе их можно было бы занять сменой ника.
+    store.reservedNames = new Set(ADMIN_NAMES);
+    console.log('Администраторы заданы по нику (ADMIN_NAMES) — лучше перейти на ADMIN_IDS: номера игроков не меняются');
+  }
   const announceFile = path.join(store.dataDir, 'announcement.json');
   let announcement = null;
   try { announcement = JSON.parse(fs.readFileSync(announceFile, 'utf8')); } catch { /* объявления нет */ }
@@ -40,14 +60,20 @@ function createAdmin(deps) {
   function userRow(u) {
     const where = deps.tableOfUser(u.id);
     return {
+      pid: u.meta && u.meta.pid,
       name: u.name,
       avatar: store.avatarUrl(u),
+      admin: isAdmin(u),
+      owner: isOwner(u),
       chips: u.chips,
       hands: u.handsPlayed,
       createdAt: u.createdAt,
       lastDay: lastDay(u),
       source: (u.meta && u.meta.source) || null,
       telegram: u.tg ? (u.tg.username ? `@${u.tg.username}` : 'да') : null,
+      vk: u.meta && u.meta.vk ? u.meta.vk.name || 'да' : null,
+      guest: store.isGuest(u),
+      resident: store.isBotUser(u),
       banned: !!(u.meta && u.meta.banned),
       online: deps.isOnline(u.id),
       table: where ? where.name : null,
@@ -64,7 +90,15 @@ function createAdmin(deps) {
       friends: u.friends.length,
       log: ((u.meta && u.meta.log) || []).slice().reverse(),
       days: ((u.meta && u.meta.days) || []).length,
+      oldNames: ((u.meta && u.meta.oldNames) || []).slice().reverse(),
     };
+  }
+
+  // Игрок по номеру («12», «#12», «ID 12») или по нику.
+  function findUser(q) {
+    const s = String(q || '').trim();
+    const m = s.match(/^(?:id\s*)?#?(\d+)$/i);
+    return (m && store.byPidNumber(Number(m[1]))) || store.byNameLower(s);
   }
 
   // Принудительно закрыть стол: фишки — в банки по тем же правилам, что при перезапуске.
@@ -123,7 +157,9 @@ function createAdmin(deps) {
       const q = (url.searchParams.get('q') || '').trim().toLowerCase();
       const sort = url.searchParams.get('sort') || 'recent';
       let list = [...store.users.values()];
-      if (q) list = list.filter((u) => u.name.toLowerCase().includes(q) || (u.tg && u.tg.username && u.tg.username.toLowerCase().includes(q)));
+      const num = q.match(/^(?:id\s*)?#?(\d+)$/i);
+      if (num) list = list.filter((u) => u.meta.pid === Number(num[1]) || u.name.toLowerCase().includes(q));
+      else if (q) list = list.filter((u) => u.name.toLowerCase().includes(q) || (u.tg && u.tg.username && u.tg.username.toLowerCase().includes(q)));
       const by = {
         recent: (a, b) => (lastDay(b) || '').localeCompare(lastDay(a) || '') || b.createdAt - a.createdAt,
         new: (a, b) => b.createdAt - a.createdAt,
@@ -136,7 +172,7 @@ function createAdmin(deps) {
     }
 
     if (route === '/api/admin/user' && req.method === 'GET') {
-      const u = store.byNameLower(url.searchParams.get('name'));
+      const u = findUser(url.searchParams.get('name'));
       if (!u) { send(res, 404, { error: 'Игрок не найден' }); return true; }
       send(res, 200, userDetail(u));
       return true;
@@ -144,8 +180,21 @@ function createAdmin(deps) {
 
     if (route === '/api/admin/user' && req.method === 'POST') {
       const body = await readBody(req);
-      const u = store.byNameLower(body.name);
+      const u = body.pid ? store.byPidNumber(body.pid) : store.byNameLower(body.name);
       if (!u) { send(res, 404, { error: 'Игрок не найден' }); return true; }
+      // Удаление насовсем: сначала — из-за стола, турниров и потока, потом — из базы.
+      if (body.action === 'delete') {
+        if (u.id === ctx.user.id) { send(res, 400, { error: 'Себя удалить нельзя' }); return true; }
+        if (store.isBotUser(u)) { send(res, 400, { error: 'Это резидент — выключите его во вкладке «Резиденты»' }); return true; }
+        deps.forgetUser(u.id);
+        deps.removeAvatar(u.id);
+        const result = await store.deleteUser(u.id);
+        if (result.error) { send(res, 400, result); return true; }
+        console.log(`Админ ${by}: удалён игрок «${result.name}»`);
+        deps.pushAll();
+        send(res, 200, { ok: true, deleted: result.name });
+        return true;
+      }
       let result;
       switch (body.action) {
         case 'chips':
@@ -172,6 +221,20 @@ function createAdmin(deps) {
         case 'avatar': {
           if (!deps.removeAvatar(u.id)) { result = { error: 'Аватара нет' }; break; }
           store.adminNote(u, by, 'аватар удалён');
+          result = { ok: true };
+          break;
+        }
+        case 'rename': {
+          result = store.renameUser(u.id, body.newName, by);
+          if (!result.error) deps.afterRename(u.id);
+          break;
+        }
+        case 'admin': {
+          // Назначать и снимать администраторов может только владелец (ADMIN_IDS).
+          if (!isOwner(ctx.user)) { result = { error: 'Назначать администраторов может только владелец (ADMIN_IDS)' }; break; }
+          if (isOwner(u)) { result = { error: 'Права владельца задаются в ADMIN_IDS на сервере' }; break; }
+          if (body.on) u.meta.admin = true; else delete u.meta.admin;
+          store.adminNote(u, by, body.on ? 'назначен администратором' : 'снят с администраторов');
           result = { ok: true };
           break;
         }
@@ -233,7 +296,7 @@ function createAdmin(deps) {
     return true;
   }
 
-  return { handle, isAdmin, getAnnouncement: () => announcement };
+  return { handle, isAdmin, isOwner, getAnnouncement: () => announcement };
 }
 
-module.exports = { createAdmin, isAdmin };
+module.exports = { createAdmin, isAdmin, isOwner };

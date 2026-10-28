@@ -1386,6 +1386,35 @@ function pickAvatar(done) {
   input.click();
 }
 
+// Смена ника — в своём окне: ввод, подсказка о правилах, ошибка от сервера.
+const renameDialog = $('#rename-dialog');
+$('#rename-close').addEventListener('click', () => renameDialog.close());
+renameDialog.addEventListener('click', (e) => { if (e.target === renameDialog) renameDialog.close(); });
+let renameDone = null;
+function openRename(done) {
+  renameDone = done;
+  const input = $('#rename-form').elements.namedItem('name');
+  input.value = state.user ? state.user.name : '';
+  $('#rename-error').hidden = true;
+  openModal(renameDialog);
+  input.focus();
+  input.select();
+}
+$('#rename-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = e.currentTarget.elements.namedItem('name').value;
+  const { ok, data } = await post('/api/rename', { name });
+  if (!ok || data.error) {
+    $('#rename-error').textContent = (data && data.error) || 'Не получилось сменить ник';
+    $('#rename-error').hidden = false;
+    return;
+  }
+  renameDialog.close();
+  setUser(data.user);
+  toast(`Теперь вы ${data.user.name}`, { good: true });
+  if (renameDone) renameDone();
+});
+
 // Окно выбора аватара: своё фото или один из 30 готовых портретов.
 const STOCK_AVATARS = {
   'Мужские': Array.from({ length: 15 }, (_, i) => `m${String(i + 1).padStart(2, '0')}`),
@@ -1801,7 +1830,7 @@ function renderProfile(box, data) {
   title.append(h);
   const where = data.table ? ` · за столом «${data.table.name}»` : '';
   const sub = el('p', `profile__sub${data.online ? ' is-online' : ''}`,
-    `${data.online ? 'онлайн' : 'не в сети'}${where} · в игре с ${DATE_FMT.format(new Date(data.createdAt))}`);
+    `${data.online ? 'онлайн' : 'не в сети'}${where} · в игре с ${DATE_FMT.format(new Date(data.createdAt))}${data.pid ? ` · ID ${data.pid}` : ''}`);
   title.append(sub);
   // Бот-резидент: уровень, характер и пометка, что это не настоящий человек.
   if (data.bot) {
@@ -1815,13 +1844,24 @@ function renderProfile(box, data) {
   if (!data.own) actions.append(...friendButtons(data, box));
   // Публичная страница профиля — ей можно поделиться где угодно.
   if (data.own) {
+    // Ник: раз в 30 дней; гость задаёт имя, сохраняя аккаунт.
+    if (!(state.user && state.user.guest)) {
+      const rename = el('button', 'btn btn--ghost btn--sm', 'Сменить ник');
+      if (data.renameAt) {
+        rename.disabled = true;
+        rename.title = `Сменить ник можно будет ${DATE_FMT.format(new Date(data.renameAt))}`;
+      }
+      rename.addEventListener('click', () => openRename(() => refreshProfile(data, box)));
+      actions.append(rename);
+    }
     const photo = el('button', 'btn btn--ghost btn--sm', data.avatar ? 'Сменить аватар' : 'Установить аватар');
     photo.addEventListener('click', () => openAvatarPicker(() => refreshProfile(data, box)));
     actions.append(photo);
   }
   const share = el('button', 'btn btn--ghost btn--sm', data.own ? 'Поделиться профилем' : 'Ссылка на профиль');
   share.addEventListener('click', async () => {
-    const url = `${location.origin}/u/${encodeURIComponent(data.name)}`;
+    // Ссылка по номеру: переживёт смену ника.
+    const url = `${location.origin}/u/${data.pid || encodeURIComponent(data.name)}`;
     if (navigator.share && data.own) {
       navigator.share({ title: `${data.name} — THPoker`, url }).catch(() => {});
       return;

@@ -985,13 +985,19 @@ function dropAvatarFile(userId, ext) {
   try { fs.rmSync(path.join(AVATAR_DIR, `${userId}.${ext}`), { force: true }); } catch { /* файла нет */ }
 }
 
-// Гость сохранил аккаунт или привязал VK — за столом сразу новое имя.
+// Игрок сменил ник (сам, через админку, сохранив гостя или привязав VK) —
+// новое имя сразу за столом, в записях на турниры по расписанию и в лобби.
 function renameSeated(userId) {
+  const u = store.user(userId);
+  if (!u) return;
   const table = tableOfUser(userId);
   const p = table && table.byUser(userId);
-  if (!p) return;
-  p.name = store.user(userId).name;
-  table.touch();
+  if (p) { p.name = u.name; table.touch(); }
+  for (const m of mtts.list.values()) {
+    const e = m.entries.get(userId);
+    if (e) e.name = u.name;
+  }
+  lobbyAt = 0;
 }
 
 // Новый аватар сразу виден и на месте за столом.
@@ -1447,7 +1453,9 @@ function profileOf(target, viewer) {
   const s = target.stats;
   return {
     name: target.name,
+    pid: target.meta.pid,                      // номер игрока — постоянный
     own,
+    renameAt: own ? store.renameAt(target) : undefined,
     createdAt: target.createdAt,
     chips: target.chips,
     online: isOnline(target.id),
@@ -1742,7 +1750,9 @@ const server = http.createServer(async (req, res) => {
 
   // Публичный профиль игрока — со своим превью для соцсетей.
   if ((req.method === 'GET' || req.method === 'HEAD') && route.startsWith('/u/')) {
-    const user = store.byNameLower(decodeURIComponent(route.slice(3)).replace(/\/$/, ''));
+    // /u/ник или /u/номер: ник может смениться, номер — нет.
+    const key = decodeURIComponent(route.slice(3)).replace(/\/$/, '');
+    const user = store.byNameLower(key) || (/^\d+$/.test(key) ? store.byPidNumber(Number(key)) : null);
     if (!user || store.isBanned(user)) return send(res, 404, 'Игрок не найден');
     const origin = `${SECURE_COOKIE ? 'https' : 'http'}://${req.headers.host}`;
     const html = withMetrika(pages.profilePage(user, origin, store.avatarUrl(user)));
@@ -1786,6 +1796,19 @@ const server = http.createServer(async (req, res) => {
       loginGuard.registered(ip);
       const token = store.createSession(user.id);
       return send(res, 200, { user: store.publicUser(user.id) }, { 'Set-Cookie': sessionCookie(token) });
+    }
+
+    // Смена ника самим игроком — раз в 30 дней (см. store.renameUser).
+    if (route === '/api/rename' && req.method === 'POST') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      if (!allowCommand(ctx.session)) return send(res, 429, { error: 'Слишком часто. Подождите секунду' });
+      const body = await readBody(req);
+      const result = store.renameUser(ctx.user.id, body.name);
+      if (result.error) return send(res, 400, result);
+      renameSeated(ctx.user.id);
+      pushAll();
+      return send(res, 200, { ok: true, user: store.publicUser(ctx.user.id) });
     }
 
     // Гость сохраняет аккаунт: имя и пароль. Новое имя видно и за столом.
@@ -2139,6 +2162,23 @@ const admin = createAdmin({
   reopenHouse: (id) => {
     const cfg = ROOM_CONFIGS.find((c) => c.id === id);
     if (cfg) createTable(cfg);
+  },
+  afterRename: (userId) => { renameSeated(userId); pushAll(); },
+  // Удаляемого игрока — из-за стола (из идущего турнира — сдавшись), из записей
+  // на турниры по расписанию и из потока: дальше его аккаунта не будет.
+  forgetUser: (userId) => {
+    const table = tableOfUser(userId);
+    if (table) {
+      if (table.tour && table.tour.status === 'running') table.forfeit(userId);
+      else table.leave(userId);
+    }
+    for (const m of mtts.list.values()) if (m.status === 'registering' && m.entries.has(userId)) m.entries.delete(userId);
+    for (const client of clients) {
+      if (client.ctx.user.id !== userId) continue;
+      try { client.res.end(); } catch { /* уже закрыт */ }
+      clients.delete(client);
+    }
+    presence.delete(userId);
   },
   // Заблокированного выкидываем из потока: следующий запрос он уже не пройдёт.
   dropStreams: (userId) => {

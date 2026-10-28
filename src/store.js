@@ -1,5 +1,7 @@
 'use strict';
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const { openStorage } = require('./db');
 const { freshStats, unlockNew, tierTotal, TIER_NAMES, category } = require('./achievements');
 const daily = require('./daily');
@@ -9,6 +11,7 @@ const weekly = require('./weekly');
 const levels = require('./levels');
 
 const START_CHIPS = 10000;
+const RENAME_EVERY = 30 * 24 * 3600_000;   // сам игрок меняет ник не чаще раза в 30 дней
 // Готовые аватары (public/stock-avatars, см. tools/gen-stock-avatars.js): 15 мужских, 15 женских.
 const STOCK_AVATARS = [
   ...Array.from({ length: 15 }, (_, i) => `m${String(i + 1).padStart(2, '0')}`),
@@ -61,6 +64,14 @@ class Store {
     this.byName = new Map();     // имя в нижнем регистре -> id
     this.byTg = new Map();       // id в Telegram -> id игрока
     this.byVk = new Map();       // id в VK -> id игрока (привязка лежит в meta.vk)
+    // Номер игрока (meta.pid): короткий, постоянный, не меняется со сменой ника —
+    // по нему ищут в админке и назначают администраторов (ADMIN_IDS).
+    this.byPid = new Map();      // номер -> id игрока
+    this.pidSeq = 0;
+    this.loading = false;
+    // Ники, которые нельзя занять: имена из старого ADMIN_NAMES (их задаёт админка),
+    // иначе сменой ника можно было бы получить права администратора.
+    this.reservedNames = new Set();
     this.sessions = new Map();   // токен -> { userId, created, seen, roomId }
 
     this.dirtyUsers = new Set();
@@ -83,10 +94,11 @@ class Store {
   }
 
   // Папка с данными: рядом с базой лежит и снимок столов.
-  get dataDir() { return require('node:path').dirname(this.backend.where); }
+  get dataDir() { return path.dirname(this.backend.where); }
 
   load() {
     const { users, sessions } = this.backend.load(SESSION_TTL);
+    this.loading = true;
     for (const user of users) {
       this.prepare(user);
       this.users.set(user.id, user);
@@ -94,6 +106,16 @@ class Store {
       if (user.tg) this.byTg.set(user.tg.id, user.id);
       if (user.meta && user.meta.vk) this.byVk.set(user.meta.vk.id, user.id);
     }
+    this.loading = false;
+    // Номера: у кого уже есть — остаются; остальным — по порядку регистрации.
+    // Счётчик номеров хранится отдельно и только растёт: номер удалённого игрока
+    // не достанется новому (иначе тот унаследовал бы, например, права администратора).
+    this.pidSeq = Math.max(this.pidSeq, this.readPidSeq());
+    for (const u of this.users.values()) if (u.meta.pid > this.pidSeq) this.pidSeq = u.meta.pid;
+    const noPid = [...this.users.values()].filter((u) => !(u.meta.pid > 0)).sort((a, b) => a.createdAt - b.createdAt);
+    for (const u of noPid) { u.meta.pid = ++this.pidSeq; this.dirtyUsers.add(u.id); }
+    for (const u of this.users.values()) this.byPid.set(u.meta.pid, u.id);
+    this.writePidSeq();
     this.convertLegacyFriends();
     for (const user of this.users.values()) {
       // Ступени, заработанные до появления ачивок (раздачи, банк), открываем сразу.
@@ -134,6 +156,12 @@ class Store {
     user.stats.peakChips = Math.max(user.stats.peakChips, user.chips);
     user.meta = user.meta || {};
     if (!Array.isArray(user.meta.days)) user.meta.days = [];
+    // Новому игроку — следующий номер (при загрузке номера раздаёт load по дате регистрации).
+    if (!this.loading && !(user.meta.pid > 0)) {
+      user.meta.pid = ++this.pidSeq;
+      this.byPid.set(user.meta.pid, user.id);
+      this.writePidSeq();
+    }
     // Кривая уровней стала круче: опыт переводится один раз, уровень у игрока остаётся прежним.
     if (user.meta.xpCurve !== levels.CURVE) {
       if (user.meta.xp) user.meta.xp = levels.convertXp(user.meta.xp);
@@ -265,6 +293,41 @@ class Store {
 
   isGuest(u) { return !!(u && u.meta && u.meta.guest); }
 
+  // Удалить игрока насовсем (админка): аккаунт, сессии, привязки, история фишек,
+  // упоминания в друзьях и заявках у других. Из-за стола и из турниров его
+  // убирает сервер до вызова. Резидентов удалять нельзя — они живут по списку.
+  async deleteUser(id) {
+    const u = this.users.get(id);
+    if (!u) return { error: 'Игрок не найден' };
+    if (this.isBotUser(u)) return { error: 'Это резидент — его можно выключить во вкладке «Резиденты»' };
+    if (this.writing) await this.writing;   // не дать идущей записи вернуть его обратно
+    this.users.delete(id);
+    this.byName.delete(u.name.toLowerCase());
+    if (u.tg) this.byTg.delete(u.tg.id);
+    if (u.meta && u.meta.vk) this.byVk.delete(u.meta.vk.id);
+    if (u.meta) this.byPid.delete(u.meta.pid);   // номер не переиспользуется: pidSeq только растёт
+    this.dirtyUsers.delete(id);
+    for (const [token, s] of this.sessions) {
+      if (s.userId !== id) continue;
+      this.sessions.delete(token);
+      this.dirtySessions.delete(token);
+      this.goneSessions.add(token);   // файловый движок перепишет список сессий
+    }
+    this.schedule();
+    for (const o of this.users.values()) {
+      const before = o.friends.length + o.friendsIn.length + o.friendsOut.length;
+      o.friends = o.friends.filter((x) => x !== id);
+      o.friendsIn = o.friendsIn.filter((x) => x !== id);
+      o.friendsOut = o.friendsOut.filter((x) => x !== id);
+      if (o.friends.length + o.friendsIn.length + o.friendsOut.length !== before) this.touch(o);
+    }
+    this.news.delete(id);
+    this.levelNews.delete(id);
+    this.ratings.clear();
+    await this.backend.deleteUser(id);
+    return { ok: true, name: u.name, avatar: u.meta && u.meta.avatar };
+  }
+
   // Гость сохраняет аккаунт: своё имя и пароль. Фишки, задания и уровень остаются.
   async saveGuest(userId, name, password) {
     const u = this.users.get(userId);
@@ -276,7 +339,7 @@ class Store {
     if (/^гость(\s|\d|$)/i.test(name)) return { error: 'Придумайте своё имя — не «Гость»' };
     if (password.length < 6) return { error: 'Пароль — минимум 6 символов' };
     const taken = this.byName.get(name.toLowerCase());
-    if (taken && taken !== u.id) return { error: 'Такое имя уже занято' };
+    if ((taken && taken !== u.id) || this.reservedNames.has(name.toLowerCase())) return { error: 'Такое имя уже занято' };
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = (await scrypt(password, salt)).toString('hex');
     const again = this.byName.get(name.toLowerCase());
@@ -373,6 +436,42 @@ class Store {
   // ——— администрирование ———
 
   // Что сделал администратор — остаётся в истории игрока.
+  // ——— смена ника ———
+
+  // Когда игрок сможет сменить ник сам (0 — уже можно).
+  renameAt(u) {
+    const at = (u.meta.renamedAt || 0) + RENAME_EVERY;
+    return at > Date.now() ? at : 0;
+  }
+
+  // Новый ник. by — имя администратора: ему можно в любое время и без ограничения
+  // «раз в 30 дней». Прежние ники остаются в meta.oldNames (видны в админке).
+  renameUser(userId, newName, by = null) {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    if (this.isBotUser(u)) return { error: 'Ник резидента меняется во вкладке «Резиденты»' };
+    if (!by && this.isGuest(u)) return { error: 'Сначала сохраните аккаунт — там же задаётся имя' };
+    const name = String(newName || '').trim().replace(/\s+/g, ' ');
+    const bad = this.checkName(name);
+    if (bad) return { error: bad };
+    if (name === u.name) return { error: 'Это и так ваш ник' };
+    if (/^гость(\s|\d|$)/i.test(name)) return { error: 'Придумайте своё имя — не «Гость»' };
+    if (this.reservedNames.has(name.toLowerCase())) return { error: 'Такое имя занять нельзя' };
+    const taken = this.byName.get(name.toLowerCase());
+    if (taken && taken !== u.id) return { error: 'Такое имя уже занято' };
+    if (!by && this.renameAt(u)) return { error: 'Ник можно менять раз в 30 дней', at: this.renameAt(u) };
+    const old = u.name;
+    this.byName.delete(old.toLowerCase());
+    u.name = name;
+    this.byName.set(name.toLowerCase(), u.id);
+    u.meta.oldNames = [...(u.meta.oldNames || []), { name: old, at: Date.now() }].slice(-20);
+    if (!by) u.meta.renamedAt = Date.now();
+    this.ratings.clear();
+    if (by) this.adminNote(u, by, `ник «${old}» → «${name}»`);
+    else this.touch(u);
+    return { ok: true, name, old };
+  }
+
   adminNote(u, by, text) {
     u.meta.log = [...(u.meta.log || []), { at: Date.now(), by, text }].slice(-50);
     console.log(`Админ ${by}: ${u.name} — ${text}`);
@@ -447,7 +546,7 @@ class Store {
     let base = clean(tg.username) || clean(tg.firstName);
     if (base.length < 3) base = 'Игрок';
     let name = base;
-    for (let n = 2; this.byName.has(name.toLowerCase()); n++) {
+    for (let n = 2; this.byName.has(name.toLowerCase()) || this.reservedNames.has(name.toLowerCase()); n++) {
       const tail = String(n);
       name = `${base.slice(0, 16 - tail.length)}${tail}`;
     }
@@ -990,6 +1089,19 @@ class Store {
     return 'none';
   }
 
+  readPidSeq() {
+    try { return Number(JSON.parse(fs.readFileSync(path.join(this.dataDir, 'pid-seq.json'), 'utf8')).seq) || 0; } catch { return 0; }
+  }
+
+  writePidSeq() {
+    try { fs.writeFileSync(path.join(this.dataDir, 'pid-seq.json'), JSON.stringify({ seq: this.pidSeq })); } catch { /* не критично: при запуске возьмём максимум по игрокам */ }
+  }
+
+  byPidNumber(pid) {
+    const id = this.byPid.get(Number(pid));
+    return id ? this.users.get(id) : null;
+  }
+
   byNameLower(name) {
     const id = this.byName.get(String(name || '').trim().toLowerCase());
     return id ? this.users.get(id) : null;
@@ -1147,6 +1259,8 @@ class Store {
       referral: this.referralView(u),
       shop: shop.view(u),                        // купленное оформление и что надето
       hasPassword: !!u.hash,
+      pid: u.meta.pid,                            // номер игрока — постоянный, не меняется с ником
+      renameAt: this.renameAt(u),                 // с какого момента можно снова сменить ник (0 — сейчас)
       // Гость: пора ли предложить сохранить аккаунт — после 20 раздач или первого выигранного банка.
       guest: this.isGuest(u) ? { hands: u.handsPlayed, won: u.stats.handsWon > 0 } : null,
     };

@@ -529,6 +529,21 @@
   </div>
 </div>
 
+<!-- Смена ника -->
+<dialog id="rename-dialog" class="dialog save">
+  <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="rename-close" title="Закрыть" aria-label="Закрыть"></button>
+  <h3>Сменить ник</h3>
+  <p class="dialog__note">Ник можно менять раз в 30 дней. Номер игрока (ID) не меняется — по нему вас найдут друзья и администрация. Прежняя ссылка на профиль с ником перестанет работать.</p>
+  <form id="rename-form" autocomplete="off">
+    <label class="field">
+      <span>Новый ник</span>
+      <input name="name" required minlength="3" maxlength="16" placeholder="От 3 до 16 символов">
+    </label>
+    <p class="error" id="rename-error" hidden></p>
+    <button class="btn btn--primary btn--wide" type="submit">Сохранить</button>
+  </form>
+</dialog>
+
 <!-- Выбор аватара: готовые портреты или своё фото -->
 <dialog id="avatar-dialog" class="dialog dialog--avatar">
   <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="avatar-close" title="Закрыть" aria-label="Закрыть"></button>
