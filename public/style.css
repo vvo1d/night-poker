@@ -1802,12 +1802,27 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
 
 /* Низкий экран (ноутбук 720p и подобные): сукну нужно больше места,
    иначе блок игрока упирается в центр стола и ставке некуда лечь. */
-/* Боковые места на широком экране: карты сбоку от аватара, со стороны центра стола,
-   — место становится ниже и не наезжает на соседа сверху. */
-@media (min-width: 621px) {
-  .seat__avatar > .seat__cards { position: absolute; top: 50%; transform: translateY(-50%); z-index: 1; align-items: center; text-shadow: none; }
-  .seat--side-l .seat__avatar > .seat__cards { left: calc(100% + 8px); }
-  .seat--side-r .seat__avatar > .seat__cards { right: calc(100% + 8px); }
+/* Карты соперников — всегда сбоку от аватара, к центру стола: в левой половине
+   стола справа, в правой — зеркально, слева. Рубашкой вверх — маленькие и плотной
+   стопкой, чтобы даже четыре карты Омахи не задевали соседей; открытые на
+   вскрытии — обычного размера, чтобы читались. */
+.seat__avatar > .seat__cards {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 1;
+  align-items: center; text-shadow: none; height: auto;
+}
+.seat--side-l .seat__avatar > .seat__cards { left: calc(100% + 6px); }
+.seat--side-r .seat__avatar > .seat__cards { right: calc(100% + 6px); }
+.seat__avatar > .seat__cards .card--back { --r: 4px; width: 28px; height: 40px; }
+.seat--you { z-index: 3; }   /* свои карты — всегда поверх чужих рубашек */
+.seat__avatar > .seat__cards .card--back + .card--back { margin-left: -17px; }
+.seat__avatar > .seat__cards .card--back .card__back::after { font-size: 1.1em; }
+/* Телефон: карты соперников — над ником, маленькой стопкой: место ниже и
+   не задевает соседей. Открытые на вскрытии — обычного размера. */
+@media (max-width: 620px) {
+  .seat:not(.seat--you) > .seat__cards { height: auto; min-height: 30px; align-items: flex-end; }
+  .seat:not(.seat--you) > .seat__cards .card--back { --r: 3px; width: 21px; height: 30px; }
+  .seat:not(.seat--you) > .seat__cards .card--back + .card--back { margin-left: -13px; }
+  .seat:not(.seat--you) > .seat__cards .card--back .card__back::after { font-size: 0.9em; }
 }
 
 @media (max-height: 780px) and (min-width: 621px) {

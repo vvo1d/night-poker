@@ -2250,7 +2250,7 @@ function cardEl(card, { small = false, dim = false, key = '', mark = '', deal = 
   return node;
 }
 
-const wideSeats = window.matchMedia('(min-width: 621px)');
+const phoneSeats = window.matchMedia('(max-width: 620px)');
 
 function seatPositions(n, hero) {
   const out = [];
@@ -2358,12 +2358,16 @@ function renderTable(t) {
     node.dataset.seat = i;
     node.style.setProperty('--x', `${positions[i].x}%`);
     node.style.setProperty('--y', `${positions[i].y}%`);
-    // Места у левого и правого края и вверху: карты — сбоку от аватара, к центру стола.
-    // Над ником они доставали до стека соседа выше (на 9 мест места стоят тесно),
-    // а у верхних мест вылезали за край стола.
-    const { x, y } = positions[i];
-    if (x < 22 || (y < 30 && x <= 50)) node.classList.add('seat--side-l');
-    else if (x > 78 || (y < 30 && x > 50)) node.classList.add('seat--side-r');
+    // Карты соперников — всегда сбоку от аватара, зеркально по половинам стола:
+    // по бокам — к центру (в левой половине справа от аватара, в правой — слева),
+    // в верхнем ряду — наружу, иначе карты двух верхних мест сходятся посередине.
+    // Свои — над ником.
+    // На телефоне — над ником, маленькой стопкой (см. style.css).
+    if (!seat.you && !phoneSeats.matches) {
+      const { x, y } = positions[i];
+      const inward = y >= 25;
+      node.classList.add((x <= 50) === inward ? 'seat--side-l' : 'seat--side-r');
+    }
 
     if (seat.empty) {
       // В идущий турнир не садятся: свободные места — это вылетевшие.
@@ -2463,8 +2467,8 @@ function renderTable(t) {
     avatar.append(face);
     if (t.actingSeat === i) avatar.append(timerRing());
     plate.append(name, avatar);
-    // Боковые места на широком экране: карты — в блоке аватара, по центру его высоты.
-    if (wideSeats.matches && (node.classList.contains('seat--side-l') || node.classList.contains('seat--side-r'))) {
+    // Карты соперника — в блоке аватара, по центру его высоты (см. seat--side-*).
+    if (node.classList.contains('seat--side-l') || node.classList.contains('seat--side-r')) {
       const cards = node.querySelector(':scope > .seat__cards');
       if (cards) avatar.append(cards);
     }
