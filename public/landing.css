@@ -352,7 +352,30 @@ a { color: var(--brass); }
 .pp .final { padding: 56px 0 40px; }
 
 /* адаптив */
+/* цифры под первым экраном */
+.stats { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: rgba(18, 28, 33, 0.55); }
+.stats__in { display: grid; grid-template-columns: repeat(4, 1fr); }
+.stat-big { display: flex; align-items: center; gap: 14px; padding: 26px 18px; }
+.stat-big + .stat-big { border-left: 1px solid var(--line); }
+.stat-big b { font-family: Fraunces, Georgia, serif; font-weight: 500; font-size: 40px; line-height: 1; color: var(--brass); white-space: nowrap; }
+.stat-big span { color: var(--muted); font-size: 14px; line-height: 1.35; }
+
+/* статьи на главной */
+.post {
+  display: flex; flex-direction: column; gap: 8px; padding: 22px; border-radius: var(--radius);
+  background: var(--ink-2); border: 1px solid var(--line); text-decoration: none; color: var(--text);
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+.post:hover { transform: translateY(-3px); border-color: var(--brass-dim); }
+.post b { font-size: 18px; color: var(--bone); font-weight: 600; }
+.post span:last-child { color: #b0c0c0; font-size: 15px; }
+.post__tag { align-self: flex-start; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brass); }
+.card-box p a { color: var(--brass); text-decoration: none; white-space: nowrap; }
+
 @media (max-width: 960px) {
+  .stats__in { grid-template-columns: 1fr 1fr; }
+  .stat-big:nth-child(3) { border-left: 0; }
+  .stat-big:nth-child(n+3) { border-top: 1px solid var(--line); }
   .hero__in, .rules { grid-template-columns: 1fr; gap: 44px; }
   .hero { padding-top: 48px; }
   .grid--4 { grid-template-columns: repeat(2, 1fr); }
@@ -360,6 +383,9 @@ a { color: var(--brass); }
 }
 
 @media (max-width: 640px) {
+  .stat-big { flex-direction: column; align-items: flex-start; gap: 6px; padding: 18px 14px; }
+  .stat-big b { font-size: 30px; }
+  .stat-big span { font-size: 13px; }
   .wrap { padding: 0 16px; }
   /* Ссылки шапки — в выпадающем меню под бургером. */
   .nav__in { justify-content: space-between; gap: 12px; }
