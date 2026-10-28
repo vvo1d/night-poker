@@ -248,7 +248,9 @@ a { color: var(--brass); }
 .final p { color: #c3d4cd; margin: 12px 0 26px; font-size: 17px; }
 
 .footer { border-top: 1px solid var(--line); padding: 28px 0 40px; }
-.footer__in { display: flex; align-items: center; gap: 24px; }
+.footer__in { display: flex; align-items: center; flex-wrap: wrap; gap: 14px 24px; }
+.footer__in > p { flex: 1 1 auto; max-width: 64ch; }
+.footer__in > .footer__links { flex: 1 1 100%; margin-left: 0; }   /* ссылки — строками под логотипом, по левому краю */
 .footer p { color: var(--muted); font-size: 13px; max-width: 70ch; }
 .footer__links { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-left: auto; font-size: 13px; }
 .footer__links a { color: var(--muted); text-decoration: none; }
@@ -352,6 +354,19 @@ a { color: var(--brass); }
 .pp .final { padding: 56px 0 40px; }
 
 /* адаптив */
+/* посадочные страницы и облако ссылок */
+.lp .lp__cta { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 26px 0 30px; }
+.lp .lp__cta span { color: var(--muted); font-size: 14px; }
+.lp .lp__cards { margin-bottom: 18px; }
+.lp .card-box h3 { font-size: 18px; }
+.lp .faq { margin-top: 12px; }
+.tags { list-style: none; margin: 24px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+.tags a {
+  display: inline-block; padding: 10px 16px; border-radius: 999px; text-decoration: none; color: var(--text);
+  background: var(--ink-2); border: 1px solid var(--line); transition: border-color 140ms ease, color 140ms ease;
+}
+.tags a:hover { border-color: var(--brass-dim); color: var(--bone); }
+
 /* цифры под первым экраном */
 .stats { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: rgba(18, 28, 33, 0.55); }
 .stats__in { display: grid; grid-template-columns: repeat(4, 1fr); }

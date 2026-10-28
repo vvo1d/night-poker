@@ -1072,6 +1072,10 @@ const MIME = {
 
 // Страницы сайта: главная — для поиска и новичков, игра — на /play.
 const PAGES = { '/': 'index.html', '/play': 'play.html', '/play/': 'play.html', '/admin': 'admin.html' };
+// Посадочные страницы — какие есть в public/lp (список читается при запуске).
+const LANDING_PAGES = new Set((() => {
+  try { return fs.readdirSync(path.join(PUBLIC_DIR, 'lp')).filter((f) => f.endsWith('.html')).map((f) => f.slice(0, -5)); } catch { return []; }
+})());
 // Старые и служебные адреса страниц ведут на основные, чтобы у поиска не было дублей.
 const PAGE_ALIASES = { '/index.html': '/', '/play.html': '/play' };
 // Картинки меняются редко — браузер может не переспрашивать о них сутки.
@@ -1147,7 +1151,10 @@ function serveStatic(req, res, urlPath) {
   }
   // Статьи живут по чистым адресам: /articles/ и /articles/название.
   const article = /^\/articles(?:\/([a-z0-9-]+))?\/?$/.exec(urlPath);
-  const rel = PAGES[urlPath] || (article ? `articles/${article[1] || 'index'}.html` : urlPath.replace(/^\/+/, ''));
+  // Посадочные страницы под поисковые запросы: /igrat-v-poker-onlajn → public/lp/igrat-v-poker-onlajn.html.
+  const landing = !PAGES[urlPath] && /^\/([a-z0-9-]+)\/?$/.exec(urlPath);
+  const lpRel = landing && LANDING_PAGES.has(landing[1]) ? `lp/${landing[1]}.html` : null;
+  const rel = PAGES[urlPath] || lpRel || (article ? `articles/${article[1] || 'index'}.html` : urlPath.replace(/^\/+/, ''));
   const file = path.join(PUBLIC_DIR, rel);
   if (!file.startsWith(PUBLIC_DIR)) return send(res, 403, 'Доступ запрещён');
 
