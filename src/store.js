@@ -32,13 +32,13 @@ const FRIENDS_MAX = 200;
 const REQUESTS_MAX = 100;          // заявок в одну сторону — чтобы ими не засыпали
 
 // По чему строится рейтинг. Ключ уходит клиенту, значение — как достать число.
+// По выигранным раздачам и по очкам сезона рейтинга больше нет: сезон виден в профиле.
 const RATINGS = {
   chips: (u) => u.chips,
-  wins: (u) => u.stats.handsWon,
   sng: (u) => u.stats.sngWins * 1e9 + u.stats.sngPrizes, // победы, при равенстве — призовые
-  // Очки текущего сезона: у тех, кто в этом месяце ещё не играл, — ноль.
-  season: (u) => (u.meta.season && u.meta.season.key === seasons.seasonKey() ? u.meta.season.points : 0),
 };
+// Очки текущего сезона: у тех, кто в этом месяце ещё не играл, — ноль.
+const seasonPointsOf = (u) => (u.meta.season && u.meta.season.key === seasons.seasonKey() ? u.meta.season.points : 0);
 
 // Пароли считаются на пуле потоков, а не в основном цикле: иначе на входе
 // сервер замирает и перестаёт обслуживать столы.
@@ -60,6 +60,7 @@ class Store {
     this.users = new Map();      // id -> игрок
     this.byName = new Map();     // имя в нижнем регистре -> id
     this.byTg = new Map();       // id в Telegram -> id игрока
+    this.byVk = new Map();       // id в VK -> id игрока (привязка лежит в meta.vk)
     this.sessions = new Map();   // токен -> { userId, created, seen, roomId }
 
     this.dirtyUsers = new Set();
@@ -91,6 +92,7 @@ class Store {
       this.users.set(user.id, user);
       this.byName.set(user.name.toLowerCase(), user.id);
       if (user.tg) this.byTg.set(user.tg.id, user.id);
+      if (user.meta && user.meta.vk) this.byVk.set(user.meta.vk.id, user.id);
     }
     this.convertLegacyFriends();
     for (const user of this.users.values()) {
@@ -436,6 +438,52 @@ class Store {
     if (u.tg && u.tg.id !== tg.id) this.byTg.delete(u.tg.id);
     u.tg = { id: tg.id, username: tg.username || null };
     this.byTg.set(tg.id, userId);
+    this.touch(u);
+    return { ok: true };
+  }
+
+  // ——— VK ———
+
+  // Вход через VK: свой аккаунт, а при первом входе — новый, без пароля.
+  // Имя — «Имя Ф» из профиля VK (как у Telegram: свободное, без повторов).
+  vkUser(vk, source = null, friend = null) {
+    const known = this.byVk.get(vk.id);
+    if (known && this.users.has(known)) {
+      const u = this.users.get(known);
+      if (this.isBanned(u)) return { error: 'Аккаунт заблокирован' };
+      return { user: u, created: false };
+    }
+    const full = [vk.firstName, vk.lastName ? vk.lastName.slice(0, 1) : ''].filter(Boolean).join(' ');
+    const user = {
+      id: crypto.randomUUID(),
+      name: this.nameFromTelegram({ firstName: full }),
+      salt: '',
+      hash: '',                       // пароля нет: такой аккаунт входит только через VK
+      chips: START_CHIPS,
+      handsPlayed: 0,
+      createdAt: Date.now(),
+      meta: { source: cleanSource(source) || 'vk', vk: { id: vk.id, name: full } },
+    };
+    this.prepare(user);
+    this.markActive(user);
+    this.users.set(user.id, user);
+    this.byName.set(user.name.toLowerCase(), user.id);
+    this.byVk.set(vk.id, user.id);
+    this.logStart(user);
+    this.linkReferral(user, friend);
+    this.touch(user);
+    return { user, created: true };
+  }
+
+  // Привязать VK к уже существующему аккаунту — чтобы входить и так, и так.
+  linkVk(userId, vk) {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    const other = this.byVk.get(vk.id);
+    if (other && other !== userId) return { error: 'Этот VK уже привязан к другому аккаунту' };
+    if (u.meta.vk && u.meta.vk.id !== vk.id) this.byVk.delete(u.meta.vk.id);
+    u.meta.vk = { id: vk.id, name: [vk.firstName, vk.lastName].filter(Boolean).join(' ') };
+    this.byVk.set(vk.id, userId);
     this.touch(u);
     return { ok: true };
   }
@@ -916,8 +964,8 @@ class Store {
         sngWins: s.sngWins,
         sngPrizes: s.sngPrizes,
         achievements: tierTotal(u),
-        season: RATINGS.season(u),
-        league: seasons.leagueOf(RATINGS.season(u)).id,
+        season: seasonPointsOf(u),
+        league: seasons.leagueOf(seasonPointsOf(u)).id,
         you: id === viewerId,
       };
     };
@@ -1029,6 +1077,7 @@ class Store {
       level: this.levelView(u),                  // уровень, опыт и награда за следующий
       season: seasons.view(u),                   // очки и лига текущего сезона
       telegram: u.tg ? (u.tg.username ? `@${u.tg.username}` : 'привязан') : null,
+      vk: u.meta.vk ? (u.meta.vk.name || 'привязан') : null,
       referral: this.referralView(u),
       shop: shop.view(u),                        // купленное оформление и что надето
       hasPassword: !!u.hash,

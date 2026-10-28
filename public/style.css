@@ -1582,6 +1582,9 @@ body:has(.actions.is-raising) .react { display: none; }
 .dialog__row--share .btn--tg { flex-basis: 100%; }
 .btn--tg { background: #2aabee; border-color: #2aabee; color: #fff; text-decoration: none; }
 .btn--tg:hover:not(:disabled) { background: #229ed9; border-color: #229ed9; }
+.btn--vk { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: #0077ff; border-color: #0077ff; color: #fff; text-decoration: none; }
+.btn--vk:hover:not(:disabled) { background: #0069e0; border-color: #0069e0; }
+.btn--vk .btn__ico { width: 22px; height: 22px; flex: 0 0 auto; }
 .tg-auth { margin-top: 18px; }
 .tg-auth__or { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; margin-bottom: 14px; }
 .tg-auth__or::before, .tg-auth__or::after { content: ''; flex: 1; height: 1px; background: var(--line); }

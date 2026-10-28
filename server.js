@@ -24,6 +24,7 @@ const { createAdmin } = require('./src/admin');
 const pages = require('./src/pages');
 const { MttManager } = require('./src/mtt');
 const { createResidentsConfig } = require('./src/residents-config');
+const { createVk } = require('./src/vk');
 
 const PORT = Number(process.env.PORT) || 3000;
 // За обратным прокси сервер стоит слушать только петлю, чтобы снаружи
@@ -36,6 +37,8 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 // Вход через Telegram скрыт, пока Telegram недоступен в РФ: включается TELEGRAM_LOGIN=on.
 const TG_LOGIN = process.env.TELEGRAM_LOGIN === 'on';
+// Вход через VK ID: ID приложения из кабинета id.vk.com. Адрес возврата должен
+// совпадать с указанным в настройках приложения (по умолчанию — APP_URL/auth/vk/callback).
 const APP_URL = process.env.APP_URL || 'https://thpoker.ru';
 // Режим вебхука: Telegram сам приносит сообщения на /api/telegram/webhook.
 // Нужен, если хостинг не выпускает сервер к api.telegram.org.
@@ -1648,6 +1651,48 @@ async function handleCommand(ctx, body) {
   }
 }
 
+// ——— вход через VK ———
+
+const VK_CLIENT_ID = process.env.VK_CLIENT_ID || '';
+const vk = VK_CLIENT_ID
+  ? createVk({ clientId: VK_CLIENT_ID, redirectUri: process.env.VK_REDIRECT_URI || `${APP_URL}/auth/vk/callback` })
+  : null;
+
+function redirect(res, location, headers = {}) {
+  res.writeHead(302, { Location: location, 'Cache-Control': 'no-store', ...headers });
+  res.end();
+}
+
+// /auth/vk — уходим в VK (link=1 — привязать к тому, кто уже вошёл);
+// /auth/vk/callback — VK вернул игрока: входим, создаём аккаунт или привязываем.
+// Ответ — переход обратно в игру, итог — в адресе (?vk=new|linked, ?vkError=…).
+async function vkRoute(req, res, route, url) {
+  const back = (q) => redirect(res, `/play?${new URLSearchParams(q)}`);
+  if (!vk) return back({ vkError: 'Вход через VK не настроен' });
+  if (route === '/auth/vk') {
+    const ctx = url.searchParams.get('link') ? sessionOf(req) : null;
+    return redirect(res, vk.start({
+      linkUserId: ctx ? ctx.user.id : null,
+      source: String(url.searchParams.get('source') || '').slice(0, 40) || null,
+      friend: String(url.searchParams.get('friend') || '').slice(0, 40) || null,
+    }));
+  }
+  const q = Object.fromEntries(url.searchParams);
+  if (q.error) return back({ vkError: 'Вход через VK отменён' });
+  const result = await vk.finish(q);
+  if (result.error) return back({ vkError: result.error });
+  const { linkUserId, source, friend } = result.extra;
+  if (linkUserId) {
+    const linked = store.linkVk(linkUserId, result.vk);
+    return back(linked.error ? { vkError: linked.error } : { vk: 'linked' });
+  }
+  const { user, created, error } = store.vkUser(result.vk, source, friend);
+  if (error) return back({ vkError: error });
+  const token = store.createSession(user.id);
+  console.log(`Вход через VK: ${user.name}${created ? ' (новый)' : ''}`);
+  return redirect(res, `/play${created ? '?vk=new' : ''}`, { 'Set-Cookie': sessionCookie(token) });
+}
+
 // ——— маршруты ———
 
 const MONEY_CMDS = new Set(['sit', 'standUp', 'leaveRoom', 'topUp', 'createTable', 'addBot', 'kickBot', 'mttRegister', 'mttUnregister']);
@@ -1661,6 +1706,9 @@ const server = http.createServer(async (req, res) => {
   }
   if ((req.method === 'GET' || req.method === 'HEAD') && route.startsWith('/avatars/')) {
     return serveAvatar(req, res, route.slice('/avatars/'.length));
+  }
+  if (req.method === 'GET' && (route === '/auth/vk' || route === '/auth/vk/callback')) {
+    return vkRoute(req, res, route, url);
   }
 
   // Публичный профиль игрока — со своим превью для соцсетей.
@@ -1716,6 +1764,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, {
         telegramBot: TG_LOGIN && bot && bot.username ? bot.username : null,
         telegramLogin: TG_LOGIN,
+        vkLogin: !!vk,
         reactions: REACTIONS,
         phrases: PHRASES,
         botDisclaimer: BOT_DISCLAIMER,

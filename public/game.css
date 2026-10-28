@@ -36,6 +36,12 @@ body { background: none; }
   transform: translateY(2px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 1px 0 #070c0e, 0 2px 6px rgba(0, 0, 0, 0.35);
 }
+/* VK — фирменный синий, объёмный, как остальные кнопки */
+.btn--vk, .btn--vk:hover:not(:disabled) {
+  color: #fff; border-color: #2b8bff;
+  background: linear-gradient(180deg, #2b8bff 0%, #0077ff 55%, #0062d1 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 3px 0 #003f87, 0 6px 16px rgba(0, 119, 255, 0.25);
+}
 .btn--primary {
   color: #2a1a02; border-color: #e9c46a; text-shadow: 0 1px 0 rgba(255, 240, 200, 0.4);
   background: linear-gradient(180deg, var(--gold-1) 0%, var(--gold-2) 55%, #a8822f 100%);

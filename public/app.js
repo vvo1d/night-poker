@@ -353,6 +353,7 @@ $('#logout').addEventListener('click', async () => {
   state.stream = null;
   state.user = null;
   show('auth');
+  renderVkAuth();
   renderTelegramAuth();
 });
 
@@ -1090,10 +1091,9 @@ function goToTable(id) {
 
 // ——— рейтинг ———
 
+// Рейтинг — по фишкам и по турнирам (по выигранным раздачам и сезону убран).
 const RATING_COLS = {
-  season: { label: 'Очки сезона', value: (r) => fmt(r.season) },
   chips: { label: 'Фишки', value: (r) => fmt(r.chips) },
-  wins: { label: 'Выиграно раздач', value: (r) => `${fmt(r.handsWon)} · ${r.winRate}%` },
   sng: { label: 'Побед в турнирах', value: (r) => `${fmt(r.sngWins)} · ${fmt(r.sngPrizes)}` },
 };
 
@@ -1101,7 +1101,8 @@ document.querySelectorAll('#rating-filter .filter').forEach((btn) => {
   btn.addEventListener('click', () => { Sound.play('click'); loadRating(btn.dataset.by); });
 });
 
-async function loadRating(by = state.ratingBy || 'season') {
+async function loadRating(by = state.ratingBy || 'chips') {
+  if (!RATING_COLS[by]) by = 'chips';
   state.ratingBy = by;
   document.querySelectorAll('#rating-filter .filter').forEach((b) => {
     b.classList.toggle('is-active', b.dataset.by === by);
@@ -1117,7 +1118,6 @@ function ratingRow(r, col) {
   row.title = 'Открыть профиль';
   row.append(el('span', 'rating__place', String(r.place)));
   const who = el('span', 'rating__name');
-  if (col === RATING_COLS.season) who.append(leagueBadge(r.league));
   who.append(avatarEl(r.name, r.avatar, 'avatar--xs'));
   who.append(document.createTextNode(r.name));
   if (r.you) who.append(el('span', 'rating__you', 'вы'));
@@ -1328,11 +1328,7 @@ function seasonCard(season, { own = true } = {}) {
 
 function renderRating(data) {
   const box = $('#rating');
-  const sc = $('#season-card');
-  sc.hidden = data.by !== 'season' || !state.user || !state.user.season;
-  sc.textContent = '';
-  if (!sc.hidden) sc.append(seasonCard(state.user.season));
-  const col = RATING_COLS[data.by];
+  const col = RATING_COLS[data.by] || RATING_COLS.chips;
   box.textContent = '';
   const head = el('div', 'rating__row rating__row--head');
   head.append(el('span', 'rating__place', '#'), el('span', 'rating__name', 'Игрок'),
@@ -1742,6 +1738,8 @@ function renderProfile(box, data) {
 
   // Telegram — в своём кабинете.
   if (data.own) {
+    const vkSec = vkSection();
+    if (vkSec) root.append(vkSec);
     const tg = telegramSection();
     if (tg) root.append(tg);
   }
@@ -4357,6 +4355,51 @@ async function telegramLink(payload) {
 window.onTelegramAuth = (user) => telegramLogin({ data: user });
 window.onTelegramLink = (user) => telegramLink({ data: user });
 
+// Вход через VK — обычная ссылка: сервер уводит в VK и возвращает уже вошедшим.
+// Источник и пригласивший друг едут в адресе — после возврата их не достать.
+function renderVkAuth() {
+  const box = $('#vk-auth');
+  box.hidden = !(state.config && state.config.vkLogin) || !!state.tgApp;
+  if (box.hidden) return;
+  const q = new URLSearchParams();
+  if (currentSource()) q.set('source', currentSource());
+  if (currentFriend()) q.set('friend', currentFriend());
+  $('#vk-login').href = `/auth/vk${q.toString() ? `?${q}` : ''}`;
+}
+
+// Вернулись из VK: итог входа или привязки — в адресе; показываем и чистим адрес.
+function vkReturn() {
+  const q = new URLSearchParams(location.search);
+  const result = q.get('vk');
+  const error = q.get('vkError');
+  if (!result && !error) return;
+  if (error) toast(error);
+  if (result === 'new') {
+    goal('register');
+    toast(`Добро пожаловать${state.user ? `, ${state.user.name}` : ''}! На счету 10 000 фишек`, { good: true });
+  }
+  if (result === 'linked') toast('VK привязан — теперь можно входить через него', { good: true });
+  q.delete('vk');
+  q.delete('vkError');
+  history.replaceState(null, '', `${location.pathname}${q.toString() ? `?${q}` : ''}${location.hash}`);
+}
+
+// Блок в кабинете: привязан ли VK, и если нет — привязать.
+function vkSection() {
+  const user = state.user;
+  if (!user || !(state.config && state.config.vkLogin)) return null;
+  const sec = profileSection('VK');
+  if (user.vk) {
+    sec.append(el('p', 'tg-linked', `Привязан VK (${user.vk}) — можно входить через VK без пароля.`));
+    return sec;
+  }
+  sec.append(el('p', 'hint', 'Привяжите VK, чтобы входить одним нажатием, без пароля.'));
+  const link = el('a', 'btn btn--vk btn--sm', 'Привязать VK');
+  link.href = '/auth/vk?link=1';
+  sec.append(link);
+  return sec;
+}
+
 // Кнопка входа на экране авторизации: в Telegram — одним нажатием, на сайте — виджет.
 function renderTelegramAuth() {
   const box = $('#tg-login');
@@ -4425,7 +4468,9 @@ function telegramSection() {
   } else {
     show('auth');
     showInviteNote();
+    renderVkAuth();
     renderTelegramAuth();
   }
+  vkReturn();
   if (window.innerWidth > 900) toggleLog(true);
 })();

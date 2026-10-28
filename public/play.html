@@ -66,6 +66,17 @@
       <p class="error" id="auth-error" hidden></p>
       <button class="btn btn--primary btn--wide" type="submit" id="auth-submit">Войти</button>
     </form>
+    <!-- Вход через VK: появляется, если на сервере задан VK_CLIENT_ID -->
+    <div class="tg-auth" id="vk-auth" hidden>
+      <div class="tg-auth__or"><span>или</span></div>
+      <div class="tg-auth__box">
+        <a class="btn btn--vk btn--wide" id="vk-login" href="/auth/vk">
+          <svg class="btn__ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.9 17.5c-5.5 0-8.6-3.8-8.8-10h2.8c.1 4.6 2.1 6.5 3.7 6.9V7.5h2.6v3.9c1.6-.2 3.3-2 3.8-3.9h2.6c-.4 2.4-2.2 4.2-3.5 4.9 1.3.6 3.3 2.2 4.1 5.1h-2.9c-.6-1.9-2.1-3.4-4.1-3.6v3.6h-.3Z"/></svg>
+          Войти через VK
+        </a>
+      </div>
+      <p class="hint">Аккаунт создастся сам, имя возьмём из VK. Пароль не нужен.</p>
+    </div>
     <!-- Вход через Telegram: появляется, если на сервере настроен бот -->
     <div class="tg-auth" id="tg-auth" hidden>
       <div class="tg-auth__or"><span>или</span></div>
@@ -184,11 +195,8 @@
       <h2>Рейтинг игроков</h2>
       <p id="rating-note">Пятьдесят лучших. Нажмите на игрока, чтобы открыть его профиль.</p>
     </div>
-    <div class="season-card" id="season-card" hidden></div>
     <div class="filters" role="tablist" id="rating-filter">
-      <button class="filter is-active" data-by="season" role="tab">Сезон</button>
-      <button class="filter" data-by="chips" role="tab">По фишкам</button>
-      <button class="filter" data-by="wins" role="tab">По выигранным раздачам</button>
+      <button class="filter is-active" data-by="chips" role="tab">По фишкам</button>
       <button class="filter" data-by="sng" role="tab">По турнирам</button>
     </div>
     <div class="rating" id="rating"></div>
