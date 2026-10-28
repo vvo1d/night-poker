@@ -1823,6 +1823,7 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   .seat:not(.seat--you) > .seat__cards .card--back { --r: 3px; width: 21px; height: 30px; }
   .seat:not(.seat--you) > .seat__cards .card--back + .card--back { margin-left: -13px; }
   .seat:not(.seat--you) > .seat__cards .card--back .card__back::after { font-size: 0.9em; }
+  .seat--you .seat__cards--4 .card + .card { margin-left: -23px; }
 }
 
 @media (max-height: 780px) and (min-width: 621px) {
@@ -2026,7 +2027,7 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
 @media (max-width: 620px) {
   /* 34 px карта, видно по 15 px: «10♥» помещается, весь веер — 79 px, в ширину места. */
   .seat__cards--4 .card + .card { margin-left: -19px; }
-  .seat--you .seat__cards--4 .card + .card { margin-left: -14px; }
+  .seat--you .seat__cards--4 .card + .card { margin-left: -21px; }   /* свой веер Омахи — плотнее: не задевает ники соседей */
 }
 
 /* Лобби: сначала игра (Холдем | Омаха), под ней — формат и разделы */
@@ -2047,3 +2048,22 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
 .rooms__group:first-child { padding-top: 8px; }
 .rooms__group small { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); }
 @media (max-width: 620px) { .games { display: flex; } .games__btn { flex: 1; } }
+
+/* Совсем узкий телефон (360 px): свой веер Омахи и рубашки соперников чуть меньше —
+   за столом на 9 мест иначе не хватает места между соседями. */
+@media (max-width: 380px) {
+  .seat--you .seat__cards--4 { height: 52px; }
+  .seat--you .seat__cards--4 .card--sm { width: 36px; height: 52px; }
+  .seat--you .seat__cards--4 .card + .card { margin-left: -21px; }
+  .seat:not(.seat--you) > .seat__cards { min-height: 26px; }
+  .seat:not(.seat--you) > .seat__cards .card--back { width: 18px; height: 26px; }
+  .seat:not(.seat--you) > .seat__cards .card--back + .card--back { margin-left: -11px; }
+  /* Место соперника ниже: аватар меньше, подписи плотнее — строка действия
+     остаётся под стеком, как везде, и не задевает соседей. */
+  .seat:not(.seat--you) .seat__face { width: 36px; height: 36px; font-size: 17px; border-radius: 9px; }
+  .seat:not(.seat--you) .seat__avatar { margin: 2px auto 1px; }
+  .seat:not(.seat--you) .seat__name { font-size: 11px; line-height: 1.15; }
+  .seat:not(.seat--you) .seat__stack { font-size: 11px; line-height: 1.15; }
+  .seat:not(.seat--you) .seat__note { font-size: 10px; line-height: 1.15; min-height: 1.15em; }
+  .seat:not(.seat--you) { gap: 2px; }
+}
