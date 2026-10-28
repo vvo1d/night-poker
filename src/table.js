@@ -1,5 +1,5 @@
 'use strict';
-const { freshDeck, shuffle, evaluate, handInfo } = require('./cards');
+const { freshDeck, shuffle, evaluate, handInfo, evaluateOmaha, handInfoOmaha } = require('./cards');
 const { decideBotAction, botThinkingTime, botLevel } = require('./bot');
 const { SNG_AWAY_MS } = require('./tournament');
 
@@ -66,6 +66,9 @@ class Table {
   constructor(config, hooks = {}) {
     Object.assign(this, config); // id, name, maxSeats, sb, bb, minBuyIn, maxBuyIn, timeout, tour
     this.tour = this.tour || null; // турнир, если стол — sit-n-go
+    // Вид игры: 'holdem' — техасский холдем без лимита, 'omaha' — Омаха пот-лимит
+    // (четыре карты на руках, комбинация — ровно две своих и три с борда).
+    this.game = this.game === 'omaha' ? 'omaha' : 'holdem';
     this.seats = new Array(this.maxSeats).fill(null);
     this.phase = 'idle';
     this.board = [];
@@ -421,6 +424,7 @@ class Table {
       at: Date.now(),
       table: this.name,
       kind: this.mttId ? 'mtt' : this.tour ? (this.tour.spin ? 'spin' : 'sng') : 'cash',
+      game: this.game,
       sb: this.sb,
       bb: this.bb,
       button: this.buttonSeat,
@@ -433,8 +437,8 @@ class Table {
     this.currentBet = Math.max(this.sb, this.bb);
     this.minRaise = this.bb;
 
-    // Раздача по две карты, начиная с малого блайнда.
-    for (let round = 0; round < 2; round++) {
+    // Раздача по две карты (в Омахе — по четыре), начиная с малого блайнда.
+    for (let round = 0; round < (this.game === 'omaha' ? 4 : 2); round++) {
       let seat = sbSeat;
       for (let i = 0; i < ready.length; i++) {
         this.seats[seat].cards.push(this.deck.pop());
@@ -495,10 +499,16 @@ class Table {
     const acts = { fold: true, toCall, stack: p.stack, pot: this.potTotal() };
     if (toCall === 0) acts.check = true;
     else acts.call = toCall;
-    const maxTo = p.bet + p.stack;
+    let maxTo = p.bet + p.stack;
+    // Пот-лимит: повысить можно не больше чем на банк после своего колла.
+    if (this.game === 'omaha') {
+      const callFull = this.currentBet - p.bet;
+      maxTo = Math.min(maxTo, this.currentBet + this.potTotal() + callFull);
+    }
     if (!p.noRaise && maxTo > this.currentBet) {
       acts.minRaiseTo = Math.min(this.currentBet + this.minRaise, maxTo);
       acts.maxRaiseTo = maxTo;
+      acts.allInTo = p.bet + p.stack;   // в Омахе потолок — банк, и он может быть меньше всего стека
       acts.isBet = this.currentBet === 0;
     }
     return acts;
@@ -515,7 +525,7 @@ class Table {
     if ((action === 'raise' || action === 'bet')) {
       if (legal.minRaiseTo === undefined) return { error: 'Повышать нельзя' };
       const to = Math.round(Number(amount) || 0);
-      if (to > legal.maxRaiseTo) return { error: 'Не хватает фишек' };
+      if (to > legal.maxRaiseTo) return { error: this.game === 'omaha' && to <= p.bet + p.stack ? `Пот-лимит: не больше ${legal.maxRaiseTo}` : 'Не хватает фишек' };
       if (to < legal.minRaiseTo && to !== legal.maxRaiseTo) {
         return { error: `Минимум ${legal.minRaiseTo}` };
       }
@@ -728,7 +738,9 @@ class Table {
     const alive = this.inHand();
     this.results = new Map();
     if (alive.length > 1) {
-      for (const p of alive) this.results.set(p, evaluate([...p.cards, ...this.board]));
+      for (const p of alive) {
+        this.results.set(p, this.game === 'omaha' ? evaluateOmaha(p.cards, this.board) : evaluate([...p.cards, ...this.board]));
+      }
     }
 
     this.pots = this.buildPots();
@@ -1095,7 +1107,9 @@ class Table {
     if (needsBoard && evalBudget.left <= 0) return this.lastHand.get(p.seat) || null;
     if (needsBoard) evalBudget.left -= 1;
 
-    const info = handInfo(p.cards, this.board, this.evalCache, withStrength);
+    const info = this.game === 'omaha'
+      ? handInfoOmaha(p.cards, this.board, withStrength)
+      : handInfo(p.cards, this.board, this.evalCache, withStrength);
     this.evalCache.len = this.board.length;
     this.handCache.set(key, info);
     this.lastHand.set(p.seat, info);
@@ -1112,6 +1126,7 @@ class Table {
     return {
       id: this.id,
       kind: this.tour ? 'sng' : 'cash',
+      game: this.game,
       name: this.name,
       invite: this.invite || null,       // код ссылки-приглашения за этот стол
       private: !!this.private,

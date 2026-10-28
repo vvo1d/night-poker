@@ -10,6 +10,27 @@
 // Новичок «считает» грубо и с большим шумом, профи — точно и почти без шума.
 
 const { bestValue, rankOf, suitOf, holeStrength, evaluate, freshDeck } = require('./cards');
+const { omahaHoleStrength, omahaEquity } = require('./cards');
+
+// Омаха: место стартовой руки среди всех (0 — лучшая, 1 — худшая) — по выборке
+// случайных рук, посчитанной один раз при запуске.
+const OMAHA_SAMPLE = (() => {
+  const { freshDeck: deck } = require('./cards');
+  const out = [];
+  for (let i = 0; i < 4000; i++) {
+    const d = deck();
+    for (let k = 0; k < 4; k++) { const j = k + Math.floor(Math.random() * (d.length - k)); [d[k], d[j]] = [d[j], d[k]]; }
+    out.push(omahaHoleStrength(d.slice(0, 4)));
+  }
+  return out.sort((a, b) => b - a);
+})();
+function omahaPercent(cards) {
+  const v = omahaHoleStrength(cards);
+  let lo = 0;
+  let hi = OMAHA_SAMPLE.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (OMAHA_SAMPLE[mid] > v) lo = mid + 1; else hi = mid; }
+  return lo / OMAHA_SAMPLE.length;
+}
 
 // ——— характеры ———
 
@@ -235,12 +256,13 @@ function decideBotAction(table, p) {
   const stackBb = (p.stack + p.bet) / bb;
   const pos = positionOf(table, p);
   const players = table.inHand().length;
+  const omaha = table.game === 'omaha';
 
   if (!table.board.length) return preflop();
   return postflop();
 
   function preflop() {
-    const pct = holePercent(p.cards) + gauss() * st.noise * 0.6;
+    const pct = (omaha ? omahaPercent(p.cards) : holePercent(p.cards)) + gauss() * st.noise * 0.6;
     // Короткий стек — пуш или фолд: играть «понемногу» уже нечем.
     if (stackBb <= 12 && canRaise) {
       const width = 0.18 + st.vpip * 0.4 + pos * 0.12 + (players <= 3 ? 0.12 : 0);
@@ -278,8 +300,14 @@ function decideBotAction(table, p) {
     // Шансы: новичок оценивает «на глаз», остальные считают против вероятных рук.
     const key = `${table.handId}:${table.board.length}:${players}`;
     if (!p.eq || p.eq.key !== key) {
-      const ranges = opponentRanges(table, p);
-      const raw = st.sims ? equity(p.cards, table.board, ranges, st.sims) : roughStrength(p.cards, table.board) ** (1 + (players - 2) * 0.35);
+      let raw;
+      if (omaha) {
+        // Омаха: розыгрыши против случайной руки, на многих соперников — строже.
+        raw = omahaEquity(p.cards, table.board, st.sims ? 300 : 80) ** (1 + (players - 2) * 0.55);
+      } else {
+        const ranges = opponentRanges(table, p);
+        raw = st.sims ? equity(p.cards, table.board, ranges, st.sims) : roughStrength(p.cards, table.board) ** (1 + (players - 2) * 0.35);
+      }
       p.eq = { key, raw };
     }
     const eq = Math.max(0, Math.min(1, p.eq.raw + gauss() * st.noise));

@@ -29,9 +29,7 @@ const HandReplay = (() => {
     const front = node('div', 'card__face card__front');
     if (code) {
       c.classList.add(`card--${code[1]}`);
-      front.append(node('span', 'card__mark', SUIT[code[1]]));
-      front.append(node('span', 'card__r', code[0] === 'T' ? '10' : code[0]));
-      front.append(node('span', 'card__s', SUIT[code[1]]));
+      window.CardFace.fill(front, code);
     } else {
       c.classList.add('card--back');
     }

@@ -15,8 +15,9 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=Exo+2:wght@600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Exo+2:wght@600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/cards.css">
 <!-- Игровое оформление поверх базовых стилей: убрать эту строку — вернётся прежний вид -->
 <link rel="stylesheet" href="/game.css">
 <link rel="icon" href="/favicon.ico" sizes="any">
@@ -30,9 +31,9 @@
 <!-- Заставка -->
 <section id="screen-loading" class="screen loading" aria-live="polite">
   <div class="loading__table" aria-hidden="true">
-    <span class="loading__card loading__card--1">A<i>♠</i></span>
-    <span class="loading__card loading__card--2">K<i>♥</i></span>
-    <span class="loading__card loading__card--3">Q<i>♦</i></span>
+    <span class="loading__card loading__card--1 card--s" data-card="As">A<i>♠</i></span>
+    <span class="loading__card loading__card--2 card--h" data-card="Kh">K<i>♥</i></span>
+    <span class="loading__card loading__card--3 card--d" data-card="Qd">Q<i>♦</i></span>
     <span class="loading__chips"><i></i><i></i><i></i><i></i></span>
   </div>
   <p class="loading__brand">THPoker</p>
@@ -46,6 +47,13 @@
     </div>
     <h1 class="auth__title">THPoker</h1>
     <p class="auth__lede">Техасский холдем без лимита. Свои столы с любыми блайндами и турниры sit-n-go, фишки только виртуальные.</p>
+
+    <!-- Без регистрации: гостевой аккаунт и сразу за стол -->
+    <div class="guest">
+      <button class="btn btn--primary btn--wide" type="button" id="guest-play">Играть без регистрации</button>
+      <p class="hint">Сразу за стол, 10 000 фишек. Сохранить аккаунт можно потом — имя и пароль или VK.</p>
+      <div class="tg-auth__or"><span>или войдите</span></div>
+    </div>
 
     <div class="tabs" role="tablist">
       <button class="tab is-active" data-mode="login" role="tab">Вход</button>
@@ -153,6 +161,11 @@
     </section>
 
     <div class="lobby__list">
+      <!-- Сначала игра, потом формат: холдем и Омаха не перемешаны в одном списке -->
+      <div class="games" role="tablist" id="lobby-game" aria-label="Игра">
+        <button class="games__btn is-active" data-game="holdem" role="tab">Холдем<small id="game-count-holdem"></small></button>
+        <button class="games__btn" data-game="omaha" role="tab">Омаха<small id="game-count-omaha"></small></button>
+      </div>
       <div class="filters" role="tablist" id="lobby-filter">
         <button class="filter is-active" data-filter="all" role="tab">Все</button>
         <button class="filter" data-filter="cash" role="tab">Кэш</button>
@@ -343,6 +356,14 @@
 <dialog id="create-dialog" class="dialog dialog--wide">
   <form method="dialog" id="create-form">
     <h3>Новый стол</h3>
+    <div class="field">
+      <span>Игра</span>
+      <div class="seg" role="radiogroup" aria-label="Игра">
+        <label><input type="radio" name="game" value="holdem" checked><span>Холдем</span></label>
+        <label><input type="radio" name="game" value="omaha"><span>Омаха</span></label>
+      </div>
+      <small class="field__hint" id="create-game-hint">Две карты на руках, ставки без лимита.</small>
+    </div>
     <div class="seg" role="radiogroup" aria-label="Тип стола">
       <label><input type="radio" name="kind" value="cash" checked><span>Кэш-игра</span></label>
       <label><input type="radio" name="kind" value="sng"><span>Sit-n-go</span></label>
@@ -476,6 +497,38 @@
   </div>
 </dialog>
 
+<!-- Гость сохраняет аккаунт: имя и пароль или VK -->
+<dialog id="save-dialog" class="dialog save">
+  <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="save-close" title="Закрыть" aria-label="Закрыть"></button>
+  <h3>Сохраните аккаунт</h3>
+  <p class="dialog__note">Фишки, уровень и задания останутся. Без этого гостевой аккаунт пропадёт, если почистить браузер или зайти с другого устройства.</p>
+  <form id="save-form" autocomplete="on">
+    <label class="field">
+      <span>Имя за столом</span>
+      <input name="name" required minlength="3" maxlength="16" autocomplete="username" placeholder="Например, Марго">
+    </label>
+    <label class="field">
+      <span>Пароль</span>
+      <input name="password" type="password" required minlength="6" autocomplete="new-password" placeholder="Минимум 6 символов">
+    </label>
+    <p class="error" id="save-error" hidden></p>
+    <button class="btn btn--primary btn--wide" type="submit">Сохранить</button>
+  </form>
+  <div class="save__vk" id="save-vk" hidden>
+    <div class="tg-auth__or"><span>или</span></div>
+    <a class="btn btn--vk btn--wide" href="/auth/vk?link=1">Сохранить через VK</a>
+  </div>
+</dialog>
+
+<!-- Напоминание гостю: сохранить аккаунт -->
+<div class="save-offer" id="save-offer" role="status" hidden>
+  <span class="save-offer__text" id="save-offer-text"></span>
+  <div class="save-offer__row">
+    <button class="btn btn--primary btn--sm" type="button" id="save-offer-go">Сохранить</button>
+    <button class="btn btn--ghost btn--sm" type="button" id="save-offer-later">Позже</button>
+  </div>
+</div>
+
 <!-- Выбор аватара: готовые портреты или своё фото -->
 <dialog id="avatar-dialog" class="dialog dialog--avatar">
   <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="avatar-close" title="Закрыть" aria-label="Закрыть"></button>
@@ -489,6 +542,7 @@
 </dialog>
 
 <script src="/sound.js"></script>
+<script src="/cardface.js"></script>
 <script src="/replay.js"></script>
 <script src="/app.js"></script>
 </body>

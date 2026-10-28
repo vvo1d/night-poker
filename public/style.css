@@ -133,6 +133,7 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .loading__card i { font-style: normal; font-size: 0.8em; margin-top: 3px; }
 .loading__card--2 { color: #b0392c; animation-delay: 0.15s; --to-x: 0px; --rot: 0deg; }
 .loading__card--3 { color: #1c6b9f; animation-delay: 0.3s; --to-x: 46px; --rot: 9deg; }
+.loading__card.card--real { container-type: size; color: var(--suit); }
 .loading__card--1 { --to-x: -46px; --rot: -9deg; }
 @keyframes dealIn {
   0% { opacity: 0; transform: translate(0, -40px) rotate(0deg) scale(0.85); }
@@ -663,10 +664,8 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   --suit: #263038;
   --tint: #dfe3e6;
 }
-.card--s { --suit: #222b33; --tint: #dde1e5; }
-.card--h { --suit: #b0392c; --tint: #f4dcd7; }
-.card--d { --suit: #1c6b9f; --tint: #d9e7f3; }
-.card--c { --suit: #1e7a4c; --tint: #d9eee2; }
+.card { container-type: size; }   /* размеры лица — в долях карты (cqw), см. cardface.js */
+/* Цвета мастей — в cards.css (четырёхцветная колода). */
 
 .card__inner {
   position: absolute; inset: 0; transform-style: preserve-3d;
@@ -681,22 +680,13 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   clip-path: inset(0 round var(--r));
 }
 .card__front {
-  background: linear-gradient(158deg, #fdfbf5 0%, #f3ede1 62%, #e9e1d1 100%);
+  background: linear-gradient(160deg, #ffffff 0%, #fbf9f4 55%, #f1ece2 100%);
   color: var(--suit);
-  box-shadow: inset 0 0 0 1px rgba(20, 26, 32, 0.16), inset 0 0 0 3px rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(20, 26, 32, 0.18);
+
 }
-/* цветная кромка по масти — карту видно даже краем глаза */
-.card__front::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 5px;
-  background: linear-gradient(90deg, var(--suit), transparent 78%); opacity: 0.6;
-}
-/* водяной знак масти */
-.card__mark {
-  position: absolute; right: -6%; bottom: -8%;
-  font-size: 3.2em; line-height: 1; color: var(--tint); pointer-events: none;
-}
-.card__r { position: relative; font-size: 25px; font-weight: 700; letter-spacing: -0.02em; }
-.card__s { position: relative; font-size: 17px; margin-top: 2px; }
+
+/* Индекс, масти, туз и фигуры — в cards.css (общий с главной и повтором раздачи). */
 .card__back {
   transform: rotateY(180deg);
   background:
@@ -710,13 +700,8 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 }
 .card--back .card__inner { transform: rotateY(180deg); }
 .card--sm { --r: 6px; width: 40px; height: 57px; }
-.card--sm .card__r { font-size: 17px; }
-.card--sm .card__s { font-size: 12px; }
-.card--sm .card__front::before { height: 4px; }
 .seat--you .seat__cards { height: 68px; }
 .seat--you .card--sm { --r: 7px; width: 48px; height: 68px; }
-.seat--you .card--sm .card__r { font-size: 21px; }
-.seat--you .card--sm .card__s { font-size: 15px; }
 .card--dim { filter: grayscale(0.65) brightness(0.6); }
 
 /* собранная комбинация героя — мягкая подсветка */
@@ -1021,6 +1006,7 @@ button.person__who:hover .person__name { text-decoration: underline; text-underl
 }
 .mini b { font-weight: 700; }
 .mini i { font-style: normal; font-size: 10px; }
+/* Те же четыре цвета, что у карт на столе. */
 .mini--s { --suit: #222b33; }
 .mini--h { --suit: #b0392c; }
 .mini--d { --suit: #1c6b9f; }
@@ -1473,8 +1459,6 @@ body:has(.actions.is-raising) .react { display: none; }
 }
 .replay__cards { grid-area: cards; display: flex; gap: 3px; min-height: 46px; }
 .replay__cards .card { width: 32px; height: 46px; --r: 5px; }
-.replay__cards .card .card__r { font-size: 14px; }
-.replay__cards .card .card__s { font-size: 11px; }
 .replay__stack { grid-area: stack; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
 .replay__act { grid-area: act; font-size: 12px; color: var(--muted); min-height: 1.3em; }
 .replay__player.is-active .replay__act, .replay__player.is-winner .replay__act { color: var(--brass); }
@@ -1493,7 +1477,6 @@ body:has(.actions.is-raising) .react { display: none; }
   .replay__player { padding: 6px 8px; grid-template-columns: minmax(0, 1fr) auto 64px; }
   .replay__cards { min-height: 40px; }
   .replay__cards .card { width: 28px; height: 40px; --r: 5px; }
-  .replay__cards .card .card__r { font-size: 13px; }
   .replay__board .card, .replay__slot { width: 38px; height: 54px; }
   .replay__board { min-height: 54px; gap: 5px; }
   .replay__btn { min-width: 40px; padding: 6px 8px; }
@@ -1722,11 +1705,7 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   :root { --seat-w: 84px; }
   .felt { margin: 10px; border-width: 6px; }
   .card { --r: 7px; width: 44px; height: 63px; }
-  .card__r { font-size: 19px; }
-  .card__s { font-size: 14px; }
   .card--sm { --r: 5px; width: 32px; height: 46px; }
-  .card--sm .card__r { font-size: 14px; }
-  .card--sm .card__s { font-size: 11px; }
   .seat__cards { height: 46px; }
   .seat__name { font-size: 11px; }
   .seat__face { width: 44px; height: 44px; font-size: 19px; border-radius: 10px; }
@@ -1758,8 +1737,6 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   /* свои карты крупнее чужих, но на узком экране — умеренно */
   .seat--you .seat__cards { height: 58px; }
   .seat--you .card--sm { --r: 6px; width: 40px; height: 58px; }
-  .seat--you .card--sm .card__r { font-size: 17px; }
-  .seat--you .card--sm .card__s { font-size: 12px; }
   .topbar { padding: 10px 12px; }
   .actions {
     padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
@@ -1840,15 +1817,10 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
   .pot { min-height: 16px; }
   .felt__msg { min-height: 20px; font-size: 15px; }
   .card { --r: 7px; width: 44px; height: 63px; }
-  .card__r { font-size: 20px; }
-  .card__s { font-size: 15px; }
   .card--sm { --r: 5px; width: 34px; height: 49px; }
-  .card--sm .card__r { font-size: 15px; }
-  .card--sm .card__s { font-size: 11px; }
   .seat__cards { height: 49px; }
   .seat--you .seat__cards { height: 58px; }
   .seat--you .card--sm { --r: 6px; width: 40px; height: 58px; }
-  .seat--you .card--sm .card__r { font-size: 17px; }
   .board { min-height: 63px; min-width: 252px; }
   .seat__face { width: 52px; height: 52px; font-size: 22px; border-radius: 11px; }
   .actions { min-height: 64px; padding: 8px 18px calc(8px + env(safe-area-inset-bottom)); }
@@ -2008,3 +1980,55 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
   .dialog--avatar { padding: 18px 14px; }
   .avatar-pick { grid-template-columns: repeat(5, 1fr); gap: 6px; }
 }
+
+/* Лобби: живые столы помечены, лишние свободные свёрнуты */
+.room__tag--live { color: #9fe0b0; border-color: rgba(79, 157, 106, 0.55); background: rgba(79, 157, 106, 0.12); }
+.room__tag--omaha { color: #e6c3ff; border-color: rgba(160, 110, 200, 0.55); background: rgba(160, 110, 200, 0.12); }
+.room-more { list-style: none; display: flex; justify-content: center; padding: 6px 0 2px; }
+
+/* Игра без регистрации */
+.guest { margin: 4px 0 18px; }
+.guest .hint { text-align: center; margin: 8px 0 14px; }
+.save { width: min(400px, 92vw); }
+.save .dialog__note { line-height: 1.5; }
+.save__vk { margin-top: 14px; }
+.save-offer {
+  position: fixed; left: 12px; right: 12px; margin: 0 auto; bottom: calc(112px + env(safe-area-inset-bottom)); z-index: 60;
+  max-width: 440px; display: grid; gap: 10px; padding: 14px 16px; border-radius: 14px;
+  background: rgba(14, 22, 26, 0.97); border: 1px solid rgba(201, 162, 74, 0.55); box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+  animation: rise 240ms ease-out both;
+}
+.save-offer[hidden] { display: none; }
+.save-offer__text { font-size: 14px; line-height: 1.4; color: var(--bone); }
+.save-offer__row { display: flex; gap: 8px; justify-content: flex-end; }
+.profile__section--guest { border: 1px solid rgba(201, 162, 74, 0.45); border-radius: 14px; padding: 14px 16px; }
+
+/* Омаха: четыре карты веером — каждая следующая заходит на предыдущую.
+   Ранг и масть — в левом верхнем углу, как на настоящих картах: эта полоска
+   у каждой карты остаётся открытой, и вскрытые карты соперника читаются. */
+.seat__cards--4 .card + .card { margin-left: -16px; }
+.seat--you .seat__cards--4 .card + .card { margin-left: -12px; }
+@media (max-width: 620px) {
+  /* 34 px карта, видно по 15 px: «10♥» помещается, весь веер — 79 px, в ширину места. */
+  .seat__cards--4 .card + .card { margin-left: -19px; }
+  .seat--you .seat__cards--4 .card + .card { margin-left: -14px; }
+}
+
+/* Лобби: сначала игра (Холдем | Омаха), под ней — формат и разделы */
+.games { display: inline-flex; gap: 4px; padding: 4px; margin-bottom: 10px; border-radius: 12px; background: rgba(9, 16, 19, 0.6); border: 1px solid var(--line); }
+.games__btn {
+  font: inherit; font-size: 14px; font-weight: 600; color: var(--muted); background: none; border: 0; cursor: pointer;
+  padding: 8px 18px; border-radius: 9px; transition: color 140ms ease, background 140ms ease;
+}
+.games__btn small { font-weight: 500; font-size: 12px; opacity: 0.8; font-variant-numeric: tabular-nums; }
+.games__btn:hover { color: var(--text); }
+.games__btn.is-active { color: #1a1305; background: linear-gradient(180deg, #f0d68f, var(--brass)); }
+.games__btn:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.rooms__group {
+  list-style: none; display: flex; align-items: baseline; gap: 10px; padding: 18px 0 6px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brass);
+  border-bottom: 1px solid var(--line);
+}
+.rooms__group:first-child { padding-top: 8px; }
+.rooms__group small { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); }
+@media (max-width: 620px) { .games { display: flex; } .games__btn { flex: 1; } }

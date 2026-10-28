@@ -235,6 +235,62 @@ class Store {
     return null;
   }
 
+  // ——— гости ———
+
+  // «Играть гостем»: аккаунт без имени и пароля — «Гость 4821». Всё как у обычного
+  // игрока (фишки, задания, уровень), но в рейтинг не попадает и живёт, пока жива
+  // сессия в браузере. Сохранить — задать имя и пароль или привязать VK.
+  createGuest(source = null, friend = null) {
+    let name;
+    do name = `Гость ${1000 + Math.floor(Math.random() * 9000)}`; while (this.byName.has(name.toLowerCase()));
+    const user = {
+      id: crypto.randomUUID(),
+      name,
+      salt: '',
+      hash: '',
+      chips: START_CHIPS,
+      handsPlayed: 0,
+      createdAt: Date.now(),
+      meta: { source: cleanSource(source), guest: true },
+    };
+    this.prepare(user);
+    this.users.set(user.id, user);
+    this.byName.set(name.toLowerCase(), user.id);
+    this.markActive(user);
+    this.logStart(user);
+    this.linkReferral(user, friend);
+    this.touch(user);
+    return { user };
+  }
+
+  isGuest(u) { return !!(u && u.meta && u.meta.guest); }
+
+  // Гость сохраняет аккаунт: своё имя и пароль. Фишки, задания и уровень остаются.
+  async saveGuest(userId, name, password) {
+    const u = this.users.get(userId);
+    if (!u || !this.isGuest(u)) return { error: 'Аккаунт уже сохранён' };
+    name = String(name || '').trim();
+    password = String(password || '');
+    const bad = this.checkName(name);
+    if (bad) return { error: bad };
+    if (/^гость(\s|\d|$)/i.test(name)) return { error: 'Придумайте своё имя — не «Гость»' };
+    if (password.length < 6) return { error: 'Пароль — минимум 6 символов' };
+    const taken = this.byName.get(name.toLowerCase());
+    if (taken && taken !== u.id) return { error: 'Такое имя уже занято' };
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = (await scrypt(password, salt)).toString('hex');
+    const again = this.byName.get(name.toLowerCase());
+    if (again && again !== u.id) return { error: 'Такое имя уже занято' };
+    this.byName.delete(u.name.toLowerCase());
+    u.name = name;
+    this.byName.set(name.toLowerCase(), u.id);
+    u.salt = salt;
+    u.hash = hash;
+    delete u.meta.guest;
+    this.touch(u);
+    return { ok: true };
+  }
+
   async register(name, password, source = null, friend = null) {
     name = String(name || '').trim();
     password = String(password || '');
@@ -484,6 +540,15 @@ class Store {
     if (u.meta.vk && u.meta.vk.id !== vk.id) this.byVk.delete(u.meta.vk.id);
     u.meta.vk = { id: vk.id, name: [vk.firstName, vk.lastName].filter(Boolean).join(' ') };
     this.byVk.set(vk.id, userId);
+    // Гость привязал VK — аккаунт сохранён: имя «Гость 1234» меняем на имя из VK.
+    if (this.isGuest(u)) {
+      delete u.meta.guest;
+      const full = [vk.firstName, vk.lastName ? vk.lastName.slice(0, 1) : ''].filter(Boolean).join(' ');
+      const name = this.nameFromTelegram({ firstName: full });
+      this.byName.delete(u.name.toLowerCase());
+      u.name = name;
+      this.byName.set(name.toLowerCase(), u.id);
+    }
     this.touch(u);
     return { ok: true };
   }
@@ -939,6 +1004,7 @@ class Store {
     if (cached && now - cached.at < RATING_TTL) return cached.order;
     const score = RATINGS[by];
     const order = [...this.users.values()]
+      .filter((u) => !this.isGuest(u))   // гости — не в рейтинге
       .sort((a, b) => score(b) - score(a) || a.createdAt - b.createdAt)
       .map((u) => u.id);
     cached = { at: now, order };
@@ -1081,6 +1147,8 @@ class Store {
       referral: this.referralView(u),
       shop: shop.view(u),                        // купленное оформление и что надето
       hasPassword: !!u.hash,
+      // Гость: пора ли предложить сохранить аккаунт — после 20 раздач или первого выигранного банка.
+      guest: this.isGuest(u) ? { hands: u.handsPlayed, won: u.stats.handsWon > 0 } : null,
     };
   }
 

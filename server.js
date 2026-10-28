@@ -59,6 +59,9 @@ const ROOM_CONFIGS = [
   { id: 'heads', name: 'Хедз-ап', maxSeats: 2, sb: 10, bb: 20, minBuyIn: 400, maxBuyIn: 2000, timeout: 20 },
   { id: 'turbo', name: 'Турбо', maxSeats: 9, sb: 25, bb: 50, minBuyIn: 1000, maxBuyIn: 5000, timeout: 12 },
   { id: 'high', name: 'Высокие ставки', maxSeats: 6, sb: 50, bb: 100, minBuyIn: 2000, maxBuyIn: 10000, timeout: 25 },
+  // Омаха пот-лимит: четыре карты на руках.
+  { id: 'omaha', name: 'Омаха', maxSeats: 6, sb: 5, bb: 10, minBuyIn: 200, maxBuyIn: 1000, timeout: 30, game: 'omaha' },
+  { id: 'omaha-high', name: 'Омаха 25/50', maxSeats: 6, sb: 25, bb: 50, minBuyIn: 1000, maxBuyIn: 5000, timeout: 30, game: 'omaha' },
 ];
 
 // Из чего игрок собирает свой стол. Закупка — от 20 до 100 больших блайндов.
@@ -99,6 +102,9 @@ const HOUSE_SNGS = [
   // Спины — на троих, места добираются быстрее: это формат «сел и играешь».
   { key: 'spin-100', seats: 3, buyIn: 100, name: 'Спин', spin: true, fillMs: 10_000 },
   { key: 'spin-1000', seats: 3, buyIn: 1000, name: 'Спин', spin: true, fillMs: 10_000 },
+  // Омаха пот-лимит — те же sit-n-go, четыре карты на руках.
+  { key: 'omaha6-100', seats: 6, buyIn: 100, name: 'Омаха · быстрый', game: 'omaha' },
+  { key: 'omaha6-1000', seats: 6, buyIn: 1000, name: 'Омаха · большой', game: 'omaha' },
 ];
 const LOBBY_LIMIT = 150;             // столько столов уходит в лобби — самые живые
 const EVAL_PER_TICK = 8;             // тяжёлых разборов руки за тик (по ~4 мс каждый)
@@ -217,7 +223,8 @@ function createUserTable(user, body) {
     if (!SNG_SEATS.includes(seats)) return { error: 'Sit-n-go бывает на 6 или 9 мест' };
     const buyIn = Number(body.buyIn);
     if (!BUY_IN_STEPS.includes(buyIn)) return { error: 'Выберите взнос из ряда: 10, 20, 25, 50, 100 … 1 000 000' };
-    return createSngTable(name || `Sit-n-go на ${seats}`, seats, buyIn, { owner: user, privateTable });
+    const game = body.game === 'omaha' ? 'omaha' : 'holdem';
+    return createSngTable(name || `${game === 'omaha' ? 'Омаха' : 'Sit-n-go'} на ${seats}`, seats, buyIn, { owner: user, privateTable, game });
   }
 
   const seats = Number(body.seats);
@@ -228,9 +235,10 @@ function createUserTable(user, body) {
   if (!BLIND_STEPS.includes(bb)) return { error: 'Выберите блайнды из ряда: 1/2, 2/5, 5/10 … 50 000/100 000' };
   if (!TIMEOUTS.includes(timeout)) return { error: 'Выберите время на ход' };
   const sb = Math.max(1, Math.floor(bb / 2));
+  const game = body.game === 'omaha' ? 'omaha' : 'holdem';
   return createTable({
-    name: name || `Стол ${user.name}`,
-    maxSeats: seats, sb, bb, minBuyIn: bb * 20, maxBuyIn: bb * 100, timeout,
+    name: name || `${game === 'omaha' ? 'Омаха' : 'Стол'} ${user.name}`,
+    maxSeats: seats, sb, bb, minBuyIn: bb * 20, maxBuyIn: bb * 100, timeout, game,
   }, { owner: user, privateTable });
 }
 
@@ -238,6 +246,7 @@ function createSngTable(name, seats, buyIn, opts = {}) {
   const stack = opts.spin ? SPIN_STACK : SNG_STACK;
   const table = createTable({
     name, maxSeats: seats, sb: 0, bb: 0, minBuyIn: stack, maxBuyIn: stack, timeout: opts.spin ? SPIN_TIMEOUT : SNG_TIMEOUT,
+    game: opts.game === 'omaha' ? 'omaha' : 'holdem',
   }, { ...opts, sng: seats, buyIn });
   [table.sb, table.bb] = table.tour.blinds();
   return table;
@@ -603,12 +612,20 @@ function quickPlay(user, session) {
   const seated = tableOfUser(user.id);
   if (seated) { session.roomId = seated.id; return { ok: true, roomId: seated.id }; }
   const chips = store.user(user.id).chips;
-  const cash = [...tables.values()]
-    .filter((t) => t.house && !t.tour && t.maxSeats >= 4 && t.occupied() < t.maxSeats)
-    .sort((a, b) => a.bb - b.bb);
-  if (!cash.length) return { error: 'Свободных столов нет, попробуйте позже' };
+  // Сначала — открытый кэш-стол, где уже играют люди и ставки по карману
+  // (закупка — не больше половины банка): живые игроки должны встречаться,
+  // а не сидеть каждый за своим столом с ботами. Больше людей — выше в очереди,
+  // при равенстве — ставки покрупнее из тех, что по карману.
+  const open = (t) => !t.tour && !t.mttId && !t.private && t.game !== 'omaha'
+    && t.maxSeats >= 4 && t.occupied() < t.maxSeats;
+  const withPeople = [...tables.values()]
+    .filter((t) => open(t) && t.humans() > 0 && t.minBuyIn * 2 <= chips)
+    .sort((a, b) => b.humans() - a.humans() || b.bb - a.bb);
+  // Людей нигде нет — стол заведения по банку, соперников доберут боты.
+  const cash = [...tables.values()].filter((t) => open(t) && t.house).sort((a, b) => a.bb - b.bb);
+  if (!withPeople.length && !cash.length) return { error: 'Свободных столов нет, попробуйте позже' };
   const fit = cash.filter((t) => t.maxBuyIn * 4 <= chips);
-  const table = fit.length ? fit[fit.length - 1] : cash[0];
+  const table = withPeople[0] || (fit.length ? fit[fit.length - 1] : cash[0]);
   const buyIn = Math.min(table.maxBuyIn, chips);
   if (buyIn < table.minBuyIn) return { error: 'В банке мало фишек — пополните его в шапке', reload: true };
   const res = seatUser(user, table, buyIn);
@@ -624,7 +641,7 @@ function quickPlay(user, session) {
 // спин или нет. Сначала среди турниров заведения, потом среди открытых турниров
 // игроков; нет такого — открываем новый с теми же условиями: места через полминуты
 // после записи займут боты, как в турнирах заведения.
-function quickSng(user, session, { buyIn, spin = false, seats = 0, name = '' }) {
+function quickSng(user, session, { buyIn, spin = false, seats = 0, name = '', game = 'holdem' }) {
   const seated = tableOfUser(user.id);
   if (seated) {
     if (!seated.tour) return { error: 'Сначала встаньте из-за кэш-стола' };
@@ -634,7 +651,7 @@ function quickSng(user, session, { buyIn, spin = false, seats = 0, name = '' }) 
   if (store.user(user.id).chips < buyIn) return { error: 'В банке не хватает на взнос' };
   const same = (t) => t.tour && !t.mttId && !t.private && t.tour.status === 'registering'
     && t.tour.buyIn === buyIn && !!t.tour.spin === spin && (!seats || t.maxSeats === seats)
-    && t.occupied() < t.maxSeats;
+    && (t.game || 'holdem') === game && t.occupied() < t.maxSeats;
   const open = [...tables.values()].filter(same).sort((a, b) => !!b.houseSng - !!a.houseSng);
   let table = open[0];
   if (!table) {
@@ -642,7 +659,7 @@ function quickSng(user, session, { buyIn, spin = false, seats = 0, name = '' }) 
     const okBuyIn = BUY_IN_STEPS.includes(buyIn) || HOUSE_SNGS.some((tpl) => tpl.buyIn === buyIn);
     if (!okSeats || !okBuyIn) return { error: 'Такого турнира сейчас нет — выберите в лобби' };
     if (tables.size >= TABLES_MAX) return { error: 'Свободных столов нет, попробуйте позже' };
-    table = createSngTable(String(name || `Sit-n-go на ${seats}`).slice(0, 24), seats, buyIn, { spin });
+    table = createSngTable(String(name || `Sit-n-go на ${seats}`).slice(0, 24), seats, buyIn, { spin, game });
     table.houseSng = 'custom';
     table.fillMs = HOUSE_SNG_FILL_MS;
   }
@@ -658,7 +675,7 @@ function quickSng(user, session, { buyIn, spin = false, seats = 0, name = '' }) 
 function maintainHouseSngs(now) {
   for (const tpl of HOUSE_SNGS) {
     if ([...tables.values()].some((t) => t.houseSng === tpl.key && t.tour.status === 'registering')) continue;
-    const table = createSngTable(tpl.name, tpl.seats, tpl.buyIn, { spin: !!tpl.spin });
+    const table = createSngTable(tpl.name, tpl.seats, tpl.buyIn, { spin: !!tpl.spin, game: tpl.game });
     table.houseSng = tpl.key;
     table.fillMs = tpl.fillMs || HOUSE_SNG_FILL_MS;
   }
@@ -785,7 +802,7 @@ function reopenTable(rec) {
   if (!owner) return false;
   const cfg = {
     id: rec.id, name: rec.name, maxSeats: rec.maxSeats, sb: rec.sb, bb: rec.bb,
-    minBuyIn: rec.minBuyIn, maxBuyIn: rec.maxBuyIn, timeout: rec.timeout,
+    minBuyIn: rec.minBuyIn, maxBuyIn: rec.maxBuyIn, timeout: rec.timeout, game: rec.game,
   };
   const opts = { owner, invite: rec.invite, privateTable: rec.private, createdAt: rec.createdAt };
   if (rec.sng) {
@@ -813,7 +830,7 @@ function restoreTable(rec) {
     if (rec.house && rec.houseSng) {
       table = createTable({
         id: rec.id, name: rec.name, maxSeats: rec.maxSeats, sb: 0, bb: 0,
-        minBuyIn: rec.minBuyIn, maxBuyIn: rec.maxBuyIn, timeout: rec.timeout,
+        minBuyIn: rec.minBuyIn, maxBuyIn: rec.maxBuyIn, timeout: rec.timeout, game: rec.game,
       }, { sng: sng.seats, buyIn: sng.buyIn, spin: !!sng.spin, invite: rec.invite, createdAt: rec.createdAt });
       table.houseSng = rec.houseSng;
       table.fillMs = rec.fillMs || HOUSE_SNG_FILL_MS;
@@ -966,6 +983,15 @@ function imageKind(buf) {
 
 function dropAvatarFile(userId, ext) {
   try { fs.rmSync(path.join(AVATAR_DIR, `${userId}.${ext}`), { force: true }); } catch { /* файла нет */ }
+}
+
+// Гость сохранил аккаунт или привязал VK — за столом сразу новое имя.
+function renameSeated(userId) {
+  const table = tableOfUser(userId);
+  const p = table && table.byUser(userId);
+  if (!p) return;
+  p.name = store.user(userId).name;
+  table.touch();
 }
 
 // Новый аватар сразу виден и на месте за столом.
@@ -1191,6 +1217,7 @@ function tableInfo(table) {
   return {
     id: table.id,
     kind: tour ? 'sng' : 'cash',
+    game: table.game || 'holdem',
     name: table.name,
     house: table.house,
     owner: table.ownerName,
@@ -1488,6 +1515,7 @@ async function handleCommand(ctx, body) {
     case 'quickSng':
       return quickSng(user, session, {
         buyIn: Number(body.buyIn) || 0, spin: !!body.spin, seats: Number(body.seats) || 0, name: body.name,
+        game: body.game === 'omaha' && !body.spin ? 'omaha' : 'holdem',
       });
     case 'createTable': {
       const seated = tableOfUser(user.id);
@@ -1684,6 +1712,7 @@ async function vkRoute(req, res, route, url) {
   const { linkUserId, source, friend } = result.extra;
   if (linkUserId) {
     const linked = store.linkVk(linkUserId, result.vk);
+    if (!linked.error) renameSeated(linkUserId);
     return back(linked.error ? { vkError: linked.error } : { vk: 'linked' });
   }
   const { user, created, error } = store.vkUser(result.vk, source, friend);
@@ -1745,6 +1774,29 @@ const server = http.createServer(async (req, res) => {
       loginGuard.registered(ip);
       const token = store.createSession(user.id);
       return send(res, 200, { user: store.publicUser(user.id) }, { 'Set-Cookie': sessionCookie(token) });
+    }
+
+    // «Играть гостем» — без имени и пароля; ограничение — как у регистрации.
+    if (route === '/api/guest' && req.method === 'POST') {
+      const ip = clientIp(req);
+      const wait = isDirectLocal(req) ? 0 : loginGuard.canRegister(ip);
+      if (wait) return send(res, 429, { error: `С этого адреса уже много новых аккаунтов. Попробуйте через ${waitText(wait)}` });
+      const body = await readBody(req);
+      const { user } = store.createGuest(body.source, body.friend);
+      loginGuard.registered(ip);
+      const token = store.createSession(user.id);
+      return send(res, 200, { user: store.publicUser(user.id) }, { 'Set-Cookie': sessionCookie(token) });
+    }
+
+    // Гость сохраняет аккаунт: имя и пароль. Новое имя видно и за столом.
+    if (route === '/api/guest/save' && req.method === 'POST') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      const body = await readBody(req);
+      const result = await store.saveGuest(ctx.user.id, body.name, body.password);
+      if (result.error) return send(res, 400, result);
+      renameSeated(ctx.user.id);
+      return send(res, 200, { ok: true, user: store.publicUser(ctx.user.id) });
     }
 
     if (route === '/api/login' && req.method === 'POST') {

@@ -37,8 +37,9 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/landing.css">
+<link rel="stylesheet" href="/cards.css">
 
 <!-- Разметка для поисковиков: что это за сайт, игра и ответы на частые вопросы -->
 <script type="application/ld+json">
@@ -155,15 +156,15 @@
         <div class="table__felt">
           <div class="table__pot"><i class="chip chip--gold"></i><i class="chip chip--red"></i><i class="chip chip--green"></i><span>банк 2 450</span></div>
           <div class="table__board">
-            <span class="card card--s">A<i>♠</i></span>
-            <span class="card card--s">K<i>♠</i></span>
-            <span class="card card--s">Q<i>♠</i></span>
-            <span class="card card--h">7<i>♥</i></span>
-            <span class="card card--d">2<i>♦</i></span>
+            <span class="card card--s" data-card="As">A<i>♠</i></span>
+            <span class="card card--s" data-card="Ks">K<i>♠</i></span>
+            <span class="card card--s" data-card="Qs">Q<i>♠</i></span>
+            <span class="card card--h" data-card="7h">7<i>♥</i></span>
+            <span class="card card--d" data-card="2d">2<i>♦</i></span>
           </div>
           <div class="table__hand">
-            <span class="card card--s card--lift">J<i>♠</i></span>
-            <span class="card card--s card--lift">10<i>♠</i></span>
+            <span class="card card--s card--lift" data-card="Js">J<i>♠</i></span>
+            <span class="card card--s card--lift" data-card="Ts">10<i>♠</i></span>
           </div>
           <div class="table__label">Флеш-рояль</div>
         </div>
@@ -175,7 +176,7 @@
   <section class="section" id="modes">
     <div class="wrap">
       <h2>Во что можно сыграть</h2>
-      <p class="section__lede">Все режимы — техасский холдем без лимита. Ставки — только виртуальными фишками.</p>
+      <p class="section__lede">Техасский холдем без лимита и Омаха пот-лимит — кэш-столы и турниры. Ставки — только виртуальными фишками.</p>
       <div class="grid grid--3">
         <article class="card-box">
           <span class="card-box__icon" aria-hidden="true">♣</span>
@@ -365,6 +366,7 @@
   </div>
 </footer>
 
+<script src="/cardface.js" defer></script>
 <script src="/landing.js" defer></script>
 </body>
 </html>

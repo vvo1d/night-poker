@@ -334,8 +334,139 @@ function handInfo(hole, board, cache, withStrength = true) {
   };
 }
 
+// ——— Омаха ———
+// Четыре карты на руках; комбинация — ровно две своих и три с борда.
+
+const PAIRS_OF_4 = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
+const TRIPLES = (n) => {
+  const out = [];
+  for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) for (let c = b + 1; c < n; c++) out.push([a, b, c]);
+  return out;
+};
+const TRIPLES_BY_N = { 3: TRIPLES(3), 4: TRIPLES(4), 5: TRIPLES(5) };
+
+// Только сила (для перебора в ботах и силомере).
+function bestValueOmaha(hole, board) {
+  let best = -1;
+  const triples = TRIPLES_BY_N[board.length];
+  for (const [i, j] of PAIRS_OF_4) {
+    if (!hole[i] || !hole[j]) continue;
+    scratch5[0] = hole[i];
+    scratch5[1] = hole[j];
+    for (const [a, b, c] of triples) {
+      scratch5[2] = board[a];
+      scratch5[3] = board[b];
+      scratch5[4] = board[c];
+      const v = score5(scratch5);
+      if (v > best) best = v;
+    }
+  }
+  return best;
+}
+
+// Лучшая пятёрка по правилам Омахи: { value, cards, name }.
+function evaluateOmaha(hole, board) {
+  if (board.length < 3) throw new Error('Нужно минимум три карты борда');
+  let best = -1;
+  let bestCards = null;
+  for (const [i, j] of PAIRS_OF_4) {
+    for (const [a, b, c] of TRIPLES_BY_N[board.length]) {
+      const hand = [hole[i], hole[j], board[a], board[b], board[c]];
+      const v = score5(hand);
+      if (v > best) { best = v; bestCards = hand; }
+    }
+  }
+  const category = Math.floor(best / 16 ** 5);
+  return { value: best, cards: bestCards, name: describe(category, bestCards) };
+}
+
+// Стартовая рука Омахи, 0..1: высокие карты, пары, одномастность (две масти —
+// лучше всего) и связность — всё, что даёт натсовые стриты, флеши и сеты.
+function omahaHoleStrength(cards) {
+  const ranks = cards.map(rankOf).sort((x, y) => y - x);
+  const suits = new Map();
+  for (const c of cards) suits.set(suitOf(c), (suits.get(suitOf(c)) || 0) + 1);
+  const counts = new Map();
+  for (const r of ranks) counts.set(r, (counts.get(r) || 0) + 1);
+  let score = 0;
+  for (const r of ranks) score += r >= 10 ? (r - 8) * 0.9 : r >= 7 ? 0.6 : 0.2;      // высокие карты
+  for (const [r, n] of counts) {
+    if (n === 2) score += r >= 11 ? 5 + (r - 11) * 1.5 : 2.5 + r / 8;                // пара — сет на флопе
+    if (n >= 3) score -= 3;                                                            // тройка мешает сама себе
+  }
+  const suitedPairs = [...suits.values()].filter((n) => n >= 2).length;
+  score += suitedPairs * 2.5;
+  if ([...suits.entries()].some(([s, n]) => n >= 2 && cards.some((c) => suitOf(c) === s && rankOf(c) === 14))) score += 1.5; // флеш до туза
+  if ([...suits.values()].some((n) => n >= 3)) score -= 1;
+  const uniq = [...new Set(ranks)];
+  for (let i = 0; i + 1 < uniq.length; i++) {
+    const gap = uniq[i] - uniq[i + 1];
+    if (gap === 1) score += 1.6;
+    else if (gap === 2) score += 0.9;
+    else if (gap === 3) score += 0.3;
+  }
+  return Math.max(0, Math.min(1, score / 45));
+}
+
+function describeHoleOmaha(cards) {
+  const ranks = cards.map(rankOf).sort((x, y) => y - x);
+  const names = ranks.map((r) => RANKS[r - 2].replace('T', '10')).join(' ');
+  const suits = new Map();
+  for (const c of cards) suits.set(suitOf(c), (suits.get(suitOf(c)) || 0) + 1);
+  const twos = [...suits.values()].filter((n) => n >= 2).length;
+  const tag = twos >= 2 ? 'две пары мастей' : twos === 1 ? 'с мастью' : 'разномастные';
+  return `${names} · ${tag}`;
+}
+
+// Сила руки в Омахе — Монте-Карло против одного случайного соперника: полный
+// перебор (тысячи рук по 4 карты × 60 пятёрок) слишком дорог на каждый ход.
+function omahaEquity(hole, board, samples = 300) {
+  const used = new Set([...hole, ...board]);
+  const rest = freshDeck().filter((c) => !used.has(c));
+  let score = 0;
+  const opp = new Array(4);
+  const full = board.slice();
+  for (let s = 0; s < samples; s++) {
+    // Частичное перемешивание: 4 карты соперника и недостающие карты борда.
+    const need = 4 + (5 - board.length);
+    for (let i = 0; i < need; i++) {
+      const j = i + Math.floor(Math.random() * (rest.length - i));
+      [rest[i], rest[j]] = [rest[j], rest[i]];
+    }
+    for (let i = 0; i < 4; i++) opp[i] = rest[i];
+    full.length = board.length;
+    for (let i = 4; i < need; i++) full.push(rest[i]);
+    const mine = bestValueOmaha(hole, full);
+    const theirs = bestValueOmaha(opp, full);
+    score += mine > theirs ? 1 : mine === theirs ? 0.5 : 0;
+  }
+  return score / samples;
+}
+
+function handInfoOmaha(hole, board, withStrength = true) {
+  if (!hole || hole.length < 4) return null;
+  if (!board.length) {
+    return {
+      name: describeHoleOmaha(hole), cards: [], core: [], category: 0, usesHole: 2,
+      strength: withStrength ? omahaHoleStrength(hole) : null, exact: false,
+    };
+  }
+  const res = evaluateOmaha(hole, board);
+  const category = Math.floor(res.value / 16 ** 5);
+  return {
+    name: res.name,
+    cards: res.cards,
+    core: coreCards(category, res.cards),
+    category,
+    usesHole: 2,
+    strength: withStrength ? omahaEquity(hole, board, 400) : null,
+    exact: true,
+  };
+}
+
 module.exports = {
   freshDeck, shuffle, evaluate, score5, rankOf, suitOf,
   handInfo, holeStrength, shareBeaten, describeHole, coreCards, bestValue,
+  evaluateOmaha, bestValueOmaha, omahaHoleStrength, omahaEquity, handInfoOmaha, describeHoleOmaha,
   RANKS, SUITS, CATEGORY_NAMES,
 };

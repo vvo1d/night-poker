@@ -1,0 +1,32 @@
+/* Лицо карты — минимализм: высокий ранг и масть в левом верхнем углу, крупная
+   масть в правом нижнем — один шаблон для всех карт. Разметку строит
+   cardface.js. Подключается на странице игры, в повторе раздачи и на главной.
+   Карта должна иметь размер (width/height) и container-type: size — всё внутри
+   в долях её ширины, поэтому одна разметка годится картам любого размера. */
+
+/* Четырёхцветная колода: масть видно краем глаза даже на маленьких картах. */
+.card--s { --suit: #222b33; }
+.card--h { --suit: #b0392c; }
+.card--d { --suit: #1c6b9f; }
+.card--c { --suit: #1e7a4c; }
+
+/* Индекс: ранг над мастью, основным шрифтом сайта (IBM Plex Sans, жирный). Шириной не больше 40% карты —
+   ровно та полоса, что остаётся открытой, когда карты лежат веером (Омаха). */
+.card__idx {
+  position: absolute; z-index: 1; width: 44cqw;
+  display: flex; flex-direction: column; align-items: center;
+  color: var(--suit); line-height: 1;
+}
+.card__idx { left: 1cqw; top: 3cqw; }
+.card__idx-r {
+  font-family: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif; font-weight: 700;
+  font-size: 52cqw; line-height: 1; letter-spacing: -0.03em;
+}
+.card__idx-r.is-ten { font-size: 44cqw; letter-spacing: -0.04em; transform: scaleX(0.76); }   /* «10» — уже и чуть меньше: влезает в полосу индекса */
+.card__idx-s { font-size: 38cqw; line-height: 1; margin-top: 4cqw; }   /* зазор: хвост «Q» не налезает на масть */
+
+/* Крупная масть в правом нижнем углу — у всех карт. */
+.card__big {
+  position: absolute; right: 3cqw; bottom: 1cqw;
+  font-size: 62cqw; line-height: 1; color: var(--suit);
+}

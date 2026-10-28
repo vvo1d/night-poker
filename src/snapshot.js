@@ -29,6 +29,7 @@ function tableRecord(table) {
     minBuyIn: table.minBuyIn,
     maxBuyIn: table.maxBuyIn,
     timeout: table.timeout,
+    game: table.game || 'holdem',
     house: table.house,
     houseSng: table.houseSng || null,
     fillMs: table.fillMs || 0,
