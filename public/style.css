@@ -2041,9 +2041,8 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
 .games__btn.is-active { color: #1a1305; background: linear-gradient(180deg, #f0d68f, var(--brass)); }
 .games__btn:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 .rooms__group {
-  list-style: none; display: flex; align-items: baseline; gap: 10px; padding: 18px 0 6px;
+  list-style: none; display: flex; align-items: baseline; gap: 10px; padding: 18px 2px 8px;
   font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brass);
-  border-bottom: 1px solid var(--line);
 }
 .rooms__group:first-child { padding-top: 8px; }
 .rooms__group small { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); }
@@ -2066,4 +2065,22 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
   .seat:not(.seat--you) .seat__stack { font-size: 11px; line-height: 1.15; }
   .seat:not(.seat--you) .seat__note { font-size: 10px; line-height: 1.15; min-height: 1.15em; }
   .seat:not(.seat--you) { gap: 2px; }
+}
+
+/* «Мои столы»: у стола нет аватара — статус и кнопки под названием, без отступа под аватар. */
+.friends--mini .my-table { padding: 12px 14px; }
+.friends--mini .my-table .friend__name { font-size: 15px; }
+.friends--mini .my-table .friend__status { padding-left: 0; margin-top: 3px; }
+.friends--mini .my-table .my-table__actions { margin-top: 10px; }
+
+/* Пустой список друзей — не пустая карточка, а подсказка-карточка. */
+.friends--mini:empty { display: none; }
+#friends-mini-empty {
+  margin: 0; padding: 14px 16px 14px 52px; position: relative; line-height: 1.45;
+  border: 1px dashed rgba(201, 162, 74, 0.3); border-radius: 14px; background: rgba(201, 162, 74, 0.04);
+}
+#friends-mini-empty::before {
+  content: '♣'; position: absolute; left: 16px; top: 14px; width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 14px; color: var(--brass);
+  background: rgba(201, 162, 74, 0.12); box-shadow: 0 0 0 1px rgba(201, 162, 74, 0.35);
 }

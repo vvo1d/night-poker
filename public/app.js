@@ -484,6 +484,27 @@ function connectStream() {
   };
 }
 
+// Вкладка долго в фоне — отпускаем поток. Сайт пока работает по HTTP/1.1, а там
+// браузер держит к одному сайту не больше 6 соединений на все вкладки: несколько
+// забытых вкладок с игрой — и новая страница не грузится, пока их не закроешь.
+// Вернулись на вкладку — подключаемся снова, сервер сразу присылает всё текущее.
+const STREAM_IDLE_MS = 3 * 60_000;
+let streamIdleTimer = null;
+document.addEventListener('visibilitychange', () => {
+  clearTimeout(streamIdleTimer);
+  if (document.visibilityState === 'hidden') {
+    streamIdleTimer = setTimeout(() => {
+      if (!state.stream) return;
+      state.stream.close();
+      state.stream = null;
+      state.streamPaused = true;
+    }, STREAM_IDLE_MS);
+  } else if (state.streamPaused && state.user) {
+    state.streamPaused = false;
+    connectStream();
+  }
+});
+
 // ——— лобби ———
 
 const FILTER_KEY = 'night-poker-filter';
