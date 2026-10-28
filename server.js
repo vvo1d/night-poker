@@ -109,7 +109,24 @@ const HOUSE_SNGS = [
 const LOBBY_LIMIT = 150;             // столько столов уходит в лобби — самые живые
 const EVAL_PER_TICK = 8;             // тяжёлых разборов руки за тик (по ~4 мс каждый)
 
-const handsByDay = new Map();   // день -> раздач сыграно (для админки; живёт до перезапуска)
+// День -> раздач сыграно (для админки). Хранится в data/hands-by-day.json: пишется
+// раз в 30 секунд и при остановке, поэтому перезапуск сервера счётчик не обнуляет.
+const HANDS_FILE = path.join(store.dataDir, 'hands-by-day.json');
+const handsByDay = (() => {
+  try { return new Map(Object.entries(JSON.parse(fs.readFileSync(HANDS_FILE, 'utf8')))); } catch { return new Map(); }
+})();
+let handsDirty = false;
+function saveHandsByDay() {
+  if (!handsDirty) return;
+  handsDirty = false;
+  // Храним последние 90 дней — в админке видно 30.
+  const keep = [...handsByDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-90);
+  try {
+    fs.writeFileSync(`${HANDS_FILE}.tmp`, JSON.stringify(Object.fromEntries(keep)));
+    fs.renameSync(`${HANDS_FILE}.tmp`, HANDS_FILE);
+  } catch (err) { handsDirty = true; console.error('Не удалось сохранить счётчик раздач:', err.message); }
+}
+setInterval(saveHandsByDay, 30_000).unref();
 const tables = new Map();       // tableId -> Table, в порядке создания
 const playerTable = new Map();  // userId -> Table (чтобы не перебирать все столы)
 const invites = new Map();      // код приглашения -> Table
@@ -164,6 +181,7 @@ function createTable(cfg, {
     },
     onHandStart: (players) => {
       handsByDay.set(dayKey(), (handsByDay.get(dayKey()) || 0) + 1);
+      handsDirty = true;
       for (const p of players) if (tracked(p)) store.countHand(p.userId);
     },
     onHandEnd: (results) => {
@@ -2556,6 +2574,7 @@ async function shutdown(signal) {
     // Последний снимок столов: после запуска фишки вернутся игрокам в банк.
     snapshot.paused = false;
     saveSnapshot();
+    saveHandsByDay();
     if (bot) bot.stop();
     await store.close();
   } catch (err) {
