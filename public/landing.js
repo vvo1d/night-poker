@@ -74,7 +74,7 @@ function captureSource(fallback) {
 }
 captureSource();
 
-// Личная ссылка друга (?friend=Имя): запоминаем, игра передаст имя при регистрации.
+// Личная ссылка друга (?friend=номер или ник): запоминаем, игра передаст его при регистрации.
 try {
   const friend = new URLSearchParams(location.search).get('friend');
   if (friend && !localStorage.getItem('thp-friend')) localStorage.setItem('thp-friend', friend.slice(0, 40));

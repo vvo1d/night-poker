@@ -388,8 +388,10 @@ class Store {
   }
 
   // Новичок пришёл по ссылке друга: запоминаем, кто позвал, и сразу делаем их друзьями.
+  // Пригласивший — по номеру (?friend=23, ник может смениться) или по нику (старые ссылки).
   linkReferral(user, friendName) {
-    const o = friendName ? this.byNameLower(String(friendName)) : null;
+    const key = friendName ? String(friendName).trim() : '';
+    const o = key ? ((/^\d+$/.test(key) && this.byPidNumber(Number(key))) || this.byNameLower(key)) : null;
     if (!o || o.id === user.id || this.isBanned(o)) return;
     user.meta.invitedBy = o.id;
     if (user.friends.length < FRIENDS_MAX && o.friends.length < FRIENDS_MAX) {

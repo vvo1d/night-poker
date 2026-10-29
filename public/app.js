@@ -115,7 +115,7 @@ function captureSource(fallback) {
 }
 captureSource(new URLSearchParams(location.search).get('join') ? 'invite' : null);
 
-// Пришёл по личной ссылке друга (?friend=Имя) — запоминаем до регистрации.
+// Пришёл по личной ссылке друга (?friend=номер, у старых ссылок — ник) — запоминаем до регистрации.
 const FRIEND_KEY = 'thp-friend';
 try {
   const friend = new URLSearchParams(location.search).get('friend');
@@ -1120,7 +1120,8 @@ async function shareHand(hand) {
 // Личная ссылка-приглашение: по ней новичок регистрируется и сразу становится другом.
 function openFriendInvite() {
   if (!state.user) return;
-  const url = `${location.origin}/?friend=${encodeURIComponent(state.user.name)}`;
+  // По номеру игрока: короткая, без пробелов и не ломается при смене ника.
+  const url = `${location.origin}/?friend=${state.user.pid || encodeURIComponent(state.user.name)}`;
   const r = state.user.referral || { hands: 20, reward: 2000 };
   const text = 'Сыграем в покер? THPoker — бесплатно, на фишки, прямо в браузере';
   $('#invite-title').textContent = 'Пригласить друга';
