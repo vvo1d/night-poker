@@ -2084,3 +2084,8 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
   display: grid; place-items: center; font-size: 14px; color: var(--brass);
   background: rgba(201, 162, 74, 0.12); box-shadow: 0 0 0 1px rgba(201, 162, 74, 0.35);
 }
+
+/* Виджет VK ID One Tap — его кнопку рисует VK; пока не загрузился, места не занимает. */
+.vk-onetap:empty { display: none; }
+.vk-onetap { margin-bottom: 10px; }
+.vk-onetap--sm { max-width: 320px; }

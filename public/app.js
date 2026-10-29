@@ -4609,6 +4609,69 @@ function renderVkAuth() {
   if (currentSource()) q.set('source', currentSource());
   if (currentFriend()) q.set('friend', currentFriend());
   $('#vk-login').href = `/auth/vk${q.toString() ? `?${q}` : ''}`;
+  // Виджет VK ID: получилось — фирменная кнопка вместо ссылки; нет — остаётся ссылка.
+  vkOneTap($('#vk-onetap'), 'login', () => { $('#vk-login').hidden = true; });
+}
+
+// ——— виджет VK ID One Tap ———
+// Код на токены меняет браузер игрока (VKID.Auth.exchangeCode), на сервер уходит
+// только id_token — сервер проверяет его у VK. Токен доступа к нам не попадает.
+// Версия SDK зафиксирована: обновление у VK не должно ломать вход.
+const VKID_SDK = 'https://unpkg.com/@vkid/sdk@2.6.9/dist-sdk/umd/index.js';
+let vkSdk = null;
+function loadVkSdk() {
+  if (!vkSdk) {
+    vkSdk = loadScript(VKID_SDK).then(() => {
+      const VKID = window.VKIDSDK;
+      if (!VKID) throw new Error('VK ID SDK не загрузился');
+      VKID.Config.init({
+        app: Number(state.config.vkApp),
+        redirectUrl: state.config.vkRedirect,
+        responseMode: VKID.ConfigResponseMode.Callback,
+        source: VKID.ConfigSource.LOWCODE,
+        scope: '',
+      });
+      return VKID;
+    }).catch((err) => { vkSdk = null; throw err; });
+  }
+  return vkSdk;
+}
+
+// mode: 'login' — вход или новый аккаунт, 'link' — привязать к тому, кто уже вошёл.
+// onShown — кнопка виджета нарисовалась (можно прятать запасную ссылку).
+async function vkOneTap(container, mode, onShown = () => {}) {
+  if (!container || !state.config || !state.config.vkApp) return;
+  let VKID;
+  try { VKID = await loadVkSdk(); } catch { return; }   // нет VK — работает запасная ссылка
+  container.textContent = '';
+  const onError = () => toast('VK не подтвердил вход — попробуйте ещё раз');
+  new VKID.OneTap().render({
+    container,
+    scheme: 'dark',
+    showAlternativeLogin: mode === 'login',
+    oauthList: mode === 'login' ? ['ok_ru', 'mail_ru'] : [],
+  })
+    .on(VKID.WidgetEvents.ERROR, onError)
+    .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, async (payload) => {
+      let tokens;
+      try { tokens = await VKID.Auth.exchangeCode(payload.code, payload.device_id); } catch { onError(); return; }
+      const { ok, data } = await post('/api/vk/idtoken', {
+        id_token: tokens.id_token, mode, source: currentSource(), friend: currentFriend(),
+      });
+      if (!ok || data.error) { toast((data && data.error) || 'Не получилось войти через VK'); return; }
+      if (mode === 'link') {
+        setUser(data.user);
+        toast('VK привязан — теперь можно входить через него', { good: true });
+        if (state.page === 'profile') loadOwnProfile();
+        return;
+      }
+      afterLogin(data.user);
+      if (data.created) {
+        goal('register');
+        toast(`Добро пожаловать, ${data.user.name}! На счету 10 000 фишек`, { good: true });
+      }
+    });
+  onShown();
 }
 
 // Вернулись из VK: итог входа или привязки — в адресе; показываем и чистим адрес.
@@ -4655,9 +4718,11 @@ function vkSection() {
     return sec;
   }
   sec.append(el('p', 'hint', 'Привяжите VK, чтобы входить одним нажатием, без пароля.'));
+  const widget = el('div', 'vk-onetap vk-onetap--sm');
   const link = el('a', 'btn btn--vk btn--sm', 'Привязать VK');
   link.href = '/auth/vk?link=1';
-  sec.append(link);
+  sec.append(widget, link);
+  vkOneTap(widget, 'link', () => { link.hidden = true; });
   return sec;
 }
 

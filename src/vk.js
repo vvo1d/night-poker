@@ -1,10 +1,16 @@
 'use strict';
-// Вход через VK ID (id.vk.com): OAuth 2.1 с PKCE, без SDK на странице.
+// Вход через VK ID (id.vk.com): OAuth 2.1 с PKCE.
 //
+// Запасной путь (переходом по ссылке):
 // 1. /auth/vk — запоминаем state и code_verifier и уводим игрока на id.vk.com/authorize.
 // 2. VK возвращает на /auth/vk/callback с code и device_id.
 // 3. Сервер меняет code на access_token (id.vk.com/oauth2/auth) и берёт имя и аватар
 //    (id.vk.com/oauth2/user_info). Токен нигде не хранится — он нужен только на этот вход.
+//
+// Основной путь теперь — виджет VK ID One Tap (public/app.js): код на токены меняет
+// браузер игрока, а сервер получает только id_token и проверяет его у VK через
+// oauth2/public_info (verifyIdToken). Токен доступа к нашему серверу не попадает.
+// Переход /auth/vk остаётся запасным — если скрипт VK не загрузился.
 //
 // Включается переменной VK_CLIENT_ID (ID приложения в кабинете VK ID).
 
@@ -13,6 +19,7 @@ const crypto = require('node:crypto');
 const AUTHORIZE = 'https://id.vk.com/authorize';
 const TOKEN = 'https://id.vk.com/oauth2/auth';
 const USER_INFO = 'https://id.vk.com/oauth2/user_info';
+const PUBLIC_INFO = 'https://id.vk.com/oauth2/public_info';
 const PENDING_MS = 10 * 60_000;       // на подтверждение в VK — 10 минут
 const PENDING_MAX = 5000;
 
@@ -89,7 +96,23 @@ function createVk({ clientId, redirectUri }) {
     }
   }
 
-  return { start, finish };
+  // id_token из виджета: VK сам проверяет подпись, срок и что он выдан нашему приложению,
+  // и возвращает, чей он. Это единственное, чему сервер верит, — не данным из браузера.
+  async function verifyIdToken(idToken) {
+    if (!idToken || typeof idToken !== 'string' || idToken.length > 8192) return { error: 'VK не подтвердил вход' };
+    try {
+      const info = await post(PUBLIC_INFO, { client_id: clientId, id_token: idToken });
+      const u = info.user || {};
+      const id = String(u.user_id || '');
+      if (!id) return { error: 'VK не прислал данные профиля' };
+      return { vk: { id, firstName: u.first_name || '', lastName: u.last_name || '', avatar: u.avatar || null } };
+    } catch (err) {
+      console.error('Вход через VK (id_token):', err.message);
+      return { error: 'VK не подтвердил вход — попробуйте ещё раз' };
+    }
+  }
+
+  return { start, finish, verifyIdToken, clientId, redirectUri };
 }
 
 module.exports = { createVk };

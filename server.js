@@ -1865,6 +1865,8 @@ const server = http.createServer(async (req, res) => {
         telegramBot: TG_LOGIN && bot && bot.username ? bot.username : null,
         telegramLogin: TG_LOGIN,
         vkLogin: !!vk,
+        vkApp: vk ? vk.clientId : null,            // для виджета VK ID One Tap
+        vkRedirect: vk ? vk.redirectUri : null,
         reactions: REACTIONS,
         phrases: PHRASES,
         botDisclaimer: BOT_DISCLAIMER,
@@ -1894,6 +1896,28 @@ const server = http.createServer(async (req, res) => {
       )) return send(res, 403, { error: 'Нет доступа' });
       const answer = bot.reply(await readBody(req));
       return send(res, 200, answer || {});
+    }
+
+    // Вход или привязка через виджет VK ID: браузер присылает id_token, сервер
+    // проверяет его у VK (vk.verifyIdToken) и дальше — как при обычном входе через VK.
+    if (route === '/api/vk/idtoken' && req.method === 'POST') {
+      if (!vk) return send(res, 400, { error: 'Вход через VK не настроен' });
+      const body = await readBody(req);
+      const result = await vk.verifyIdToken(body.id_token);
+      if (result.error) return send(res, 400, result);
+      if (body.mode === 'link') {
+        const ctx = requireAuth(req, res);
+        if (!ctx) return;
+        const linked = store.linkVk(ctx.user.id, result.vk);
+        if (linked.error) return send(res, 400, linked);
+        renameSeated(ctx.user.id);
+        return send(res, 200, { ok: true, linked: true, user: store.publicUser(ctx.user.id) });
+      }
+      const { user, created, error } = store.vkUser(result.vk, body.source, body.friend);
+      if (error) return send(res, 403, { error });
+      const token = store.createSession(user.id);
+      console.log(`Вход через VK ID: ${user.name}${created ? ' (новый)' : ''}`);
+      return send(res, 200, { ok: true, created, user: store.publicUser(user.id) }, { 'Set-Cookie': sessionCookie(token) });
     }
 
     // Отвязать VK от своего аккаунта (без пароля — с новым паролем, см. store.unlinkVk).
