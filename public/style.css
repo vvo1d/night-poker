@@ -1595,11 +1595,26 @@ body:has(.actions.is-raising) .react { display: none; }
 }
 /* Крестик «прилипает» к верху окна: при прокрутке длинного профиля он не уезжает.
    Отрицательный нижний отступ — чтобы он не занимал строку над содержимым. */
-.dialog__close {
-  position: sticky; top: 4px; z-index: 5; margin: 0 0 -32px auto;   /* в ряд с заголовком, внутри рамки */
-  background: var(--ink-2);
+/* Полоса с крестиком — прилипает к верху окна на всю ширину, с фоном окна:
+   содержимое при прокрутке уходит под неё, а не под сам крестик сбоку. */
+.dialog__bar {
+  position: sticky; top: calc(-1 * var(--dlg-pad, 22px)); z-index: 6;
+  display: flex; justify-content: flex-end; align-items: center;
+  margin: calc(-1 * var(--dlg-pad, 22px)) calc(-1 * var(--dlg-pad-x, var(--dlg-pad, 22px))) 4px;
+  /* Крестик — на равном расстоянии от верхнего и правого края окна: полосу прокрутки
+     окна (её ширину считает app.js в --dlg-sb) вычитаем из правого отступа. */
+  padding: 12px max(0px, calc(12px - var(--dlg-sb, 0px))) 0 0; min-height: 46px;
+  background: linear-gradient(180deg, #141e23 70%, rgba(20, 30, 35, 0));
 }
-.dialog--profile .profile__actions { margin-right: 30px; }
+.dialog__close {
+  width: 34px; height: 34px; margin: 0; color: var(--muted);
+  background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.12);
+}
+.dialog__close:hover { color: var(--bone); border-color: var(--brass-dim); background: rgba(201, 162, 74, 0.1); }
+.dialog__close::before, .dialog__close::after { width: 14px; }
+.dialog--profile { --dlg-pad: 26px; }
+.dialog--hands, .dialog--avatar { --dlg-pad: 24px; }
+@media (max-width: 620px) { .dialog--profile, .dialog--hands, .dialog--avatar { --dlg-pad: 18px; --dlg-pad-x: 14px; } }
 .dialog--wide .field { margin-bottom: 16px; }
 .dialog--wide .dialog__note { margin: 4px 0 0; line-height: 1.45; }
 
@@ -1981,7 +1996,7 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
 
 /* Выбор аватара: готовые портреты сеткой */
 .dialog--avatar { position: fixed; width: min(560px, 94vw); max-height: 90vh; padding: 24px; scrollbar-width: thin; }
-.dialog--avatar h3 { margin: 0 34px 12px 0; }
+.dialog--avatar h3 { margin: 0 0 12px; }
 .avatar-pick__top { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .avatar-pick__title { margin: 14px 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .avatar-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; }

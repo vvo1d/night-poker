@@ -458,7 +458,9 @@
 
 <!-- Профиль другого игрока -->
 <dialog id="profile-dialog" class="dialog dialog--profile">
-  <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="profile-close" title="Закрыть" aria-label="Закрыть"></button>
+  <div class="dialog__bar">
+    <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="profile-close" title="Закрыть" aria-label="Закрыть"></button>
+  </div>
   <div id="profile-body"></div>
 </dialog>
 
@@ -500,7 +502,9 @@
 
 <!-- Гость сохраняет аккаунт: имя и пароль или VK -->
 <dialog id="save-dialog" class="dialog save">
-  <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="save-close" title="Закрыть" aria-label="Закрыть"></button>
+  <div class="dialog__bar">
+    <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="save-close" title="Закрыть" aria-label="Закрыть"></button>
+  </div>
   <h3>Сохраните аккаунт</h3>
   <p class="dialog__note">Фишки, уровень и задания останутся. Без этого гостевой аккаунт пропадёт, если почистить браузер или зайти с другого устройства.</p>
   <form id="save-form" autocomplete="on">
@@ -532,7 +536,9 @@
 
 <!-- Смена ника -->
 <dialog id="rename-dialog" class="dialog save">
-  <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="rename-close" title="Закрыть" aria-label="Закрыть"></button>
+  <div class="dialog__bar">
+    <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="rename-close" title="Закрыть" aria-label="Закрыть"></button>
+  </div>
   <h3>Сменить ник</h3>
   <p class="dialog__note">Ник можно менять раз в 30 дней. Номер игрока (ID) не меняется — по нему вас найдут друзья и администрация. Прежняя ссылка на профиль с ником перестанет работать.</p>
   <form id="rename-form" autocomplete="off">
@@ -547,13 +553,17 @@
 
 <!-- Выбор аватара: готовые портреты или своё фото -->
 <dialog id="avatar-dialog" class="dialog dialog--avatar">
-  <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="avatar-close" title="Закрыть" aria-label="Закрыть"></button>
+  <div class="dialog__bar">
+    <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="avatar-close" title="Закрыть" aria-label="Закрыть"></button>
+  </div>
   <div id="avatar-body"></div>
 </dialog>
 
 <!-- Последние раздачи: список и повтор по улицам -->
 <dialog id="hands-dialog" class="dialog dialog--hands">
-  <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="hands-close" title="Закрыть" aria-label="Закрыть"></button>
+  <div class="dialog__bar">
+    <button class="icon-btn icon-btn--sm icon-btn--close dialog__close" id="hands-close" title="Закрыть" aria-label="Закрыть"></button>
+  </div>
   <div id="hands-body"></div>
 </dialog>
 

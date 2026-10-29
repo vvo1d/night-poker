@@ -485,8 +485,12 @@ class Table {
       const p = this.seats[seat];
       const away = this.isAway(p);
       this.deadline = Date.now() + (p.isBot ? botThinkingTime() : away ? SNG_AWAY_MS : this.timeout * 1000);
+      // Живому боту рамка-таймер показывается как человеку — от полного времени на ход,
+      // хотя решает он за свои пару секунд: иначе его выдавала бы быстро убегающая рамка.
+      this.shownDeadline = p.resident ? Date.now() + this.timeout * 1000 : 0;
     } else {
       this.deadline = 0;
+      this.shownDeadline = 0;
     }
     this.touch();
   }
@@ -1145,7 +1149,7 @@ class Table {
       currentBet: this.currentBet,
       buttonSeat: this.buttonSeat,
       actingSeat: this.actingSeat,
-      timeLeft: this.deadline ? Math.max(0, this.deadline - now) : 0,
+      timeLeft: this.deadline ? Math.max(0, (this.shownDeadline || this.deadline) - now) : 0,
       timeout: this.timeout * 1000,
       winners: this.lastWinners,
       reveal: this.reveal && this.reveal.seat >= 0 ? {

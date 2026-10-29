@@ -1004,6 +1004,22 @@ $('#call-later').addEventListener('click', () => { $('#call').hidden = true; });
 // ——— последние раздачи ———
 
 // Открыть окно без автофокуса на крестике: иначе вокруг него сразу горит рамка фокуса.
+// Ширина полосы прокрутки окна — в --dlg-sb: по ней крестик в правом верхнем углу
+// стоит на одинаковом расстоянии от верха и от правого края (см. .dialog__bar).
+const dialogSb = new ResizeObserver((entries) => {
+  for (const { target: d } of entries) {
+    const cs = getComputedStyle(d);
+    const sb = d.offsetWidth - d.clientWidth - parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth);
+    d.style.setProperty('--dlg-sb', `${Math.max(0, sb)}px`);
+  }
+});
+document.querySelectorAll('dialog').forEach((d) => {
+  if (!d.querySelector('.dialog__bar')) return;
+  dialogSb.observe(d);
+  // Содержимое догружается после открытия — полоса прокрутки может появиться позже.
+  new MutationObserver(() => dialogSb.unobserve(d) || dialogSb.observe(d)).observe(d, { childList: true, subtree: true });
+});
+
 function openModal(dialog) {
   if (dialog.open) return;
   dialog.showModal();

@@ -375,7 +375,11 @@ function pickResident(table, mix) {
 function sitResident(r, table, seat) {
   const tour = table.tour;
   if (tour && tour.status !== 'registering') return { error: 'Турнир уже идёт' };
-  if (!Number.isInteger(seat) || seat < 0) seat = table.seats.findIndex((x) => x === null);
+  // Место не задано — случайное свободное: живой игрок не садится всегда на первое место по кругу.
+  if (!Number.isInteger(seat) || seat < 0) {
+    const empty = table.seats.map((x, i) => (x === null ? i : -1)).filter((i) => i >= 0);
+    seat = empty.length ? empty[Math.floor(Math.random() * empty.length)] : -1;
+  }
   if (seat < 0) return { error: 'Свободных мест нет' };
   const u = store.user(r.userId);
   const want = tour ? tour.buyIn : Math.min(table.maxBuyIn, Math.max(table.minBuyIn, Math.round(table.bb * (40 + Math.random() * 60))));

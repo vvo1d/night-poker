@@ -449,7 +449,6 @@ body { background: none; }
 .profile__name span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile__name .profile__lvl { flex: none; margin-left: 0; }
 /* В окне чужого профиля крестик закрытия стоит в углу — шапке нужен отступ под него. */
-.dialog--profile .profile__head { padding-right: 52px; }
 
 /* Выход — такой же круглый значок, как кнопка звука рядом: золотая иконка в тонком кольце. */
 @media (max-width: 620px) {
@@ -473,7 +472,6 @@ body { background: none; }
   .profile__head { padding: 16px; gap: 12px; }
   .profile__head .avatar { width: 62px; height: 62px; font-size: 26px; }
   .profile__title h2 { font-size: 21px; }
-  .dialog--profile .profile__head { padding-right: 44px; }
 }
 
 /* Шапка профиля: аватар слева, справа имя и статус, кнопки — строкой под ними.
