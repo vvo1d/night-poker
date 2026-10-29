@@ -630,6 +630,24 @@ class Store {
     return { user, created: true };
   }
 
+  // Отвязать VK. Если это единственный способ входа (нет пароля и Telegram),
+  // нужен новый пароль — иначе в аккаунт будет не войти. by — имя администратора.
+  async unlinkVk(userId, password = '', by = null) {
+    const u = this.users.get(userId);
+    if (!u) return { error: 'Игрок не найден' };
+    if (!u.meta.vk) return { error: 'VK не привязан' };
+    if (!u.hash && !u.tg) {
+      if (String(password).length < 6) return { error: 'Это единственный способ входа — задайте пароль (минимум 6 символов)', needPassword: true };
+      u.salt = crypto.randomBytes(16).toString('hex');
+      u.hash = (await scrypt(String(password), u.salt)).toString('hex');
+    }
+    this.byVk.delete(u.meta.vk.id);
+    delete u.meta.vk;
+    if (by) this.adminNote(u, by, 'отвязан VK');
+    else this.touch(u);
+    return { ok: true };
+  }
+
   // Привязать VK к уже существующему аккаунту — чтобы входить и так, и так.
   linkVk(userId, vk) {
     const u = this.users.get(userId);

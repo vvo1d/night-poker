@@ -218,6 +218,11 @@ function createAdmin(deps) {
           result = await store.setPassword(u.id, pass, by);
           break;
         }
+        case 'unlinkVk':
+          // Без пароля и Telegram отвязать нельзя: игрок останется без входа — сначала задайте пароль.
+          result = await store.unlinkVk(u.id, '', by);
+          if (result.needPassword) result = { error: 'У игрока нет пароля — сначала задайте ему пароль, затем отвяжите VK' };
+          break;
         case 'avatar': {
           if (!deps.removeAvatar(u.id)) { result = { error: 'Аватара нет' }; break; }
           store.adminNote(u, by, 'аватар удалён');

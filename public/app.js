@@ -4635,6 +4635,23 @@ function vkSection() {
   const sec = profileSection('VK');
   if (user.vk) {
     sec.append(el('p', 'tg-linked', `Привязан VK (${user.vk}) — можно входить через VK без пароля.`));
+    const unlink = el('button', 'btn btn--ghost btn--sm btn--danger', 'Отвязать VK');
+    unlink.addEventListener('click', async () => {
+      // VK — единственный вход (нет пароля): сначала новый пароль, иначе в аккаунт будет не войти.
+      let password = '';
+      if (!user.hasPassword && !user.telegram) {
+        password = prompt('Через VK вы входите без пароля. Придумайте пароль (минимум 6 символов) — с ним вы будете входить по нику:') || '';
+        if (!password) return;
+      } else if (!(await ask('Отвязать VK?', { text: 'Входить можно будет по нику и паролю. Привязать VK снова можно здесь же.', yes: 'Отвязать', danger: true }))) {
+        return;
+      }
+      const { ok, data } = await post('/api/vk/unlink', { password });
+      if (!ok || data.error) { toast((data && data.error) || 'Не получилось отвязать VK'); return; }
+      setUser(data.user);
+      toast(password ? `VK отвязан. Входите по нику «${data.user.name}» и новому паролю` : 'VK отвязан', { good: true });
+      if (state.page === 'profile') loadOwnProfile();
+    });
+    sec.append(unlink);
     return sec;
   }
   sec.append(el('p', 'hint', 'Привяжите VK, чтобы входить одним нажатием, без пароля.'));

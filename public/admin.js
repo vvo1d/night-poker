@@ -300,6 +300,13 @@ function renderUser(u) {
   add('Источник', u.source || '—');
   add('Telegram', u.telegram || '—');
   add('VK', u.vk || '—');
+  if (u.vk) {
+    const unlink = el('button', 'btn btn--sm', 'Отвязать VK');
+    unlink.addEventListener('click', () => {
+      if (confirm(`Отвязать VK (${u.vk}) от ${u.name}?`)) act({ action: 'unlinkVk' }, 'VK отвязан');
+    });
+    info.append(el('dt'), (() => { const dd = el('dd'); dd.append(unlink); return dd; })());
+  }
   if (u.guest) add('Аккаунт', 'гостевой (не сохранён)');
   add('Вход по паролю', u.password ? 'да' : 'нет');
   add('За столом', u.table || '—');

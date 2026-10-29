@@ -1896,6 +1896,17 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, answer || {});
     }
 
+    // Отвязать VK от своего аккаунта (без пароля — с новым паролем, см. store.unlinkVk).
+    if (route === '/api/vk/unlink' && req.method === 'POST') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      if (!allowCommand(ctx.session)) return send(res, 429, { error: 'Слишком часто. Подождите секунду' });
+      const body = await readBody(req);
+      const result = await store.unlinkVk(ctx.user.id, body.password);
+      if (result.error) return send(res, 400, result);
+      return send(res, 200, { ok: true, user: store.publicUser(ctx.user.id) });
+    }
+
     if (route === '/api/telegram/link' && req.method === 'POST') {
       const ctx = requireAuth(req, res);
       if (!ctx) return;
