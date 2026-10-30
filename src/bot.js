@@ -108,6 +108,7 @@ function styleOf(p) { return STYLES[botLevel(p)]; }
 
 // Сколько бот «думает»: новички — быстро, сильные — дольше на крупных решениях.
 function botThinkingTime() { return 300 + Math.random() * 1200; }   // от 0,3 до 1,5 секунды
+function botRaiseTime() { return 2000 + Math.random() * 3000; }   // перед ставкой или рейзом: от 2 до 5 секунд
 
 // ——— сила стартовой руки ———
 
@@ -349,4 +350,4 @@ function decideBotAction(table, p) {
   }
 }
 
-module.exports = { decideBotAction, botThinkingTime, botLevel, BOT_NAMES, CHARACTERS, RESIDENTS, BOT_DISCLAIMER, STYLES, equity, holePercent };
+module.exports = { decideBotAction, botThinkingTime, botRaiseTime, botLevel, BOT_NAMES, CHARACTERS, RESIDENTS, BOT_DISCLAIMER, STYLES, equity, holePercent };

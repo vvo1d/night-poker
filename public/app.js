@@ -2363,7 +2363,7 @@ function renderTable(t) {
   // Сообщение в центре стола
   const msg = $('#felt-msg');
   msg.textContent = '';
-  msg.classList.remove('is-win');
+  msg.classList.remove('is-win', 'felt__msg--tour');
   if (t.phase === 'showdown' && t.winners.length) {
     msg.classList.add('is-win');
     t.winners.forEach((w, i) => {
@@ -2676,6 +2676,7 @@ function showResult(t) {
 // Что пишет сукно турнирного стола, пока карт нет: регистрация или итоги.
 function tourMessage(msg, t) {
   const tour = t.tour;
+  msg.classList.toggle('felt__msg--tour', tour.status === 'registering');
   if (tour.status === 'registering' && tour.spin) {
     const taken = t.seats.filter((s) => !s.empty).length;
     msg.append(el('span', null, `Спин: ${taken} из ${t.maxSeats} · победитель получит взнос `));
@@ -2822,9 +2823,12 @@ function renderBets(t, hero) {
   }
 
   placeBets(spots, seatObstacles(seatNodes, feltBox), feltBox, $('#felt'));
+  // Координаты посчитаны от внешнего края стола, а проценты #bets — от внутреннего,
+  // без борта: без поправки ставка съезжала на его толщину и задевала карты.
+  const felt = $('#felt');
   for (const { i, bet, x: px, y: py } of spots) {
-    const x = (px / feltBox.width) * 100;
-    const y = (py / feltBox.height) * 100;
+    const x = ((px - felt.clientLeft) / felt.clientWidth) * 100;
+    const y = ((py - felt.clientTop) / felt.clientHeight) * 100;
     bet.style.setProperty('--x', `${x}%`);
     bet.style.setProperty('--y', `${y}%`);
     placed.set(i, { x, y });
@@ -2843,6 +2847,7 @@ function seatObstacles(seatNodes, feltBox) {
       if (!r.width || !r.height) continue;
       out.push({
         seat,
+        cards: part.classList.contains('seat__cards'),
         left: r.left - feltBox.left, right: r.right - feltBox.left,
         top: r.top - feltBox.top, bottom: r.bottom - feltBox.top,
       });
@@ -2935,14 +2940,23 @@ function placeBets(spots, obstacles, feltBox, felt) {
     // общие карты, чужие места и чужие ставки. Сначала угол со стороны центра.
     if (!spot) {
       const corner = (right, down) => ({ x: right ? f.right : f.left, y: cornerY(down), badge: true });
-      const corners = [corner(toRight, toDown), corner(toRight, !toDown), corner(!toRight, toDown), corner(!toRight, !toDown)];
+      // Широкая плашка на углу торчит за аватар и достаёт до веера соседа (Омаха, 9 мест) —
+      // на этот случай те же углы, но плашка целиком над аватаром.
+      const over = (right, down) => ({ x: right ? f.right - s.w : f.left + s.w, y: cornerY(down), badge: true });
+      const corners = [
+        corner(toRight, toDown), corner(toRight, !toDown), corner(!toRight, toDown), corner(!toRight, !toDown),
+        over(toRight, toDown), over(toRight, !toDown), over(!toRight, toDown), over(!toRight, !toDown),
+        // У самого борта углы не помещаются — посередине аватара.
+        { x: fx, y: cornerY(toDown), badge: true }, { x: fx, y: cornerY(!toDown), badge: true },
+      ];
       const fits = (r) => inside(r) && !taken.some((t) => hits(r, t))
         && !obstacles.some((o) => o.seat !== s.i && hits(r, o));
       // Совсем тесно — берём угол, где плашка задевает меньше всего чужого.
+      // Чужие карты закрывать хуже всего: на них смотрят, решая, как ходить.
       const clutter = (c) => {
         const r = rectAt(c.x, c.y, s);
         return (inside(r) ? 0 : 100) + taken.filter((t) => hits(r, t)).length
-          + obstacles.filter((o) => o.seat !== s.i && hits(r, o)).length;
+          + obstacles.filter((o) => o.seat !== s.i && hits(r, o)).reduce((sum, o) => sum + (o.cards ? 10 : 1), 0);
       };
       spot = corners.find((c) => fits(rectAt(c.x, c.y, s)))
         || corners.reduce((best, c) => (clutter(c) < clutter(best) ? c : best));
@@ -4635,6 +4649,7 @@ function renderVkAuth() {
 // только id_token — сервер проверяет его у VK. Токен доступа к нам не попадает.
 // Версия SDK зафиксирована: обновление у VK не должно ломать вход.
 const VKID_SDK = 'https://unpkg.com/@vkid/sdk@2.6.9/dist-sdk/umd/index.js';
+const VK_AUTH_ERROR = 2;   // код ошибки входа в SDK; 0 и 1 — виджет не загрузился
 let vkSdk = null;
 function loadVkSdk() {
   if (!vkSdk) {
@@ -4662,13 +4677,16 @@ async function vkOneTap(container, mode, onShown = () => {}) {
   try { VKID = await loadVkSdk(); } catch { return; }   // нет VK — работает запасная ссылка
   container.textContent = '';
   const onError = () => toast('VK не подтвердил вход — попробуйте ещё раз');
+  // Ошибка виджета — это ещё и «кадр VK не загрузился за 5 секунд», игрок при этом
+  // ничего не нажимал; кнопка виджета работает и так. Говорим только об отказе во входе.
+  const onWidgetError = (err) => { if (err && err.code === VK_AUTH_ERROR) onError(); };
   new VKID.OneTap().render({
     container,
     scheme: 'dark',
     showAlternativeLogin: mode === 'login',
     oauthList: mode === 'login' ? ['ok_ru', 'mail_ru'] : [],
   })
-    .on(VKID.WidgetEvents.ERROR, onError)
+    .on(VKID.WidgetEvents.ERROR, onWidgetError)
     .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, async (payload) => {
       let tokens;
       try { tokens = await VKID.Auth.exchangeCode(payload.code, payload.device_id); } catch { onError(); return; }

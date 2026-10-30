@@ -1,6 +1,6 @@
 'use strict';
 const { freshDeck, shuffle, evaluate, handInfo, evaluateOmaha, handInfoOmaha } = require('./cards');
-const { decideBotAction, botThinkingTime, botLevel } = require('./bot');
+const { decideBotAction, botThinkingTime, botRaiseTime, botLevel } = require('./bot');
 const { SNG_AWAY_MS } = require('./tournament');
 
 const PHASES = ['preflop', 'flop', 'turn', 'river'];
@@ -80,6 +80,8 @@ class Table {
     this.actingSeat = -1;
     this.buttonSeat = -1;
     this.deadline = 0;      // дедлайн хода текущего игрока
+    this.actorSince = 0;    // когда начался его ход
+    this.pendingRaise = null;   // ставка или рейз, которые бот сделает, когда «додумает»
     this.nextStepAt = 0;    // отложенный переход (старт раздачи, конец вскрытия)
     this.closeAt = 0;       // круг торговли закрыт — когда собрать ставки в банк (см. closeRound)
     this.handId = 0;
@@ -481,6 +483,8 @@ class Table {
 
   setActor(seat) {
     this.actingSeat = seat;
+    this.pendingRaise = null;
+    this.actorSince = Date.now();
     if (seat >= 0) {
       const p = this.seats[seat];
       const away = this.isAway(p);
@@ -1083,7 +1087,20 @@ class Table {
       const p = this.seats[this.actingSeat];
       if (!p) { this.advance(); return; }
       if (p.isBot) {
+        // Бот решил поставить или поднять — ход не делает сразу, а «думает» ещё: быстрый
+        // рейз выдавал бы его. Ставка уже посчитана, пока он думает, стол её не меняет.
+        if (this.pendingRaise !== null) {
+          const amount = this.pendingRaise;
+          this.pendingRaise = null;
+          this.applyAction(p, 'raise', amount);
+          return;
+        }
         const { action, amount } = decideBotAction(this, p);
+        if (action === 'raise') {
+          this.pendingRaise = amount;
+          this.deadline = this.actorSince + botRaiseTime();
+          return;
+        }
         this.applyAction(p, action, amount);
       } else {
         const legal = this.legalActions(p);

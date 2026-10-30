@@ -612,6 +612,12 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 }
 .felt__msg.is-win { color: var(--bone); animation: rise 420ms ease-out both; }
 .felt__msg b { color: var(--brass); font-weight: 500; }
+/* Надпись турнира, пока карт нет: строго в центре сукна (пустые банк и борд над ней
+   опускали её к местам игроков) и уже стола — между боковыми местами. */
+.felt__msg--tour {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 46%; max-width: 420px; padding: 0;
+}
 
 .board {
   display: flex; gap: 8px; min-height: 74px; min-width: 292px;
