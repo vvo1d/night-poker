@@ -323,7 +323,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
 $('#auth-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
-  const payload = { name: form.name.value, password: form.password.value, source: currentSource(), friend: currentFriend() };
+  const payload = { name: form.name.value, password: form.password.value, source: currentSource(), friend: currentFriend(), consent: gateOpen() };
   const { ok, data } = await post(authMode === 'login' ? '/api/login' : '/api/register', payload);
   if (!ok || data.error) {
     const err = $('#auth-error');
@@ -341,11 +341,76 @@ $('#auth-form').addEventListener('submit', async (e) => {
 // Вошли любым способом: в лобби, поток событий и — если пришли по приглашению — за стол.
 function afterLogin(user) {
   setUser(user);
+  ensureConsent(user);
   fetch('/api/me').then((r) => r.json()).then((d) => { $('#admin-link').hidden = !d.admin; }).catch(() => {});
   show('lobby');
   Sound.play('chips');
   connectStream();
   joinInvite();
+}
+
+// ——— возраст и согласие ———
+// Отметки на экране входа открывают создание аккаунта. Вход через VK уводит со страницы,
+// поэтому отметка переживает переход в localStorage и записывается на сервер после возврата.
+const CONSENT_KEY = 'thp-consent';
+const gateOpen = () => $('#gate-age').checked && $('#gate-data').checked;
+
+function paintGate() {
+  const open = gateOpen();
+  try { if (open) localStorage.setItem(CONSENT_KEY, '1'); else localStorage.removeItem(CONSENT_KEY); } catch { /* попросим ещё раз после входа */ }
+  $('#guest-play').disabled = !open;
+  for (const sel of ['#vk-auth', '#tg-auth']) { const box = $(sel); if (box) box.classList.toggle('is-gated', !open); }
+  if (authMode === 'register') $('#auth-submit').disabled = !open;
+  else $('#auth-submit').disabled = false;
+}
+$('#gate-age').addEventListener('change', paintGate);
+$('#gate-data').addEventListener('change', paintGate);
+document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', paintGate));
+
+async function ensureConsent(user) {
+  if (!user || user.consent) return;
+  let agreed = false;
+  try { agreed = localStorage.getItem(CONSENT_KEY) === '1'; localStorage.removeItem(CONSENT_KEY); } catch { /* спросим в окне */ }
+  if (agreed) {
+    const { ok, data } = await post('/api/consent');
+    if (ok && data.user) { setUser(data.user); return; }
+  }
+  const dialog = $('#consent-dialog');
+  if (!dialog.open) dialog.showModal();
+}
+$('#consent-dialog').addEventListener('cancel', (e) => e.preventDefault());   // Esc не обходит окно
+for (const sel of ['#consent-age', '#consent-data']) {
+  $(sel).addEventListener('change', () => {
+    $('#consent-yes').disabled = !($('#consent-age').checked && $('#consent-data').checked);
+  });
+}
+$('#consent-yes').addEventListener('click', async () => {
+  const { ok, data } = await post('/api/consent');
+  if (!ok || !data.user) { toast('Не получилось сохранить, попробуйте ещё раз'); return; }
+  setUser(data.user);
+  $('#consent-dialog').close();
+});
+$('#consent-no').addEventListener('click', async () => {
+  await post('/api/logout');
+  location.reload();
+});
+
+// Блок в кабинете: удаление аккаунта (оно же — отзыв согласия).
+function accountSection() {
+  const sec = profileSection('Данные и аккаунт');
+  const del = el('button', 'btn btn--ghost btn--sm btn--danger account-delete', 'Удалить аккаунт');
+  del.addEventListener('click', async () => {
+    if (!(await ask('Удалить аккаунт насовсем?', {
+      text: 'Исчезнут фишки, статистика, достижения, друзья и покупки. Вернуть их будет нельзя. Согласие на обработку данных при этом отзывается.',
+      yes: 'Удалить', danger: true,
+    }))) return;
+    const { ok, data } = await post('/api/account/delete');
+    if (!ok || data.error) { toast((data && data.error) || 'Не получилось удалить аккаунт'); return; }
+    if (state.stream) state.stream.close();
+    location.href = '/';
+  });
+  sec.append(del);
+  return sec;
 }
 
 // ——— гость ———
@@ -354,7 +419,7 @@ function afterLogin(user) {
 $('#guest-play').addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   btn.disabled = true;
-  const { ok, data } = await post('/api/guest', { source: currentSource(), friend: currentFriend() });
+  const { ok, data } = await post('/api/guest', { source: currentSource(), friend: currentFriend(), consent: gateOpen() });
   btn.disabled = false;
   if (!ok || data.error) { toast((data && data.error) || 'Не получилось начать игру — попробуйте ещё раз'); return; }
   goal('guest');
@@ -434,6 +499,7 @@ $('#logout').addEventListener('click', async () => {
   show('auth');
   renderVkAuth();
   renderTelegramAuth();
+  paintGate();
 });
 
 $('#reload-chips').addEventListener('click', async () => {
@@ -1988,6 +2054,7 @@ function renderProfile(box, data) {
     if (guestSec) root.prepend(guestSec);
     const tg = telegramSection();
     if (tg) root.append(tg);
+    root.append(accountSection());
   }
 
   // Свои друзья и заявки — только в своём кабинете.
@@ -2313,15 +2380,18 @@ function renderTable(t) {
   const feltW = felt.clientWidth || 800;
   const feltH = felt.clientHeight || 500;
 
-  $('#table-name').textContent = t.game === 'omaha' && !/омаха/i.test(t.name) ? `${t.name} · Омаха` : t.name;
+  $('#table-name').textContent = t.name;
   const tour = t.tour;
+  // В шапке только то, чего не видно на столе: улицу показывает борд. Номер раздачи — в подсказке.
   const stage = t.phase === 'idle' ? 'ожидание' : `${PHASE_LABEL[t.phase]} · раздача №${t.handId}`;
-  $('#table-stakes').textContent = !tour ? `блайнды ${fmt(t.sb)}/${fmt(t.bb)} · ${stage}`
+  const omaha = t.game === 'omaha' && !/омаха/i.test(t.name) ? 'Омаха · ' : '';
+  $('#table-stakes').title = stage;
+  $('#table-stakes').textContent = omaha + (!tour ? `блайнды ${fmt(t.sb)}/${fmt(t.bb)}`
     : tour.kind === 'mtt' ? (tour.status === 'finished' ? 'турнир завершён'
-      : `уровень ${tour.level} · ${fmt(t.sb)}/${fmt(t.bb)} · осталось ${fmt(tour.alive)} из ${fmt(tour.entrants)} · ${stage}`)
+      : `ур. ${tour.level} · ${fmt(t.sb)}/${fmt(t.bb)} · осталось ${fmt(tour.alive)} из ${fmt(tour.entrants)}`)
       : tour.status === 'registering' ? `${tour.spin ? 'спин' : 'sit-n-go'} · регистрация · взнос ${fmt(tour.buyIn)}`
       : tour.status === 'finished' ? `${tour.spin ? 'спин' : 'sit-n-go'} · турнир завершён`
-        : `${tour.spin ? `×${tour.multiplier} · приз ${fmt(tour.pool)} · ` : ''}уровень ${tour.level} · блайнды ${fmt(t.sb)}/${fmt(t.bb)} · ${stage}`;
+        : `${tour.spin ? `×${tour.multiplier} · приз ${fmt(tour.pool)} · ` : ''}ур. ${tour.level} · ${fmt(t.sb)}/${fmt(t.bb)}`);
   // Часы уровня тикают сами между кадрами — см. tickTimer.
   state.levelDeadline = tour && tour.status === 'running' && tour.next
     ? performance.now() + tour.levelLeft : 0;
@@ -4647,8 +4717,8 @@ function renderVkAuth() {
 // ——— виджет VK ID One Tap ———
 // Код на токены меняет браузер игрока (VKID.Auth.exchangeCode), на сервер уходит
 // только id_token — сервер проверяет его у VK. Токен доступа к нам не попадает.
-// Версия SDK зафиксирована: обновление у VK не должно ломать вход.
-const VKID_SDK = 'https://unpkg.com/@vkid/sdk@2.6.9/dist-sdk/umd/index.js';
+// Копия SDK лежит у нас: версия зафиксирована, а IP игрока не уходит на сторонний CDN.
+const VKID_SDK = '/vendor/vkid-sdk-2.6.9.js';
 const VK_AUTH_ERROR = 2;   // код ошибки входа в SDK; 0 и 1 — виджет не загрузился
 let vkSdk = null;
 function loadVkSdk() {
@@ -4819,6 +4889,7 @@ window.CardFace.upgrade($('#screen-loading'));
   const data = res ? await res.json().catch(() => ({})) : {};
   if (data.user) {
     setUser(data.user);
+    ensureConsent(data.user);
     $('#admin-link').hidden = !data.admin;
     state.awayTable = data.away || null;
     show(data.roomId ? 'table' : 'lobby');
@@ -4834,6 +4905,7 @@ window.CardFace.upgrade($('#screen-loading'));
     showInviteNote();
     renderVkAuth();
     renderTelegramAuth();
+    paintGate();
   }
   vkReturn();
   if (window.innerWidth > 900) toggleLog(true);

@@ -13,9 +13,7 @@
 <meta name="theme-color" content="#0d1317">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Exo+2:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/fonts/fonts.css">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/cards.css">
 <!-- Игровое оформление поверх базовых стилей: убрать эту строку — вернётся прежний вид -->
@@ -47,6 +45,12 @@
     </div>
     <h1 class="auth__title">THPoker</h1>
     <p class="auth__lede">Техасский холдем без лимита. Свои столы с любыми блайндами и турниры sit-n-go, фишки только виртуальные.</p>
+
+    <!-- Без этих отметок новый аккаунт не создать: ни гостем, ни по нику, ни через VK или Telegram -->
+    <div class="legal-gate" id="legal-gate">
+      <label class="check"><input type="checkbox" id="gate-age"><span>Мне есть 18 лет, я принимаю <a href="/terms" target="_blank">Пользовательское соглашение</a></span></label>
+      <label class="check"><input type="checkbox" id="gate-data"><span>Даю <a href="/consent" target="_blank">согласие на обработку персональных данных</a> (<a href="/privacy" target="_blank">политика</a>)</span></label>
+    </div>
 
     <!-- Без регистрации: гостевой аккаунт и сразу за стол -->
     <div class="guest">
@@ -497,6 +501,18 @@
   <div class="dialog__row">
     <button class="btn btn--ghost" type="button" id="ask-no">Отмена</button>
     <button class="btn btn--primary" type="button" id="ask-yes">Да</button>
+  </div>
+</dialog>
+
+<!-- Игрок ещё не давал согласия (старый аккаунт, вход из Telegram): без него играть нельзя -->
+<dialog id="consent-dialog" class="dialog">
+  <h3>Подтвердите, пожалуйста</h3>
+  <p class="dialog__note">На сайте действуют правила для игроков старше 18 лет и порядок обработки данных.</p>
+  <label class="check"><input type="checkbox" id="consent-age"><span>Мне есть 18 лет, я принимаю <a href="/terms" target="_blank">Пользовательское соглашение</a></span></label>
+  <label class="check"><input type="checkbox" id="consent-data"><span>Даю <a href="/consent" target="_blank">согласие на обработку персональных данных</a> (<a href="/privacy" target="_blank">политика</a>)</span></label>
+  <div class="dialog__row">
+    <button class="btn btn--ghost" type="button" id="consent-no">Выйти</button>
+    <button class="btn btn--primary" type="button" id="consent-yes" disabled>Принять</button>
   </div>
 </dialog>
 

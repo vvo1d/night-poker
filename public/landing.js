@@ -102,3 +102,38 @@ try {
 
 // Карты на столе в первом экране — как настоящие (см. cardface.js).
 if (window.CardFace) window.CardFace.upgrade();
+
+// Подтверждение возраста: сайт только для 18+. Ответ помним в браузере. Поисковых
+// роботов не спрашиваем — иначе они индексировали бы окно вместо страницы.
+(() => {
+  const KEY = 'thp-age';
+  try { if (localStorage.getItem(KEY) === '1') return; } catch { /* спросим на каждой странице */ }
+  if (/bot|crawl|spider|yandex|slurp/i.test(navigator.userAgent)) return;
+
+  const dialog = document.createElement('dialog');
+  dialog.className = 'age-gate';
+  dialog.setAttribute('aria-labelledby', 'age-gate-title');
+  dialog.innerHTML = '<b class="age-gate__mark" aria-hidden="true">18+</b>'
+    + '<h2 id="age-gate-title">Вам уже есть 18 лет?</h2>'
+    + '<p>Сайт предназначен только для совершеннолетних. Игра бесплатная, на виртуальные фишки без денежной ценности.</p>'
+    + '<div class="age-gate__row">'
+    + '<button class="btn btn--ghost" type="button" data-age="no">Нет</button>'
+    + '<button class="btn btn--primary" type="button" data-age="yes" autofocus>Да, мне есть 18</button>'
+    + '</div>';
+  dialog.addEventListener('cancel', (e) => e.preventDefault());   // Esc не обходит окно
+  dialog.addEventListener('click', (e) => {
+    const answer = e.target.dataset.age;
+    if (answer === 'yes') {
+      try { localStorage.setItem(KEY, '1'); } catch { /* спросим снова */ }
+      dialog.close();
+      document.documentElement.classList.remove('age-locked');
+    } else if (answer === 'no') {
+      dialog.innerHTML = '<b class="age-gate__mark" aria-hidden="true">18+</b>'
+        + '<h2 id="age-gate-title">Вход закрыт</h2>'
+        + '<p>Этот сайт только для тех, кому уже исполнилось 18 лет. Возвращайтесь, когда придёт время.</p>';
+    }
+  });
+  document.documentElement.classList.add('age-locked');
+  document.body.append(dialog);
+  dialog.showModal();
+})();

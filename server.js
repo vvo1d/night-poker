@@ -1075,7 +1075,10 @@ const MIME = {
 };
 
 // Страницы сайта: главная — для поиска и новичков, игра — на /play.
-const PAGES = { '/': 'index.html', '/play': 'play.html', '/play/': 'play.html', '/admin': 'admin.html' };
+const PAGES = {
+  '/': 'index.html', '/play': 'play.html', '/play/': 'play.html', '/admin': 'admin.html',
+  '/privacy': 'legal/privacy.html', '/terms': 'legal/terms.html', '/consent': 'legal/consent.html',
+};
 // Посадочные страницы — какие есть в public/lp (список читается при запуске).
 const LANDING_PAGES = new Set((() => {
   try { return fs.readdirSync(path.join(PUBLIC_DIR, 'lp')).filter((f) => f.endsWith('.html')).map((f) => f.slice(0, -5)); } catch { return []; }
@@ -1099,10 +1102,12 @@ try {
 
 // Счётчик Метрики вставляется в страницы при отдаче, а не лежит в каждом файле:
 // так он один на весь сайт, включая страницы, которые собирает сервер.
+// Сам счётчик не запускается: его вызывает consent.js, когда посетитель разрешил аналитику.
 function withMetrika(html) {
   if (!METRIKA_ID || html.includes('mc.yandex.ru')) return html;
   const snippet = `<!-- Yandex.Metrika counter -->
 <script type="text/javascript">
+  window.thpMetrika = function () {
     (function(m,e,t,r,i,k,a){
         m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
         m[i].l=1*new Date();
@@ -1111,8 +1116,9 @@ function withMetrika(html) {
     })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=${METRIKA_ID}', 'ym');
 
     ym(${METRIKA_ID}, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+  };
 </script>
-<noscript><div><img src="https://mc.yandex.ru/watch/${METRIKA_ID}" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+<script src="/consent.js" defer></script>
 <!-- /Yandex.Metrika counter -->
 `;
   return html.replace('</head>', `${snippet}</head>`);
@@ -1802,14 +1808,36 @@ const server = http.createServer(async (req, res) => {
   try {
     if (await admin.handle(req, res, route, url)) return;
 
+    if (route === '/api/consent' && req.method === 'POST') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      store.setConsent(ctx.user.id);
+      return send(res, 200, { ok: true, user: store.publicUser(ctx.user.id) });
+    }
+
+    // Игрок удаляет себя сам — это и отзыв согласия. Порядок как у админки: стол, аватар, база.
+    if (route === '/api/account/delete' && req.method === 'POST') {
+      const ctx = requireAuth(req, res);
+      if (!ctx) return;
+      if (!allowCommand(ctx.session)) return send(res, 429, { error: 'Слишком часто. Подождите секунду' });
+      forgetUser(ctx.user.id);
+      removeUserAvatar(ctx.user.id);
+      const result = await store.deleteUser(ctx.user.id);
+      if (result.error) return send(res, 400, result);
+      pushAll();
+      return send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' });
+    }
+
     if (route === '/api/register' && req.method === 'POST') {
       const ip = clientIp(req);
       // Прямой запрос с самой машины (без nginx) — это нагрузочный тест или администратор.
       const wait = isDirectLocal(req) ? 0 : loginGuard.canRegister(ip);
       if (wait) return send(res, 429, { error: `С этого адреса уже много новых аккаунтов. Попробуйте через ${waitText(wait)}` });
       const body = await readBody(req);
+      if (body.consent !== true) return send(res, 400, { error: 'Подтвердите возраст и согласие на обработку данных' });
       const { user, error } = await store.register(body.name, body.password, body.source, body.friend);
       if (error) return send(res, 400, { error });
+      store.setConsent(user.id);
       loginGuard.registered(ip);
       const token = store.createSession(user.id);
       return send(res, 200, { user: store.publicUser(user.id) }, { 'Set-Cookie': sessionCookie(token) });
@@ -1821,7 +1849,9 @@ const server = http.createServer(async (req, res) => {
       const wait = isDirectLocal(req) ? 0 : loginGuard.canRegister(ip);
       if (wait) return send(res, 429, { error: `С этого адреса уже много новых аккаунтов. Попробуйте через ${waitText(wait)}` });
       const body = await readBody(req);
+      if (body.consent !== true) return send(res, 400, { error: 'Подтвердите возраст и согласие на обработку данных' });
       const { user } = store.createGuest(body.source, body.friend);
+      store.setConsent(user.id);
       loginGuard.registered(ip);
       const token = store.createSession(user.id);
       return send(res, 200, { user: store.publicUser(user.id) }, { 'Set-Cookie': sessionCookie(token) });
@@ -2204,14 +2234,32 @@ async function adminResidents(req, res, ctx) {
   return true;
 }
 
+function removeUserAvatar(userId) {
+  const old = store.removeAvatar(userId);
+  if (old && old.ext) dropAvatarFile(userId, old.ext);
+  refreshSeatAvatar(userId);
+  return !!old;
+}
+
+// Убрать игрока из-за стола, с турниров и из потока: дальше его аккаунта не будет.
+function forgetUser(userId) {
+  const table = tableOfUser(userId);
+  if (table) {
+    if (table.tour && table.tour.status === 'running') table.forfeit(userId);
+    else table.leave(userId);
+  }
+  for (const m of mtts.list.values()) if (m.status === 'registering' && m.entries.has(userId)) m.entries.delete(userId);
+  for (const client of clients) {
+    if (client.ctx.user.id !== userId) continue;
+    try { client.res.end(); } catch { /* уже закрыт */ }
+    clients.delete(client);
+  }
+  presence.delete(userId);
+}
+
 const admin = createAdmin({
   // Убрать неприемлемый аватар — файл тоже удаляется.
-  removeAvatar: (userId) => {
-    const old = store.removeAvatar(userId);
-    if (old && old.ext) dropAvatarFile(userId, old.ext);
-    refreshSeatAvatar(userId);
-    return !!old;
-  },
+  removeAvatar: removeUserAvatar,
   store,
   tables,
   handsByDay,
@@ -2230,20 +2278,7 @@ const admin = createAdmin({
   afterRename: (userId) => { renameSeated(userId); pushAll(); },
   // Удаляемого игрока — из-за стола (из идущего турнира — сдавшись), из записей
   // на турниры по расписанию и из потока: дальше его аккаунта не будет.
-  forgetUser: (userId) => {
-    const table = tableOfUser(userId);
-    if (table) {
-      if (table.tour && table.tour.status === 'running') table.forfeit(userId);
-      else table.leave(userId);
-    }
-    for (const m of mtts.list.values()) if (m.status === 'registering' && m.entries.has(userId)) m.entries.delete(userId);
-    for (const client of clients) {
-      if (client.ctx.user.id !== userId) continue;
-      try { client.res.end(); } catch { /* уже закрыт */ }
-      clients.delete(client);
-    }
-    presence.delete(userId);
-  },
+  forgetUser,
   // Заблокированного выкидываем из потока: следующий запрос он уже не пройдёт.
   dropStreams: (userId) => {
     for (const client of clients) {

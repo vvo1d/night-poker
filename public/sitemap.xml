@@ -120,4 +120,22 @@
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
+  <url>
+    <loc>https://thpoker.ru/privacy</loc>
+    <lastmod>2026-10-30</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.2</priority>
+  </url>
+  <url>
+    <loc>https://thpoker.ru/terms</loc>
+    <lastmod>2026-10-30</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.2</priority>
+  </url>
+  <url>
+    <loc>https://thpoker.ru/consent</loc>
+    <lastmod>2026-10-30</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.2</priority>
+  </url>
 </urlset>

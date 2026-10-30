@@ -29,6 +29,7 @@ const REF_MAX = 50;        // за стольких друзей приглас�
 const WRITE_EVERY = 400;            // как часто изменения уходят в базу
 const LEADERBOARD_TTL = 5_000;      // таблица лидеров пересчитывается не чаще
 const SESSION_TTL = 30 * 24 * 3600 * 1000;
+const CONSENT_VERSION = '2026-10-30';   // при изменении целей или состава данных — новая дата: спросим заново
 const RATING_TTL = 10_000;          // рейтинг пересчитывается не чаще
 const RATING_SIZE = 50;
 const FRIENDS_MAX = 200;
@@ -296,6 +297,14 @@ class Store {
   // Удалить игрока насовсем (админка): аккаунт, сессии, привязки, история фишек,
   // упоминания в друзьях и заявках у других. Из-за стола и из турниров его
   // убирает сервер до вызова. Резидентов удалять нельзя — они живут по списку.
+  // Согласие на обработку данных: какая редакция принята и когда (доказательство для оператора).
+  setConsent(id) {
+    const u = this.users.get(id);
+    if (!u) return;
+    u.meta.consent = { version: CONSENT_VERSION, at: Date.now() };
+    this.touch(u);
+  }
+
   async deleteUser(id) {
     const u = this.users.get(id);
     if (!u) return { error: 'Игрок не найден' };
@@ -1276,6 +1285,7 @@ class Store {
       season: seasons.view(u),                   // очки и лига текущего сезона
       telegram: u.tg ? (u.tg.username ? `@${u.tg.username}` : 'привязан') : null,
       vk: u.meta.vk ? (u.meta.vk.name || 'привязан') : null,
+      consent: !!u.meta.consent && u.meta.consent.version === CONSENT_VERSION,
       referral: this.referralView(u),
       shop: shop.view(u),                        // купленное оформление и что надето
       hasPassword: !!u.hash,

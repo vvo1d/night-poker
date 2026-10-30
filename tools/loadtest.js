@@ -52,7 +52,7 @@ function request(method, path, { body, cookie, stream } = {}) {
 async function makeUser(n) {
   const name = `нагрузка-${n}`;
   let res = await request('POST', '/api/login', { body: { name, password: PASSWORD } });
-  if (res.status !== 200) res = await request('POST', '/api/register', { body: { name, password: PASSWORD } });
+  if (res.status !== 200) res = await request('POST', '/api/register', { body: { consent: true, name, password: PASSWORD } });
   if (res.status !== 200) throw new Error(res.data.error || `статус ${res.status}`);
   return res.cookie;
 }

@@ -1814,8 +1814,8 @@ body[data-view="table"] .toast { top: 10px; bottom: auto; animation-name: toastD
 
   .topbar--table { gap: 10px; }
   .table-title { flex-direction: column; align-items: flex-start; gap: 0; }
-  .table-title strong { max-width: 40vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .table-title span { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 44vw; }
+  .table-title strong { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .table-title span { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   .topbar--table .bank__label { display: none; }
 
 
@@ -2110,3 +2110,10 @@ html:has(#screen-table:not([hidden])), body:has(#screen-table:not([hidden])) {
 .vk-onetap:empty { display: none; }
 .vk-onetap { margin-bottom: 10px; }
 .vk-onetap--sm { max-width: 320px; }
+
+/* Вход: отметки о возрасте и согласии. Пока их нет, способы создать аккаунт приглушены. */
+.legal-gate { display: grid; gap: 8px; margin-bottom: 14px; }
+.legal-gate a, #consent-dialog a { color: var(--brass); }
+#consent-dialog .check { margin-bottom: 10px; }
+.is-gated { opacity: 0.45; pointer-events: none; }
+.account-delete { margin-top: 8px; }

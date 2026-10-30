@@ -450,3 +450,39 @@ a { color: var(--brass); }
 }
 
 .pp-bot { margin: 6px 0 0; font-size: 13px; color: var(--muted, #8fa3a3); max-width: 60ch; }
+
+/* Юридические страницы и отметка 18+ */
+.footer__legal { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; max-width: none !important; }
+.footer__legal a { color: var(--muted); }
+.footer__legal a:hover { color: var(--text); }
+.age-mark { border: 1px solid currentColor; border-radius: 6px; padding: 1px 6px; font-size: 12px; }
+.legal { max-width: 780px; padding-top: 32px; padding-bottom: 56px; line-height: 1.6; }
+.legal h1 { font-size: clamp(26px, 5vw, 36px); line-height: 1.2; margin-bottom: 8px; }
+.legal h2 { font-size: 20px; margin: 30px 0 10px; }
+.legal p, .legal ul, .legal dl { margin-bottom: 12px; }
+.legal ul { padding-left: 20px; }
+.legal li { margin-bottom: 6px; }
+.legal a { color: var(--brass, #c9a24a); }
+.legal__date { color: var(--muted); font-size: 14px; }
+.legal__scroll { overflow-x: auto; margin-bottom: 12px; }
+.legal table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 14px; }
+.legal th, .legal td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+.legal__dl dt { font-weight: 600; margin-top: 12px; }
+.legal__dl dd { margin: 0; }
+
+/* Подтверждение возраста */
+.age-locked { overflow: hidden; }
+.age-gate {
+  width: min(400px, calc(100vw - 32px)); margin: auto; padding: 26px 24px 22px; text-align: center;
+  color: var(--text); background: var(--ink-2); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+}
+.age-gate::backdrop { background: rgba(5, 9, 11, 0.92); backdrop-filter: blur(6px); }
+.age-gate__mark {
+  display: inline-grid; place-items: center; width: 54px; height: 54px; margin-bottom: 12px; border-radius: 50%;
+  border: 2px solid var(--brass); color: var(--brass); font-size: 17px;
+}
+.age-gate h2 { font-size: 22px; color: var(--bone); margin-bottom: 8px; }
+.age-gate p { font-size: 14px; line-height: 1.5; color: var(--muted); }
+.age-gate__row { display: flex; gap: 10px; margin-top: 18px; }
+.age-gate__row .btn:last-child { flex: 1; }

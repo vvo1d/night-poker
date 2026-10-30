@@ -65,9 +65,7 @@ function profilePage(user, origin, avatar = null) {
 <link rel="icon" href="/favicon-120.png" sizes="120x120" type="image/png">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/fonts/fonts.css">
 <link rel="stylesheet" href="/landing.css">
 </head>
 <body>
@@ -118,6 +116,7 @@ function profilePage(user, origin, avatar = null) {
 <footer class="footer"><div class="wrap footer__in">
   <a class="logo logo--sm" href="/"><span class="logo__mark" aria-hidden="true">♠</span>THPoker</a>
   <p>Бесплатный онлайн покер на виртуальные фишки. Фишки нельзя купить, продать или вывести.</p>
+<p class="footer__legal"><b class="age-mark" title="Только для совершеннолетних">18+</b> <a href="/privacy">Политика конфиденциальности</a> <a href="/terms">Пользовательское соглашение</a> <a href="/consent">Согласие на обработку данных</a></p>
 </div></footer>
 <script src="/landing.js" defer></script>
 </body>
